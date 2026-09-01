@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -73,6 +74,7 @@ fun LoginScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .systemBarsPadding()
             .verticalScroll(rememberScrollState())
             .imePadding()
             .padding(horizontal = Spacing.xl),
@@ -212,6 +214,7 @@ fun ForgotPasswordScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .systemBarsPadding()
             .verticalScroll(rememberScrollState())
             .imePadding()
             .padding(horizontal = Spacing.xl),

@@ -1,16 +1,20 @@
 package com.jtexpress.bevest.ui.common
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,15 +40,19 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.ui.theme.BevestIcons
+import com.jtexpress.bevest.ui.theme.Elevation
 import com.jtexpress.bevest.ui.theme.EyebrowStyle
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Radius
@@ -65,7 +73,10 @@ fun StatusChip(
     modifier: Modifier = Modifier,
     compact: Boolean = false,
 ) {
-    val color = LocalStatusPalette.current.forStatus(status)
+    val target = LocalStatusPalette.current.forStatus(status)
+    // Ease between status colors so a worker flipping WARNING -> DANGER draws the eye
+    // with movement, not just a hard swap.
+    val color by animateColorAsState(target, tween(320), label = "statusChipColor")
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(Radius.sm))
@@ -160,6 +171,37 @@ fun BatteryIndicator(percent: Int?, modifier: Modifier = Modifier) {
 
 // ---------------------------------------------------------------- cards
 
+/**
+ * The one card surface used everywhere: [surface] fill, a hairline border for definition
+ * (which reads in both themes, unlike an alpha-blended fill), a shallow resting shadow,
+ * and the standard large radius. Pass [accent] to tint the border for a card that needs
+ * to pull the eye (a warning tile, a danger row).
+ */
+@Composable
+fun BevestCard(
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    accent: Color? = null,
+    contentPadding: PaddingValues = PaddingValues(Spacing.lg),
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val shape = RoundedCornerShape(Radius.lg)
+    Surface(
+        modifier = modifier
+            .clip(shape)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            1.dp,
+            accent?.copy(alpha = 0.45f) ?: MaterialTheme.colorScheme.outlineVariant,
+        ),
+        shadowElevation = Elevation.card,
+    ) {
+        Column(Modifier.padding(contentPadding), content = content)
+    }
+}
+
 /** Dashboard summary tile: icon, big tabular number, label. */
 @Composable
 fun StatTile(
@@ -171,18 +213,12 @@ fun StatTile(
     onClick: (() -> Unit)? = null,
 ) {
     val tint = accent ?: MaterialTheme.colorScheme.onSurfaceVariant
-    Surface(
-        modifier = modifier
-            .heightIn(min = 96.dp)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
-        shape = RoundedCornerShape(Radius.md),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-        border = accent?.let { androidx.compose.foundation.BorderStroke(1.dp, it.copy(alpha = 0.3f)) },
+    BevestCard(
+        modifier = modifier.heightIn(min = 96.dp),
+        onClick = onClick,
+        accent = accent,
     ) {
-        Column(
-            Modifier.padding(Spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
-        ) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
             Text(
                 value,
@@ -217,20 +253,19 @@ fun MetricCard(
         accent != null -> accent
         else -> MaterialTheme.colorScheme.onSurface
     }
-    Surface(
+    BevestCard(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(Radius.md),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+        accent = if (!stale) accent else null,
+        contentPadding = PaddingValues(Spacing.lg),
     ) {
         Row(
-            Modifier.padding(Spacing.lg),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
         ) {
             Box(
                 Modifier
                     .size(44.dp)
-                    .clip(RoundedCornerShape(Radius.sm))
+                    .clip(RoundedCornerShape(Radius.md))
                     .background(tint.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
             ) {
@@ -327,6 +362,7 @@ fun EmergencyBanner(
     modifier: Modifier = Modifier,
 ) {
     val palette = LocalStatusPalette.current
+    val haptics = LocalHapticFeedback.current
     val pulse = if (LocalInspectionMode.current) {
         1f
     } else {
@@ -346,9 +382,17 @@ fun EmergencyBanner(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onView),
-        shape = RoundedCornerShape(Radius.md),
+            .clip(RoundedCornerShape(Radius.lg))
+            .clickable {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                onView()
+            }
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Emergency: $workerName. ${reason.ifBlank { "No safety response" }}. Open."
+            },
+        shape = RoundedCornerShape(Radius.lg),
         color = palette.emergency,
+        shadowElevation = Elevation.sheet,
     ) {
         Row(
             Modifier.padding(Spacing.lg),

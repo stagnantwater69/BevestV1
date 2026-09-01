@@ -1,5 +1,6 @@
 package com.jtexpress.bevest.ui.common
 
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -18,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
+import com.jtexpress.bevest.navigation.NavMotion
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 
@@ -91,7 +93,15 @@ fun RoleScaffold(
         NavHost(
             navController = navController,
             startDestination = startRoute,
-            modifier = Modifier.padding(innerPadding),
+            // Pad for the bottom bar, then consume that inset so each screen's own
+            // BevestScaffold does not add it a second time.
+            modifier = Modifier
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
+            enterTransition = NavMotion.enter,
+            exitTransition = NavMotion.exit,
+            popEnterTransition = NavMotion.popEnter,
+            popExitTransition = NavMotion.popExit,
         ) {
             builder(navController)
         }

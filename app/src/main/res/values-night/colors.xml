@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Cold-start window / splash ground in dark mode. Matches DarkColors.background. -->
+    <color name="bevest_window_background">#15120F</color>
+</resources>

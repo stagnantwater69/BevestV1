@@ -1,10 +1,12 @@
 package com.jtexpress.bevest.ui.common
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -18,6 +20,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,7 +44,16 @@ fun BevestScaffold(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
+            val hairline = MaterialTheme.colorScheme.outlineVariant
             TopAppBar(
+                modifier = Modifier.drawBehind {
+                    drawLine(
+                        color = hairline,
+                        start = androidx.compose.ui.geometry.Offset(0f, size.height),
+                        end = androidx.compose.ui.geometry.Offset(size.width, size.height),
+                        strokeWidth = 1f,
+                    )
+                },
                 title = {
                     Column {
                         if (subtitle != null) {
@@ -79,6 +91,11 @@ fun BevestScaffold(
             )
         },
         floatingActionButton = floatingActionButton,
-        content = content,
-    )
+    ) { padding ->
+        // The app draws edge to edge, so the window no longer resizes for the keyboard.
+        // Give every screen IME padding here rather than in each form.
+        Box(Modifier.fillMaxSize().imePadding()) {
+            content(padding)
+        }
+    }
 }

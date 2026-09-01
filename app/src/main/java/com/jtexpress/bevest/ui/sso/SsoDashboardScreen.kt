@@ -1,5 +1,6 @@
 package com.jtexpress.bevest.ui.sso
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -42,6 +44,7 @@ import com.jtexpress.bevest.ui.common.StatTile
 import com.jtexpress.bevest.ui.common.StatusChip
 import com.jtexpress.bevest.ui.common.WorkerAvatar
 import com.jtexpress.bevest.ui.theme.BevestIcons
+import com.jtexpress.bevest.ui.theme.Elevation
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Radius
 import com.jtexpress.bevest.ui.theme.Spacing
@@ -205,9 +208,13 @@ private fun ShortcutCard(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.heightIn(min = Spacing.touchTarget).clickable(onClick = onClick),
-        shape = RoundedCornerShape(Radius.md),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+        modifier = modifier
+            .heightIn(min = 56.dp)
+            .clip(RoundedCornerShape(Radius.lg))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(Radius.lg),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
     ) {
         Row(
             Modifier.padding(Spacing.lg),
@@ -244,9 +251,12 @@ fun WorkerLiveRow(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 76.dp)
+            .clip(RoundedCornerShape(Radius.lg))
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(Radius.md),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+        shape = RoundedCornerShape(Radius.lg),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shadowElevation = Elevation.card,
     ) {
         Row(
             Modifier.padding(Spacing.lg),

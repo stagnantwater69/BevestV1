@@ -1,6 +1,8 @@
 package com.jtexpress.bevest.ui.theme
 
 import android.app.Activity
+import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -8,7 +10,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
@@ -19,19 +20,21 @@ private val LightColors = lightColorScheme(
     onPrimaryContainer = Color(0xFF3A1500),
     secondary = Color(0xFF775A44),
     onSecondary = Color.White,
+    secondaryContainer = Color(0xFFF6E2D4),
+    onSecondaryContainer = Color(0xFF2B1B0E),
     background = AppWhite,
     onBackground = WarmInk,
     surface = AppWhite,
     onSurface = WarmInk,
     surfaceVariant = WarmSurfaceLight,
-    onSurfaceVariant = Color(0xFF52443B),
-    outline = Color(0xFFCFC6BC),
-    outlineVariant = Color(0xFFE6DFD6),
+    onSurfaceVariant = WarmInkMuted,
+    outline = WarmOutlineLight,
+    outlineVariant = WarmOutlineVariantLight,
+    scrim = Color(0xFF000000),
     error = StatusDangerLight,
     onError = Color.White,
 )
 
-// Kept for a possible future dark option; the app currently ships light only.
 private val DarkColors = darkColorScheme(
     primary = BevestOrangeDark,
     onPrimary = Color(0xFF3A1500),
@@ -39,24 +42,29 @@ private val DarkColors = darkColorScheme(
     onPrimaryContainer = BevestOrangeLightContainer,
     secondary = Color(0xFFE6BEA6),
     onSecondary = Color(0xFF432B1B),
+    secondaryContainer = Color(0xFF3E2A1B),
+    onSecondaryContainer = Color(0xFFF6E2D4),
     background = WarmInkDark,
     onBackground = WarmOnDark,
-    surface = WarmInkDark,
+    surface = WarmSurfaceDark,
     onSurface = WarmOnDark,
-    surfaceVariant = WarmSurfaceDark,
-    onSurfaceVariant = Color(0xFFCBBFB2),
+    surfaceVariant = WarmSurfaceVariantDark,
+    onSurfaceVariant = WarmOnDarkMuted,
+    outline = WarmOutlineDark,
+    outlineVariant = WarmOutlineVariantDark,
+    scrim = Color(0xFF000000),
     error = StatusDangerDark,
     onError = Color(0xFF3A0A05),
 )
 
 /**
- * BeVest is a light-themed app: white ground, dark ink, orange accent. The system
- * dark-mode setting is intentionally ignored so the safety UI reads the same for
- * everyone, in any lighting.
+ * BeVest theme. The app follows the system light/dark setting; the safety-status palette
+ * ([LocalStatusPalette]) swaps in step so warnings and dangers keep their contrast in
+ * both. System bars are transparent — the app draws edge to edge (see [MainActivity]).
  */
 @Composable
 fun BevestTheme(
-    darkTheme: Boolean = false,
+    darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
     val colorScheme = if (darkTheme) DarkColors else LightColors
@@ -66,8 +74,13 @@ fun BevestTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.surface.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !darkTheme
+            controller.isAppearanceLightNavigationBars = !darkTheme
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                // Pre-Q can't tint the nav-bar icons, so keep a readable scrim.
+                window.navigationBarColor = colorScheme.surface.copy(alpha = 0.6f).toArgbCompat()
+            }
         }
     }
 
@@ -79,3 +92,7 @@ fun BevestTheme(
         )
     }
 }
+
+private fun Color.toArgbCompat(): Int = android.graphics.Color.argb(
+    (alpha * 255).toInt(), (red * 255).toInt(), (green * 255).toInt(), (blue * 255).toInt(),
+)

@@ -8,11 +8,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,7 +60,9 @@ fun AppRoot(
 
     Column(Modifier.fillMaxSize()) {
         // Network state is app-wide context, so it sits above every screen and
-        // animates in rather than shoving the layout (plan section 21).
+        // animates in rather than shoving the layout (plan section 21). When shown it
+        // takes the status-bar space; the content below then consumes that inset so the
+        // screen's own top bar does not pad for it twice.
         AnimatedVisibility(
             visible = !online,
             enter = expandVertically(),
@@ -63,7 +70,13 @@ fun AppRoot(
         ) {
             OfflineBanner()
         }
-        AppRootContent(session, viewModel)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .then(if (!online) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
+        ) {
+            AppRootContent(session, viewModel)
+        }
     }
 }
 
@@ -74,6 +87,7 @@ private fun OfflineBanner() {
         modifier = Modifier
             .fillMaxWidth()
             .background(palette.offline.copy(alpha = 0.18f))
+            .statusBarsPadding()
             .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
@@ -127,7 +141,14 @@ private fun AppRootContent(session: SessionState, viewModel: RootViewModel) {
 @Composable
 private fun AuthNavHost() {
     val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = Routes.LOGIN) {
+    NavHost(
+        navController = navController,
+        startDestination = Routes.LOGIN,
+        enterTransition = NavMotion.enter,
+        exitTransition = NavMotion.exit,
+        popEnterTransition = NavMotion.popEnter,
+        popExitTransition = NavMotion.popExit,
+    ) {
         composable(Routes.LOGIN) {
             LoginScreen(
                 onForgotPassword = { navController.navigate(Routes.FORGOT_PASSWORD) },
@@ -143,7 +164,7 @@ private fun AuthNavHost() {
 @Composable
 private fun BrandedSplash() {
     Column(
-        modifier = Modifier.fillMaxSize().padding(Spacing.xl),
+        modifier = Modifier.fillMaxSize().systemBarsPadding().padding(Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.xl, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -163,7 +184,7 @@ private fun BrandedSplash() {
 private fun BlockedScreen(title: String, message: String, onSignOut: () -> Unit) {
     val palette = LocalStatusPalette.current
     Column(
-        modifier = Modifier.fillMaxSize().padding(Spacing.xxl),
+        modifier = Modifier.fillMaxSize().systemBarsPadding().padding(Spacing.xxl),
         verticalArrangement = Arrangement.spacedBy(Spacing.md, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
