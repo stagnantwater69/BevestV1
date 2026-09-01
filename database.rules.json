@@ -1,0 +1,27 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "liveReadings": {
+      "$workerId": {
+        ".read": "auth != null",
+
+        // RTDB rules cannot read Firestore, where user roles live, so we cannot
+        // check `role == 'SSO'` here. The IoT hardware will write with a device
+        // token (`auth.token.device == true`); until then, any signed-in user of
+        // this internal app may write. Production should mint an SSO custom claim
+        // and tighten this to `auth.token.role == 'SSO' || auth.token.device`.
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['timestamp'])"
+      }
+    },
+
+    "vestsLive": {
+      "$vestId": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.device == true"
+      }
+    }
+  }
+}

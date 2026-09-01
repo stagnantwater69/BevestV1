@@ -1,0 +1,28 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    // Worker photos — SSOs and admins write, any signed-in user reads.
+    match /workerPhotos/{file} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (role() == 'SSO' || role() == 'ADMIN')
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Generated report PDFs — contractors and admins.
+    match /reports/{contractorId}/{file} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (role() == 'CONTRACTOR' || role() == 'ADMIN');
+    }
+  }
+}

@@ -1,0 +1,142 @@
+rules_version = '2';
+
+// BeVest Firestore security rules (plan section 19).
+// Authorization lives here, not in the app UI (plan section 31.9).
+// Cloud Functions use the Admin SDK and bypass these rules.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function role() {
+      return isSignedIn() ? userDoc().role : 'NONE';
+    }
+
+    function isActive() {
+      return isSignedIn() && userDoc().active == true;
+    }
+
+    function isAdmin() {
+      return isActive() && role() == 'ADMIN';
+    }
+
+    function isContractor() {
+      return isActive() && role() == 'CONTRACTOR';
+    }
+
+    function isSso() {
+      return isActive() && role() == 'SSO';
+    }
+
+    function myContractorId() {
+      return userDoc().contractorId;
+    }
+
+    function mySiteId() {
+      return userDoc().siteId;
+    }
+
+    // ---- users ----
+    match /users/{uid} {
+      allow get: if isAdmin()
+                 || request.auth.uid == uid
+                 || (isContractor() && resource.data.contractorId == request.auth.uid);
+      allow list: if isAdmin()
+                  || (isContractor() && request.query.limit <= 200);
+      allow delete: if isAdmin();
+      // Only an existing admin provisions accounts. The very first admin must be
+      // seeded out-of-band — create the users/{uid} doc from the Firebase console
+      // (or a one-off Admin SDK script) after that user signs up. There is
+      // deliberately no self-service path to an ADMIN role from the client.
+      allow create: if isAdmin();
+      allow update: if isAdmin()
+                    || (request.auth.uid == uid
+                        && request.resource.data.role == resource.data.role
+                        && request.resource.data.active == resource.data.active
+                        && request.resource.data.contractorId == resource.data.contractorId
+                        && request.resource.data.siteId == resource.data.siteId);
+    }
+
+    // ---- workers ----
+    match /workers/{workerId} {
+      allow read: if isAdmin()
+                  || resource == null  // let an SSO check whether an auto ID is free
+                  || (isContractor() && resource.data.contractorId == request.auth.uid)
+                  || (isSso() && resource.data.siteId == mySiteId());
+      allow create, update: if isAdmin()
+                            || (isSso() && request.resource.data.siteId == mySiteId());
+      allow delete: if isAdmin();
+    }
+
+    // ---- vests ----
+    match /vests/{vestId} {
+      allow read: if isAdmin() || isSso() || isContractor();
+      allow write: if isAdmin() || isSso();
+    }
+
+    // ---- vest assignments (history, never deleted — plan 31.7) ----
+    match /vestAssignments/{id} {
+      allow read: if isAdmin() || isSso() || isContractor();
+      allow create, update: if isAdmin() || isSso();
+      allow delete: if false;
+    }
+
+    // ---- alerts ----
+    match /alerts/{alertId} {
+      allow read: if isAdmin()
+                  || (isSso() && resource.data.siteId == mySiteId())
+                  || (isContractor() && resource.data.contractorId == myContractorId());
+      // Production alerts are created by the cloud safety engine or an SSO. The
+      // in-app simulator (no IoT hardware yet) may create/remove alerts flagged
+      // `simulated == true` — these never affect real safety data.
+      allow create: if isAdmin() || isSso()
+                    || (isSignedIn() && request.resource.data.simulated == true);
+      allow update: if isAdmin()
+                    || (isSso() && resource.data.siteId == mySiteId());
+      allow delete: if isSignedIn() && resource.data.simulated == true;
+    }
+
+    // ---- incidents ----
+    match /incidents/{incidentId} {
+      allow read: if isAdmin()
+                  || (isSso() && resource.data.siteId == mySiteId())
+                  || (isContractor() && resource.data.contractorId == myContractorId());
+      // Real incidents come only from the cloud engine. Simulated ones (flagged
+      // `simulated == true`) may be created/removed by any signed-in user so the
+      // app can be demoed before the IoT layer exists.
+      allow create: if isAdmin()
+                    || (isSignedIn() && request.resource.data.simulated == true);
+      allow update: if isAdmin()
+                    || (isSso() && resource.data.siteId == mySiteId())
+                    || (isContractor() && resource.data.contractorId == myContractorId());
+      allow delete: if isSignedIn() && resource.data.simulated == true;
+    }
+
+    // ---- projects / sites ----
+    match /projects/{projectId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin()
+                   || (isContractor() && request.resource.data.contractorId == request.auth.uid);
+    }
+
+    // ---- activity log ----
+    match /activityLog/{id} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    // ---- settings ----
+    match /settings/{doc} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

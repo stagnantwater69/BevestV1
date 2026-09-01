@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "605475638218",
+    "firebase_url": "https://bevest-70698-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "bevest-70698",
+    "storage_bucket": "bevest-70698.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:605475638218:android:69ff75c0d93ce14d405d33",
+        "android_client_info": {
+          "package_name": "com.jtexpress.bevest"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBiTR4V77qYVsHnPTrMUUDZ3IdF-DUkK3E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
