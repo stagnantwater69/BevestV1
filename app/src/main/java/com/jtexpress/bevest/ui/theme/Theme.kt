@@ -2,7 +2,6 @@ package com.jtexpress.bevest.ui.theme
 
 import android.app.Activity
 import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -58,13 +57,15 @@ private val DarkColors = darkColorScheme(
 )
 
 /**
- * BeVest theme. The app follows the system light/dark setting; the safety-status palette
- * ([LocalStatusPalette]) swaps in step so warnings and dangers keep their contrast in
- * both. System bars are transparent — the app draws edge to edge (see [MainActivity]).
+ * BeVest is a light-themed app: warm-white ground, dark ink, orange accent. The system
+ * dark-mode setting is intentionally ignored so the safety UI reads the same for
+ * everyone, in any lighting. (A complete [DarkColors] scheme is kept below in case that
+ * decision is revisited — pass `darkTheme = true` to preview it.)
+ * System bars are transparent — the app draws edge to edge (see [MainActivity]).
  */
 @Composable
 fun BevestTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = if (darkTheme) DarkColors else LightColors
