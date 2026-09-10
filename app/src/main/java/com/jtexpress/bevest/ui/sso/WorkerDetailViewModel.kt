@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -33,6 +34,8 @@ data class WorkerDetailState(
     val status: SafetyStatus = SafetyStatus.OFFLINE,
     val stale: Boolean = true,
     val actionMessage: String? = null,
+    /** Recent heart-rate samples, oldest first — drawn as an ECG trace on the card. */
+    val heartRateHistory: List<Int> = emptyList(),
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -47,15 +50,33 @@ class WorkerDetailViewModel @Inject constructor(
     private val workerId: String = savedStateHandle.get<String>("workerId").orEmpty()
     private val actionMessage = MutableStateFlow<String?>(null)
 
+    /**
+     * A rolling window of heart-rate samples, collected as readings arrive.
+     *
+     * The repository only ever exposes the latest reading, so there is no history to
+     * query — but the trend is what actually tells an officer whether a worker is
+     * recovering or getting worse, and a single number cannot. Holding the last
+     * [HISTORY_SIZE] samples for the life of this screen is enough to draw that, and
+     * costs nothing: the buffer dies with the ViewModel.
+     */
+    private val heartRateHistory = MutableStateFlow<List<Int>>(emptyList())
+
     val state: StateFlow<WorkerDetailState> =
         workerRepository.observeWorker(workerId).flatMapLatest { workerOutcome ->
             when (workerOutcome) {
-                is Outcome.Failure -> flowOf(WorkerDetailState(loading = false, error = workerOutcome.error.message))
+                is Outcome.Failure -> flowOf(
+                    WorkerDetailState(loading = false, error = workerOutcome.error.message),
+                )
                 is Outcome.Success -> combine(
-                    monitoringRepository.observeReading(workerId),
+                    monitoringRepository.observeReading(workerId).onEach { reading ->
+                        reading?.heartRate?.let { hr ->
+                            heartRateHistory.update { (it + hr).takeLast(HISTORY_SIZE) }
+                        }
+                    },
                     settingsRepository.observeThresholds(),
                     actionMessage,
-                ) { reading, thresholds, message ->
+                    heartRateHistory,
+                ) { reading, thresholds, message, history ->
                     val engine = SafetyStatusEngine(thresholds)
                     val now = System.currentTimeMillis()
                     WorkerDetailState(
@@ -65,6 +86,7 @@ class WorkerDetailViewModel @Inject constructor(
                         status = engine.evaluate(reading, now),
                         stale = engine.isStale(reading, now),
                         actionMessage = message,
+                        heartRateHistory = history,
                     )
                 }
             }
@@ -80,4 +102,9 @@ class WorkerDetailViewModel @Inject constructor(
     }
 
     fun clearMessage() { actionMessage.value = null }
+
+    private companion object {
+        /** Roughly the last few minutes at the vest's reporting rate. */
+        const val HISTORY_SIZE = 40
+    }
 }

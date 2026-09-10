@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -59,8 +60,12 @@ import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.domain.model.UserRole
 import com.jtexpress.bevest.ui.common.BevestScaffold
 import com.jtexpress.bevest.ui.common.ConfirmationDialog
+import com.jtexpress.bevest.ui.common.DangerButton
+import com.jtexpress.bevest.ui.common.ErrorNote
 import com.jtexpress.bevest.ui.common.FormField
+import com.jtexpress.bevest.ui.common.FormSection
 import com.jtexpress.bevest.ui.common.FormSkeleton
+import com.jtexpress.bevest.ui.common.PrimaryButton
 import com.jtexpress.bevest.ui.common.WorkerAvatar
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.EyebrowStyle
@@ -144,17 +149,34 @@ fun AddEditWorkerScreen(
                 }
 
                 // ---- Details ----
-                FormCard(title = "Details") {
-                    FormField(state.firstName, viewModel::onFirstName, "First name", state.firstNameError)
-                    FormField(state.lastName, viewModel::onLastName, "Last name", state.lastNameError)
+                FormSection(title = "Details") {
                     FormField(
-                        state.phone, viewModel::onPhone, "Phone number (optional)",
-                        state.phoneError, keyboardType = KeyboardType.Phone,
+                        state.firstName,
+                        viewModel::onFirstName,
+                        "First name",
+                        error = state.firstNameError,
+                        required = true,
+                    )
+                    FormField(
+                        state.lastName,
+                        viewModel::onLastName,
+                        "Last name",
+                        error = state.lastNameError,
+                        required = true,
+                    )
+                    FormField(
+                        state.phone,
+                        viewModel::onPhone,
+                        "Phone number",
+                        error = state.phoneError,
+                        helper = "Optional — used to reach them directly",
+                        keyboardType = KeyboardType.Phone,
+                        imeAction = ImeAction.Done,
                     )
                 }
 
                 // ---- Project / site ----
-                FormCard(title = "Project site") {
+                FormSection(title = "Project site") {
                     ProjectPicker(
                         projects = state.projects,
                         selectedId = state.selectedProjectId,
@@ -163,36 +185,20 @@ fun AddEditWorkerScreen(
                     )
                 }
 
-                state.formError?.let { FormErrorBar(it) }
+                state.formError?.let { ErrorNote(it) }
 
-                Button(
+                PrimaryButton(
+                    text = if (state.isEdit) "Save changes" else "Add worker",
                     onClick = viewModel::save,
-                    enabled = !state.submitting,
-                    shape = RoundedCornerShape(Radius.md),
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-                ) {
-                    if (state.submitting) {
-                        CircularProgressIndicator(
-                            Modifier.size(18.dp), strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                    } else {
-                        Text(
-                            if (state.isEdit) "Save changes" else "Add worker",
-                            style = MaterialTheme.typography.labelLarge,
-                        )
-                    }
-                }
+                    loading = state.submitting,
+                    loadingText = if (state.isEdit) "Saving…" else "Adding…",
+                )
 
                 if (state.isEdit && state.active) {
-                    OutlinedButton(
+                    DangerButton(
+                        text = "Deactivate worker",
                         onClick = { confirmDeactivate = true },
-                        shape = RoundedCornerShape(Radius.md),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = LocalStatusPalette.current.danger,
-                        ),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                    ) { Text("Deactivate worker") }
+                    )
                 }
 
                 Spacer(Modifier.height(Spacing.lg))
@@ -291,28 +297,6 @@ private fun WorkerIdBadge(id: String, generated: Boolean) {
     }
 }
 
-@Composable
-private fun FormCard(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-        Text(
-            title.uppercase(),
-            style = EyebrowStyle,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = Spacing.xs),
-        )
-        Surface(
-            shape = RoundedCornerShape(Radius.md),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(
-                Modifier.padding(Spacing.lg),
-                verticalArrangement = Arrangement.spacedBy(Spacing.md),
-            ) { content() }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProjectPicker(
@@ -377,31 +361,6 @@ private fun ProjectPicker(
                     },
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun FormErrorBar(message: String) {
-    val palette = LocalStatusPalette.current
-    Surface(
-        shape = RoundedCornerShape(Radius.sm),
-        color = palette.danger.copy(alpha = 0.10f),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            Modifier.padding(Spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-        ) {
-            Icon(BevestIcons.Error, contentDescription = null, tint = palette.danger, modifier = Modifier.size(18.dp))
-            Text(
-                message,
-                style = MaterialTheme.typography.bodySmall,
-                color = palette.danger,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }

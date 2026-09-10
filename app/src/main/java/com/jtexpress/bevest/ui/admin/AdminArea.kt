@@ -6,7 +6,6 @@ import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.navigation.Routes
 import com.jtexpress.bevest.ui.common.BottomTab
 import com.jtexpress.bevest.ui.theme.BevestIcons
-import com.jtexpress.bevest.ui.common.PlaceholderScreen
 import com.jtexpress.bevest.ui.common.RoleScaffold
 import com.jtexpress.bevest.ui.common.profileDestinations
 

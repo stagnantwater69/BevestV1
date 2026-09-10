@@ -70,6 +70,7 @@ fun BevestTheme(
 ) {
     val colorScheme = if (darkTheme) DarkColors else LightColors
     val statusPalette = if (darkTheme) DarkStatusPalette else LightStatusPalette
+    val brandPalette = if (darkTheme) DarkBrandPalette else LightBrandPalette
 
     val view = LocalView.current
     if (!view.isInEditMode) {
@@ -85,10 +86,14 @@ fun BevestTheme(
         }
     }
 
-    CompositionLocalProvider(LocalStatusPalette provides statusPalette) {
+    CompositionLocalProvider(
+        LocalStatusPalette provides statusPalette,
+        LocalBrandPalette provides brandPalette,
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = Typography,
+            shapes = MaterialShapes,
             content = content,
         )
     }

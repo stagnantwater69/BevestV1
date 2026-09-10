@@ -1,60 +1,97 @@
 package com.jtexpress.bevest.ui.contractor
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.jtexpress.bevest.BuildConfig
 import com.jtexpress.bevest.domain.model.AlertSeverity
+import com.jtexpress.bevest.domain.model.Incident
+import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.navigation.Routes
-import com.jtexpress.bevest.ui.common.BarChart
 import com.jtexpress.bevest.ui.common.BarDatum
+import com.jtexpress.bevest.ui.common.BevestCard
 import com.jtexpress.bevest.ui.common.BevestScaffold
-import com.jtexpress.bevest.ui.common.DonutChart
-import com.jtexpress.bevest.ui.common.DonutSlice
-import com.jtexpress.bevest.ui.common.EmptyState
-import com.jtexpress.bevest.ui.common.ErrorState
-import com.jtexpress.bevest.ui.common.ProfileAction
-import com.jtexpress.bevest.ui.common.FormField
-import com.jtexpress.bevest.ui.common.LoadingState
-import com.jtexpress.bevest.ui.common.ListSkeleton
 import com.jtexpress.bevest.ui.common.DashboardSkeleton
-import com.jtexpress.bevest.ui.theme.BevestIcons
+import com.jtexpress.bevest.ui.common.EmptyState
+import com.jtexpress.bevest.ui.common.ErrorNote
+import com.jtexpress.bevest.ui.common.ErrorState
+import com.jtexpress.bevest.ui.common.FilterOption
+import com.jtexpress.bevest.ui.common.FilterRow
+import com.jtexpress.bevest.ui.common.FormField
+import com.jtexpress.bevest.ui.common.FormSection
+import com.jtexpress.bevest.ui.common.InsightCard
+import com.jtexpress.bevest.ui.common.ListSkeleton
+import com.jtexpress.bevest.ui.common.PrimaryButton
+import com.jtexpress.bevest.ui.common.ProfileAction
+import com.jtexpress.bevest.ui.common.SearchBar
+import com.jtexpress.bevest.ui.common.SecondaryButton
+import com.jtexpress.bevest.ui.common.SectionHeader
+import com.jtexpress.bevest.ui.common.StatTile
+import com.jtexpress.bevest.ui.common.StatusBadge
+import com.jtexpress.bevest.ui.common.StatusBar
+import com.jtexpress.bevest.ui.common.StatusSlice
+import com.jtexpress.bevest.ui.common.TrendBars
+import com.jtexpress.bevest.ui.common.WorkerAvatar
+import com.jtexpress.bevest.ui.common.label
 import com.jtexpress.bevest.ui.sso.WorkerDirectoryScreen
+import com.jtexpress.bevest.ui.theme.BevestIcons
+import com.jtexpress.bevest.ui.theme.BevestShapes
+import com.jtexpress.bevest.ui.theme.ComponentHeight
+import com.jtexpress.bevest.ui.theme.IconSize
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
+import com.jtexpress.bevest.ui.theme.Spacing
 import com.jtexpress.bevest.utils.DateTimeUtils
 import com.jtexpress.bevest.utils.PdfExporter
 
 private fun contractorId(user: User) = user.contractorId ?: user.uid
 
+// -------------------------------------------------------------- dashboard
+
+/**
+ * The contractor's overview across every site.
+ *
+ * Where the officer's dashboard is about *now*, this one is about *trend* — a contractor
+ * is answering "are we getting safer?", not "who needs help this minute". So each block
+ * leads with a sentence stating the answer and puts the chart underneath as evidence,
+ * rather than presenting a chart and leaving the reader to do the comparison themselves.
+ */
 @Composable
 fun ContractorDashboardScreen(
     user: User,
@@ -67,13 +104,11 @@ fun ContractorDashboardScreen(
 
     BevestScaffold(
         title = "Safety overview",
+        subtitle = "All sites",
         actions = {
-            if (com.jtexpress.bevest.BuildConfig.DEBUG) {
-                androidx.compose.material3.IconButton(onClick = { navigate(Routes.SIMULATION) }) {
-                    androidx.compose.material3.Icon(
-                        BevestIcons.Simulator,
-                        contentDescription = "IoT simulation",
-                    )
+            if (BuildConfig.DEBUG) {
+                IconButton(onClick = { navigate(Routes.SIMULATION) }) {
+                    Icon(BevestIcons.Simulator, contentDescription = "IoT simulation")
                 }
             }
             ProfileAction(user, onClick = { navigate(Routes.PROFILE) })
@@ -83,107 +118,120 @@ fun ContractorDashboardScreen(
             state.loading -> DashboardSkeleton(Modifier.padding(padding))
             state.error != null -> ErrorState(state.error, modifier = Modifier.padding(padding))
             else -> Column(
-                Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = Spacing.gutter, vertical = Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    com.jtexpress.bevest.ui.common.StatTile(
-                        BevestIcons.Workers, state.activeWorkers.toString(), "Active workers", Modifier.weight(1f),
+                // ---- Headline figures ----
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                    StatTile(
+                        icon = BevestIcons.Workers,
+                        value = state.activeWorkers.toString(),
+                        label = "Active workers",
+                        modifier = Modifier.weight(1f),
                     )
-                    com.jtexpress.bevest.ui.common.StatTile(
-                        BevestIcons.Alerts, state.todaysAlerts.toString(), "Today's alerts", Modifier.weight(1f),
-                        accent = if (state.todaysAlerts > 0) palette.warning else null,
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    com.jtexpress.bevest.ui.common.StatTile(
-                        BevestIcons.History, state.monthlyIncidents.toString(), "Incidents (30d)", Modifier.weight(1f),
-                        accent = if (state.monthlyIncidents > 0) palette.danger else null,
-                    )
-                    com.jtexpress.bevest.ui.common.StatTile(
-                        BevestIcons.Vests, "${state.safetyScore}%", "Safety score", Modifier.weight(1f),
+                    StatTile(
+                        icon = BevestIcons.Vests,
+                        value = "${state.safetyScore}%",
+                        label = "Safety score",
                         accent = if (state.safetyScore >= 90) palette.normal else palette.warning,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                    StatTile(
+                        icon = BevestIcons.Alerts,
+                        value = state.todaysAlerts.toString(),
+                        label = "Alerts today",
+                        accent = if (state.todaysAlerts > 0) palette.warning else null,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatTile(
+                        icon = BevestIcons.History,
+                        value = state.monthlyIncidents.toString(),
+                        label = "Incidents (30d)",
+                        accent = if (state.monthlyIncidents > 0) palette.danger else null,
+                        modifier = Modifier.weight(1f),
                     )
                 }
 
-                androidx.compose.material3.Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                ) {
-                    Column(
-                        Modifier.fillMaxWidth().padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp),
-                    ) {
-                        Text(
-                            "WORKER STATUS",
-                            style = com.jtexpress.bevest.ui.theme.EyebrowStyle,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        DonutChart(
-                            slices = listOf(
-                                DonutSlice("Normal", state.normal.toFloat(), palette.normal),
-                                DonutSlice("Warning", state.warning.toFloat(), palette.warning),
-                                DonutSlice("Danger", state.danger.toFloat(), palette.danger),
-                            ),
-                            centerValue = (state.normal + state.warning + state.danger).toString(),
-                            centerLabel = "workers",
-                        )
-                    }
+                // ---- Who is where, right now ----
+                SectionHeader(
+                    title = "Worker status",
+                    supporting = "Across every site you run",
+                )
+                BevestCard {
+                    InsightCard(
+                        text = state.statusInsight,
+                        icon = BevestIcons.Workers,
+                        accent = when {
+                            state.danger > 0 -> palette.danger
+                            state.warning > 0 -> palette.warning
+                            else -> palette.normal
+                        },
+                    )
+                    Spacer(Modifier.height(Spacing.lg))
+                    StatusBar(
+                        slices = listOf(
+                            StatusSlice("Normal", state.normal, palette.normal),
+                            StatusSlice("Warning", state.warning, palette.warning),
+                            StatusSlice("Danger", state.danger, palette.danger),
+                        ),
+                    )
                 }
 
+                // ---- Trend ----
                 if (state.trends.isNotEmpty()) {
-                    androidx.compose.material3.Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    ) {
-                        Column(
-                            Modifier.fillMaxWidth().padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                        ) {
-                            Text(
-                                "MONTHLY INCIDENTS",
-                                style = com.jtexpress.bevest.ui.theme.EyebrowStyle,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            BarChart(
-                                data = state.trends.map {
-                                    BarDatum(
-                                        DateTimeUtils.monthLabel(it.monthKey).take(3),
-                                        it.totalIncidents.toFloat(),
-                                    )
-                                },
-                            )
-                        }
-                    }
-                }
-
-                Text("Recent incidents", style = MaterialTheme.typography.titleMedium)
-                if (state.recentIncidents.isEmpty()) {
-                    Text("No incidents recorded.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    state.recentIncidents.forEach { incident ->
-                        Text(
-                            "${DateTimeUtils.formatDate(incident.createdAt)} · ${incident.workerId} · ${incident.type.name}",
-                            style = MaterialTheme.typography.bodySmall,
+                    SectionHeader(
+                        title = "Incident trend",
+                        supporting = "Recorded incidents by month",
+                    )
+                    BevestCard {
+                        InsightCard(
+                            text = state.incidentInsight,
+                            icon = BevestIcons.Reports,
+                            accent = palette.warning,
+                        )
+                        Spacer(Modifier.height(Spacing.lg))
+                        TrendBars(
+                            data = state.trends.map {
+                                BarDatum(
+                                    DateTimeUtils.monthLabel(it.monthKey).take(3),
+                                    it.totalIncidents.toFloat(),
+                                )
+                            },
                         )
                     }
                 }
-                OutlinedButton(onClick = { navigate(Routes.CONTRACTOR_SSOS) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Manage Site Safety Officers")
-                }
-            }
-        }
-    }
-}
 
-@Composable
-private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(modifier) {
-        Column(Modifier.padding(16.dp)) {
-            Text(value, style = MaterialTheme.typography.headlineMedium)
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // ---- Recent incidents ----
+                SectionHeader(
+                    title = "Recent incidents",
+                    supporting = "Newest first",
+                )
+                if (state.recentIncidents.isEmpty()) {
+                    EmptyState(
+                        title = "No incidents recorded",
+                        message = "Incidents appear here once an alert is closed with an outcome.",
+                        icon = BevestIcons.History,
+                        modifier = Modifier.heightIn(min = 200.dp),
+                    )
+                } else {
+                    state.recentIncidents.take(5).forEach { incident ->
+                        IncidentRow(incident, onClick = null)
+                    }
+                }
+
+                SecondaryButton(
+                    text = "Manage Site Safety Officers",
+                    onClick = { navigate(Routes.CONTRACTOR_SSOS) },
+                    icon = BevestIcons.Officer,
+                )
+                Spacer(Modifier.height(Spacing.lg))
+            }
         }
     }
 }
@@ -193,6 +241,8 @@ fun ContractorWorkersScreen(user: User, onOpenWorker: (String) -> Unit) {
     WorkerDirectoryScreen(user = user, onOpenWorker = onOpenWorker, onAddWorker = {})
 }
 
+// -------------------------------------------------------------------- SSOs
+
 @Composable
 fun ContractorSsosScreen(
     user: User,
@@ -201,46 +251,78 @@ fun ContractorSsosScreen(
 ) {
     LaunchedEffect(user.uid) { viewModel.start(contractorId(user)) }
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    val palette = LocalStatusPalette.current
 
     BevestScaffold(
         title = "Site Safety Officers",
         floatingActionButton = {
-            FloatingActionButton(onClick = onAdd) { Icon(BevestIcons.Add, contentDescription = "Add SSO") }
+            ExtendedFloatingActionButton(
+                onClick = onAdd,
+                icon = { Icon(BevestIcons.Add, contentDescription = null) },
+                text = { Text("Add officer") },
+            )
         },
     ) { padding ->
         when {
-            state.loading -> DashboardSkeleton(Modifier.padding(padding))
+            state.loading -> ListSkeleton(modifier = Modifier.padding(padding))
+
             state.error != null -> ErrorState(state.error, modifier = Modifier.padding(padding))
+
             else -> Column(Modifier.fillMaxSize().padding(padding)) {
-                OutlinedTextField(
-                    value = state.query,
-                    onValueChange = viewModel::onQuery,
-                    label = { Text("Search") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                SearchBar(
+                    query = state.query,
+                    onQueryChange = viewModel::onQuery,
+                    placeholder = "Search officers by name or email",
+                    modifier = Modifier.padding(
+                        horizontal = Spacing.gutter,
+                        vertical = Spacing.sm,
+                    ),
                 )
+
                 if (state.visible.isEmpty()) {
-                    EmptyState("No officers", "Add a Site Safety Officer to get started.", icon = BevestIcons.Officer)
+                    val searching = state.query.isNotBlank()
+                    EmptyState(
+                        title = if (searching) "No matches" else "No officers yet",
+                        message = if (searching) {
+                            "Nothing matches \"${state.query}\"."
+                        } else {
+                            "Add a Site Safety Officer and assign them to a site so they " +
+                                "can monitor the workers there."
+                        },
+                        icon = if (searching) BevestIcons.NoResults else BevestIcons.Officer,
+                        actionLabel = if (searching) null else "Add officer",
+                        onAction = if (searching) null else onAdd,
+                    )
                 } else {
                     LazyColumn(
-                        Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = Spacing.gutter,
+                            end = Spacing.gutter,
+                            top = Spacing.sm,
+                            bottom = 96.dp,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.md),
                     ) {
                         items(state.visible, key = { it.uid }) { sso ->
-                            Card(Modifier.fillMaxWidth()) {
-                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(sso.fullName.ifBlank { sso.email }, fontWeight = FontWeight.SemiBold)
-                                    Text(sso.email, style = MaterialTheme.typography.bodySmall)
-                                    Text(
-                                        "Site: ${sso.siteId ?: "unassigned"} · ${if (sso.active) "active" else "disabled"}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            PersonRow(
+                                name = sso.fullName.ifBlank { sso.email },
+                                email = sso.email,
+                                supporting = sso.siteId?.let { "Site $it" } ?: "No site assigned",
+                                active = sso.active,
+                                trailing = {
+                                    StatusBadge(
+                                        text = if (sso.active) "Active" else "Disabled",
+                                        color = if (sso.active) palette.normal else palette.offline,
                                     )
-                                    if (sso.active) {
-                                        OutlinedButton(onClick = { viewModel.disable(sso.uid) }) { Text("Disable") }
-                                    }
-                                }
-                            }
+                                },
+                                action = if (sso.active) {
+                                    { viewModel.disable(sso.uid) }
+                                } else {
+                                    null
+                                },
+                                actionLabel = "Disable access",
+                            )
                         }
                     }
                 }
@@ -248,6 +330,89 @@ fun ContractorSsosScreen(
         }
     }
 }
+
+/**
+ * A person in a management list — officer or contractor.
+ *
+ * Deliberately identical between the contractor and admin screens: the two lists do the
+ * same job for different roles, and there is no reason for an administrator to have to
+ * learn a second layout to read the same information.
+ */
+@Composable
+fun PersonRow(
+    name: String,
+    email: String,
+    supporting: String,
+    active: Boolean,
+    modifier: Modifier = Modifier,
+    trailing: @Composable (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
+    action: (() -> Unit)? = null,
+    actionLabel: String = "Disable",
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(BevestShapes.card)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        shape = BevestShapes.card,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.padding(Spacing.lg)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            ) {
+                WorkerAvatar(name = name, photoUrl = null, size = 44.dp)
+                Column(
+                    Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        // A disabled account is history, and should read that way.
+                        color = if (active) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                    Text(
+                        email,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        supporting,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                trailing?.invoke()
+                if (onClick != null) {
+                    Icon(
+                        Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(IconSize.large),
+                    )
+                }
+            }
+            if (action != null) {
+                Spacer(Modifier.height(Spacing.md))
+                SecondaryButton(text = actionLabel, onClick = action)
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ add SSO
 
 @Composable
 fun AddSsoScreen(
@@ -259,29 +424,88 @@ fun AddSsoScreen(
     val state = viewModel.state.collectAsStateWithLifecycle().value
     LaunchedEffect(state.created) { if (state.created) onDone() }
 
-    BevestScaffold(title = "Add SSO", onBack = onDone) { padding ->
+    BevestScaffold(title = "Add officer", subtitle = "New account", onBack = onDone) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.gutter, vertical = Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xl),
         ) {
-            FormField(state.firstName, { viewModel.update("firstName", it) }, "First name", state.errors["firstName"])
-            FormField(state.lastName, { viewModel.update("lastName", it) }, "Last name", state.errors["lastName"])
-            FormField(state.email, { viewModel.update("email", it) }, "Email", state.errors["email"], keyboardType = KeyboardType.Email)
-            FormField(state.phone, { viewModel.update("phone", it) }, "Phone", state.errors["phone"], keyboardType = KeyboardType.Phone)
-            FormField(state.siteId, { viewModel.update("siteId", it) }, "Assigned site ID (optional)", state.errors["siteId"])
-            FormField(state.tempPassword, { viewModel.update("tempPassword", it) }, "Temporary password", state.errors["tempPassword"], isPassword = true)
-            state.formError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Button(onClick = viewModel::submit, enabled = !state.submitting, modifier = Modifier.fillMaxWidth()) {
-                Text(if (state.submitting) "Creating…" else "Create account")
+            // Grouped rather than one long stack of inputs: who they are, how to reach
+            // them, and how they first sign in are three separate decisions.
+            FormSection(title = "Name") {
+                FormField(
+                    state.firstName,
+                    { viewModel.update("firstName", it) },
+                    "First name",
+                    error = state.errors["firstName"],
+                    required = true,
+                )
+                FormField(
+                    state.lastName,
+                    { viewModel.update("lastName", it) },
+                    "Last name",
+                    error = state.errors["lastName"],
+                    required = true,
+                )
             }
-            Text(
-                "The officer signs in with this email and temporary password, then changes it from their profile.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+
+            FormSection(title = "Contact") {
+                FormField(
+                    state.email,
+                    { viewModel.update("email", it) },
+                    "Email",
+                    error = state.errors["email"],
+                    helper = "They sign in with this address",
+                    keyboardType = KeyboardType.Email,
+                    required = true,
+                )
+                FormField(
+                    state.phone,
+                    { viewModel.update("phone", it) },
+                    "Phone",
+                    error = state.errors["phone"],
+                    keyboardType = KeyboardType.Phone,
+                )
+            }
+
+            FormSection(title = "Access") {
+                FormField(
+                    state.siteId,
+                    { viewModel.update("siteId", it) },
+                    "Assigned site ID",
+                    error = state.errors["siteId"],
+                    helper = "Optional — a site can be assigned later",
+                )
+                FormField(
+                    state.tempPassword,
+                    { viewModel.update("tempPassword", it) },
+                    "Temporary password",
+                    error = state.errors["tempPassword"],
+                    helper = "They change this from their profile after signing in",
+                    isPassword = true,
+                    required = true,
+                    imeAction = ImeAction.Done,
+                    onImeAction = viewModel::submit,
+                )
+            }
+
+            state.formError?.let { ErrorNote(it) }
+
+            PrimaryButton(
+                text = "Create account",
+                onClick = viewModel::submit,
+                loading = state.submitting,
+                loadingText = "Creating…",
             )
+            Spacer(Modifier.height(Spacing.lg))
         }
     }
 }
+
+// ---------------------------------------------------------------- reports
 
 @Composable
 fun ContractorReportsScreen(
@@ -293,28 +517,91 @@ fun ContractorReportsScreen(
 ) {
     LaunchedEffect(user.uid) { viewModel.start(contractorId(user)) }
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    val palette = LocalStatusPalette.current
 
     BevestScaffold(title = "Reports") { padding ->
         when {
-            state.loading -> DashboardSkeleton(Modifier.padding(padding))
+            state.loading -> ListSkeleton(modifier = Modifier.padding(padding))
+
             state.error != null -> ErrorState(state.error, modifier = Modifier.padding(padding))
+
             else -> LazyColumn(
-                Modifier.fillMaxSize().padding(padding).padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(
+                    start = Spacing.gutter,
+                    end = Spacing.gutter,
+                    top = Spacing.md,
+                    bottom = Spacing.xxl,
+                ),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
-                item {
-                    OutlinedButton(onClick = onOpenIncidents, modifier = Modifier.fillMaxWidth()) {
-                        Text("Incident history")
-                    }
+                item(key = "incidents-link") {
+                    SecondaryButton(
+                        text = "Incident history",
+                        onClick = onOpenIncidents,
+                        icon = BevestIcons.History,
+                    )
                 }
-                items(state.reports, key = { it.monthKey }) { report ->
-                    Card(Modifier.fillMaxWidth().clickable { onOpenReport(report.monthKey) }) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(DateTimeUtils.monthLabel(report.monthKey), fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "${report.totalIncidents} incidents · ${report.safetyPercentage}% safety",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                item(key = "monthly-header") {
+                    SectionHeader(
+                        title = "Monthly reports",
+                        supporting = "Tap a month for detail and a PDF export",
+                    )
+                }
+                if (state.reports.isEmpty()) {
+                    item(key = "monthly-empty") {
+                        EmptyState(
+                            title = "No reports yet",
+                            message = "A monthly report is generated once a full month of " +
+                                "monitoring data exists.",
+                            icon = BevestIcons.Reports,
+                            modifier = Modifier.heightIn(min = 240.dp),
+                        )
+                    }
+                } else {
+                    items(state.reports, key = { it.monthKey }) { report ->
+                        val healthy = report.safetyPercentage >= 90
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = ComponentHeight.listRow)
+                                .clip(BevestShapes.card)
+                                .clickable { onOpenReport(report.monthKey) },
+                            shape = BevestShapes.card,
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        ) {
+                            Row(
+                                Modifier.padding(Spacing.lg),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                            ) {
+                                Column(
+                                    Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    Text(
+                                        DateTimeUtils.monthLabel(report.monthKey),
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+                                    Text(
+                                        "${report.totalIncidents} " +
+                                            if (report.totalIncidents == 1) "incident" else "incidents",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                StatusBadge(
+                                    text = "${report.safetyPercentage}% safe",
+                                    color = if (healthy) palette.normal else palette.warning,
+                                )
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(IconSize.large),
+                                )
+                            }
                         }
                     }
                 }
@@ -333,44 +620,103 @@ fun MonthlyReportDetailScreen(
     val context = LocalContext.current
     LaunchedEffect(contractorId) { viewModel.start(contractorId) }
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    val palette = LocalStatusPalette.current
 
     BevestScaffold(title = "Monthly report", onBack = onBack) { padding ->
         when {
-            state.loading -> DashboardSkeleton(Modifier.padding(padding))
+            state.loading -> ListSkeleton(modifier = Modifier.padding(padding))
+
             state.error != null -> ErrorState(state.error, modifier = Modifier.padding(padding))
-            state.report == null -> EmptyState("No data", "No report for this month.", Modifier.padding(padding), icon = BevestIcons.Reports)
+
+            state.report == null -> EmptyState(
+                title = "No report for this month",
+                message = "There isn't enough monitoring data for this period yet.",
+                icon = BevestIcons.Reports,
+                modifier = Modifier.padding(padding),
+            )
+
             else -> {
                 val report = state.report
                 Column(
-                    Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = Spacing.gutter, vertical = Spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.md),
                 ) {
-                    Text(DateTimeUtils.monthLabel(report.monthKey), style = MaterialTheme.typography.headlineSmall)
-                    Text("Total incidents: ${report.totalIncidents}")
-                    Text("Safety percentage: ${report.safetyPercentage}%")
-                    Text("Active workers: ${report.activeWorkers}")
-                    Text("Warnings: ${report.warningCount} · Danger: ${report.dangerCount} · Emergency: ${report.emergencyCount}")
+                    Text(
+                        DateTimeUtils.monthLabel(report.monthKey),
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
 
-                    Button(
+                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                        StatTile(
+                            icon = BevestIcons.Vests,
+                            value = "${report.safetyPercentage}%",
+                            label = "Safety score",
+                            accent = if (report.safetyPercentage >= 90) {
+                                palette.normal
+                            } else {
+                                palette.warning
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatTile(
+                            icon = BevestIcons.Workers,
+                            value = report.activeWorkers.toString(),
+                            label = "Active workers",
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+
+                    SectionHeader(
+                        title = "Severity breakdown",
+                        supporting = "${report.totalIncidents} incidents in total",
+                    )
+                    BevestCard {
+                        StatusBar(
+                            slices = listOf(
+                                StatusSlice("Warning", report.warningCount, palette.warning),
+                                StatusSlice("Danger", report.dangerCount, palette.danger),
+                                StatusSlice("Emergency", report.emergencyCount, palette.emergency),
+                            ),
+                        )
+                    }
+
+                    PrimaryButton(
+                        text = "Export & share PDF",
                         onClick = {
                             val file = PdfExporter.monthlyReport(context, report, state.incidents)
                             PdfExporter.share(context, file)
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Export & share PDF") }
+                        icon = BevestIcons.Reports,
+                    )
 
-                    Text("Incidents this month", style = MaterialTheme.typography.titleMedium)
-                    state.incidents.forEach { incident ->
-                        Text(
-                            "${DateTimeUtils.formatDate(incident.createdAt)} · ${incident.workerId} · ${incident.type.name} · ${incident.severity.name}",
-                            style = MaterialTheme.typography.bodySmall,
+                    SectionHeader(
+                        title = "Incidents this month",
+                        supporting = "Oldest first",
+                    )
+                    if (state.incidents.isEmpty()) {
+                        EmptyState(
+                            title = "No incidents",
+                            message = "Nothing was recorded in this period — a good month.",
+                            icon = BevestIcons.forStatus(SafetyStatus.NORMAL),
+                            modifier = Modifier.heightIn(min = 200.dp),
                         )
+                    } else {
+                        state.incidents.forEach { incident ->
+                            IncidentRow(incident, onClick = null)
+                        }
                     }
+                    Spacer(Modifier.height(Spacing.lg))
                 }
             }
         }
     }
 }
+
+// -------------------------------------------------------------- incidents
 
 @Composable
 fun ContractorIncidentsScreen(
@@ -381,52 +727,152 @@ fun ContractorIncidentsScreen(
 ) {
     LaunchedEffect(contractorId) { viewModel.start(contractorId) }
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    val palette = LocalStatusPalette.current
 
     BevestScaffold(title = "Incident history", onBack = onBack) { padding ->
         when {
-            state.loading -> DashboardSkeleton(Modifier.padding(padding))
+            state.loading -> ListSkeleton(modifier = Modifier.padding(padding))
+
             state.error != null -> ErrorState(state.error, modifier = Modifier.padding(padding))
+
             else -> Column(Modifier.fillMaxSize().padding(padding)) {
-                Row(
-                    Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    FilterChip(state.severityFilter == null, { viewModel.onFilter(null) }, { Text("All") })
-                    AlertSeverity.entries.forEach { sev ->
-                        FilterChip(
-                            state.severityFilter == sev,
-                            { viewModel.onFilter(sev) },
-                            { Text(sev.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                FilterRow(
+                    options = buildList {
+                        add(FilterOption("ALL", "All", state.incidents.size))
+                        AlertSeverity.entries.forEach { sev ->
+                            add(
+                                FilterOption(
+                                    key = sev.name,
+                                    label = sev.label(),
+                                    count = state.incidents.count { it.severity == sev },
+                                    accent = when (sev) {
+                                        AlertSeverity.WARNING -> palette.warning
+                                        AlertSeverity.DANGER -> palette.danger
+                                        AlertSeverity.EMERGENCY -> palette.emergency
+                                    },
+                                ),
+                            )
+                        }
+                    },
+                    selectedKey = state.severityFilter?.name ?: "ALL",
+                    onSelect = { key ->
+                        viewModel.onFilter(
+                            if (key == "ALL") null else AlertSeverity.valueOf(key),
                         )
-                    }
-                }
+                    },
+                )
+
                 if (state.visible.isEmpty()) {
-                    EmptyState("No incidents", "Nothing matches this filter.", icon = BevestIcons.History)
+                    EmptyState(
+                        title = if (state.incidents.isEmpty()) {
+                            "No incidents"
+                        } else {
+                            "Nothing at this severity"
+                        },
+                        message = if (state.incidents.isEmpty()) {
+                            "Incidents appear here once an alert is closed with an outcome."
+                        } else {
+                            "No incident on record has this severity."
+                        },
+                        icon = BevestIcons.History,
+                    )
                 } else {
                     LazyColumn(
-                        Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = Spacing.gutter,
+                            end = Spacing.gutter,
+                            top = Spacing.sm,
+                            bottom = Spacing.xxl,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.md),
                     ) {
                         items(state.visible, key = { it.incidentId }) { incident ->
-                            Card(Modifier.fillMaxWidth().clickable { onOpenIncident(incident.incidentId) }) {
-                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(incident.type.name.replace('_', ' '), fontWeight = FontWeight.SemiBold)
-                                    Text("Worker ${incident.workerId} · ${incident.severity.name}", style = MaterialTheme.typography.bodySmall)
-                                    Text(
-                                        DateTimeUtils.formatDateTime(incident.createdAt),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    Text(
-                                        incident.outcome?.let { "Resolved: $it" } ?: "Open",
-                                        style = MaterialTheme.typography.labelMedium,
-                                    )
-                                }
-                            }
+                            IncidentRow(
+                                incident,
+                                onClick = { onOpenIncident(incident.incidentId) },
+                            )
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * An incident in a list. Shares its shape and severity language with the alert rows on
+ * the officer's side, because the two describe the same events at different points in
+ * their lifecycle and should be recognisable as the same kind of thing.
+ */
+@Composable
+private fun IncidentRow(
+    incident: Incident,
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalStatusPalette.current
+    val color = when (incident.severity) {
+        AlertSeverity.WARNING -> palette.warning
+        AlertSeverity.DANGER -> palette.danger
+        AlertSeverity.EMERGENCY -> palette.emergency
+    }
+    val open = incident.outcome == null
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = ComponentHeight.listRow)
+            .clip(BevestShapes.alert)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        shape = BevestShapes.alert,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(
+            Modifier.padding(Spacing.lg),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(BevestShapes.tile)
+                    .background(color.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    BevestIcons.forAlertType(incident.type),
+                    contentDescription = null,
+                    tint = color,
+                    modifier = Modifier.size(IconSize.medium),
+                )
+            }
+            Column(
+                Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    incident.type.label(),
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "Worker ${incident.workerId}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    DateTimeUtils.formatDateTime(incident.createdAt),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            StatusBadge(
+                text = if (open) "Open" else "Closed",
+                color = if (open) palette.warning else palette.normal,
+            )
         }
     }
 }

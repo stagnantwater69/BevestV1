@@ -40,8 +40,7 @@ data class WorkerDirectoryState(
     }
 
     /** Count shown on each filter chip so the roster's shape is readable at a glance. */
-    fun countFor(f: WorkerFilter): Int =
-        if (f == WorkerFilter.ALL) 0 else all.count { matchesFilter(it, f) }
+    fun countFor(f: WorkerFilter): Int = all.count { matchesFilter(it, f) }
 
     val visible: List<WorkerLive>
         get() = all

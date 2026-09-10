@@ -32,9 +32,45 @@ data class SsoDashboardState(
     val emergencies get() = workers.filter { it.status == SafetyStatus.EMERGENCY }
     val dangerCount get() = workers.count { it.status == SafetyStatus.DANGER }
     val warningCount get() = workers.count { it.status == SafetyStatus.WARNING }
+    val offlineCount get() = workers.count { it.status == SafetyStatus.OFFLINE }
     val onSiteCount get() = workers.count { it.status != SafetyStatus.OFFLINE }
     val topEmergencyAlert: Alert?
         get() = activeAlerts.firstOrNull { it.severity == AlertSeverity.EMERGENCY }
+
+    /**
+     * The worst state anyone on site is in. Drives the dashboard's headline and the
+     * color of its shield, so the panel's whole identity tracks the site's condition.
+     */
+    val worstStatus: SafetyStatus
+        get() = workers.maxByOrNull { it.status.ordinal }?.status ?: SafetyStatus.OFFLINE
+
+    /**
+     * The verdict, in the words an officer would use.
+     *
+     * Deriving this here rather than in the composable keeps the wording testable and
+     * stops two screens from ever disagreeing about what the same numbers mean.
+     */
+    val headline: String
+        get() = when {
+            workers.isEmpty() -> "No workers yet"
+            emergencies.isNotEmpty() -> "Emergency on site"
+            dangerCount > 0 -> "$dangerCount ${plural(dangerCount)} in danger"
+            warningCount > 0 -> "$warningCount ${plural(warningCount)} to check"
+            onSiteCount == 0 -> "Nobody reporting"
+            else -> "All clear"
+        }
+
+    val supporting: String
+        get() = when {
+            workers.isEmpty() -> "Register a worker to start monitoring."
+            emergencies.isNotEmpty() -> "Open the alert and respond now."
+            dangerCount > 0 -> "Readings are at a dangerous level. Check on them."
+            warningCount > 0 -> "Readings crossed a warning threshold."
+            onSiteCount == 0 -> "No vest on this site is sending readings."
+            else -> "$onSiteCount of ${workers.size} monitored and within safe limits."
+        }
+
+    private fun plural(n: Int) = if (n == 1) "worker" else "workers"
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)

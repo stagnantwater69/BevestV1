@@ -20,7 +20,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -28,12 +27,18 @@ import com.jtexpress.bevest.R
 import com.jtexpress.bevest.ui.theme.EyebrowStyle
 
 /**
- * Standard screen chrome. A screen either has a back arrow (a detail) or the BeVest mark
- * (a root tab) — so the user always knows whether they are deep in a flow.
+ * Standard screen chrome.
+ *
+ * A screen either has a back arrow (a detail) or the BeVest mark (a root tab), so the
+ * user always knows whether they are deep in a flow. The bar is closed by the reflective
+ * band rather than a plain hairline — the same device that underlines section headers
+ * and marks the active navigation tab, so the top of every screen, the bottom of every
+ * screen, and every division between them are visibly the same system.
  */
 @Composable
 fun BevestScaffold(
     title: String,
+    modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
     subtitle: String? = null,
     showBrandMark: Boolean = onBack == null,
@@ -42,53 +47,52 @@ fun BevestScaffold(
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         topBar = {
-            val hairline = MaterialTheme.colorScheme.outlineVariant
-            TopAppBar(
-                modifier = Modifier.drawBehind {
-                    drawLine(
-                        color = hairline,
-                        start = androidx.compose.ui.geometry.Offset(0f, size.height),
-                        end = androidx.compose.ui.geometry.Offset(size.width, size.height),
-                        strokeWidth = 1f,
-                    )
-                },
-                title = {
-                    Column {
-                        if (subtitle != null) {
+            Column {
+                TopAppBar(
+                    title = {
+                        Column {
+                            if (subtitle != null) {
+                                Text(
+                                    subtitle.uppercase(),
+                                    style = EyebrowStyle,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                             Text(
-                                subtitle.uppercase(),
-                                style = EyebrowStyle,
-                                color = MaterialTheme.colorScheme.primary,
+                                title,
+                                style = MaterialTheme.typography.titleLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        Text(
-                            title,
-                            style = MaterialTheme.typography.titleLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                },
-                navigationIcon = {
-                    when {
-                        onBack != null -> IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    },
+                    navigationIcon = {
+                        when {
+                            onBack != null -> IconButton(onClick = onBack) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                )
+                            }
+                            showBrandMark -> Image(
+                                painter = painterResource(R.drawable.bevest_mark),
+                                contentDescription = null,
+                                modifier = Modifier.padding(start = 12.dp).size(32.dp),
+                            )
                         }
-                        showBrandMark -> Image(
-                            painter = painterResource(R.drawable.bevest_mark),
-                            contentDescription = null,
-                            modifier = Modifier.padding(start = 12.dp).size(32.dp),
-                        )
-                    }
-                },
-                actions = actions,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                ),
-            )
+                    },
+                    actions = actions,
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    ),
+                )
+                ReflectiveBand(thickness = 2.dp, emphasis = 0.55f)
+            }
         },
         floatingActionButton = floatingActionButton,
     ) { padding ->

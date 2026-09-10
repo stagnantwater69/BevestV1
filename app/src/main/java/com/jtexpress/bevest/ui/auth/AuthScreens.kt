@@ -54,6 +54,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jtexpress.bevest.R
+import com.jtexpress.bevest.ui.common.ErrorNote
+import com.jtexpress.bevest.ui.common.PrimaryButton
+import com.jtexpress.bevest.ui.common.ReflectiveBand
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.EyebrowStyle
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
@@ -86,7 +89,29 @@ fun LoginScreen(
         Image(
             painter = painterResource(R.drawable.bevest_logo),
             contentDescription = "BeVest — monitor, protect, save lives",
-            modifier = Modifier.size(200.dp),
+            modifier = Modifier.size(180.dp),
+        )
+
+        // The product's promise, set as an eyebrow between the two reflective bands —
+        // the same pairing that frames content on every screen behind this one, so the
+        // sign-in page already looks like the app it opens.
+        Spacer(Modifier.height(Spacing.lg))
+        ReflectiveBand(
+            thickness = 2.dp,
+            emphasis = 0.8f,
+            modifier = Modifier.widthIn(max = 420.dp),
+        )
+        Text(
+            "MONITOR · PROTECT · SAVE LIVES",
+            style = EyebrowStyle,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(vertical = Spacing.md),
+        )
+        ReflectiveBand(
+            thickness = 2.dp,
+            emphasis = 0.8f,
+            modifier = Modifier.widthIn(max = 420.dp),
         )
 
         Spacer(Modifier.height(Spacing.xl))
@@ -140,56 +165,24 @@ fun LoginScreen(
         )
 
         AnimatedVisibility(visible = state.formError != null) {
-            val palette = LocalStatusPalette.current
-            Surface(
-                modifier = Modifier.fillMaxWidth().padding(top = Spacing.md),
-                shape = RoundedCornerShape(Radius.sm),
-                color = palette.danger.copy(alpha = 0.10f),
-            ) {
-                Row(
-                    Modifier.padding(Spacing.md),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        BevestIcons.Error,
-                        contentDescription = null,
-                        tint = palette.danger,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Text(
-                        state.formError.orEmpty(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = palette.danger,
-                    )
-                }
-            }
+            ErrorNote(
+                message = state.formError.orEmpty(),
+                modifier = Modifier.widthIn(max = 420.dp).padding(top = Spacing.md),
+            )
         }
 
         Spacer(Modifier.height(Spacing.lg))
 
-        Button(
+        PrimaryButton(
+            text = "Sign in",
             onClick = {
                 keyboard?.hide()
                 viewModel.submit()
             },
-            enabled = !state.submitting,
-            shape = RoundedCornerShape(Radius.md),
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 420.dp)
-                .heightIn(min = 52.dp),
-        ) {
-            if (state.submitting) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
-            } else {
-                Text("Sign in", style = MaterialTheme.typography.labelLarge)
-            }
-        }
+            loading = state.submitting,
+            loadingText = "Signing in…",
+            modifier = Modifier.widthIn(max = 420.dp),
+        )
 
         TextButton(
             onClick = onForgotPassword,
@@ -209,7 +202,6 @@ fun ForgotPasswordScreen(
     viewModel: ForgotPasswordViewModel = hiltViewModel(),
 ) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
-    val palette = LocalStatusPalette.current
 
     Column(
         modifier = modifier
@@ -244,11 +236,11 @@ fun ForgotPasswordScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(Spacing.lg))
-            Button(
+            PrimaryButton(
+                text = "Back to sign in",
                 onClick = onBack,
-                shape = RoundedCornerShape(Radius.md),
-                modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp).heightIn(min = 52.dp),
-            ) { Text("Back to sign in") }
+                modifier = Modifier.widthIn(max = 420.dp),
+            )
         } else {
             Text(
                 "Enter your account email and we'll send a reset link.",
@@ -270,20 +262,19 @@ fun ForgotPasswordScreen(
                 modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp),
             )
             state.formError?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = palette.danger,
-                    modifier = Modifier.padding(top = Spacing.sm),
+                ErrorNote(
+                    message = it,
+                    modifier = Modifier.widthIn(max = 420.dp).padding(top = Spacing.sm),
                 )
             }
             Spacer(Modifier.height(Spacing.lg))
-            Button(
+            PrimaryButton(
+                text = "Send reset link",
                 onClick = viewModel::submit,
-                enabled = !state.submitting,
-                shape = RoundedCornerShape(Radius.md),
-                modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp).heightIn(min = 52.dp),
-            ) { Text("Send reset link") }
+                loading = state.submitting,
+                loadingText = "Sending…",
+                modifier = Modifier.widthIn(max = 420.dp),
+            )
             TextButton(onClick = onBack, modifier = Modifier.heightIn(min = Spacing.touchTarget)) {
                 Text("Back")
             }

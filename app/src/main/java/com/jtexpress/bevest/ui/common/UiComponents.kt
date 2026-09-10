@@ -16,18 +16,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -39,8 +38,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -48,14 +49,18 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.ui.theme.BevestIcons
+import com.jtexpress.bevest.ui.theme.BevestShapes
+import com.jtexpress.bevest.ui.theme.ComponentHeight
 import com.jtexpress.bevest.ui.theme.Elevation
 import com.jtexpress.bevest.ui.theme.EyebrowStyle
+import com.jtexpress.bevest.ui.theme.IconSize
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
-import com.jtexpress.bevest.ui.theme.Radius
+import com.jtexpress.bevest.ui.theme.Motion
 import com.jtexpress.bevest.ui.theme.Spacing
 import com.jtexpress.bevest.ui.theme.StatStyle
 import com.jtexpress.bevest.ui.theme.VitalStyle
@@ -64,8 +69,8 @@ import com.jtexpress.bevest.utils.DateTimeUtils
 // ---------------------------------------------------------------- status
 
 /**
- * Safety status pill. Carries an icon *and* a text label so status is never conveyed by
- * color alone (plan section 23).
+ * Safety status pill. Carries an icon *and* a written label, so status survives
+ * greyscale, sunlight, and color blindness (plan section 23).
  */
 @Composable
 fun StatusChip(
@@ -76,12 +81,12 @@ fun StatusChip(
     val target = LocalStatusPalette.current.forStatus(status)
     // Ease between status colors so a worker flipping WARNING -> DANGER draws the eye
     // with movement, not just a hard swap.
-    val color by animateColorAsState(target, tween(320), label = "statusChipColor")
+    val color by animateColorAsState(target, tween(Motion.STATUS), label = "statusChipColor")
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(Radius.sm))
+            .clip(BevestShapes.tile)
             .background(color.copy(alpha = 0.12f))
-            .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(Radius.sm))
+            .border(1.dp, color.copy(alpha = 0.35f), BevestShapes.tile)
             .padding(horizontal = if (compact) Spacing.sm else Spacing.md, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -90,13 +95,40 @@ fun StatusChip(
             imageVector = BevestIcons.forStatus(status),
             contentDescription = null,
             tint = color,
-            modifier = Modifier.size(if (compact) 13.dp else 15.dp),
+            modifier = Modifier.size(if (compact) IconSize.inline else IconSize.small),
         )
         Text(
-            text = status.name,
+            text = status.label(),
             style = MaterialTheme.typography.labelMedium,
             color = color,
         )
+    }
+}
+
+/**
+ * Generic state badge for things that are not a [SafetyStatus] — a vest's condition, an
+ * alert's lifecycle. Same shape and weight as [StatusChip] so the two read as siblings.
+ */
+@Composable
+fun StatusBadge(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+) {
+    Row(
+        modifier = modifier
+            .clip(BevestShapes.tile)
+            .background(color.copy(alpha = 0.12f))
+            .border(1.dp, color.copy(alpha = 0.30f), BevestShapes.tile)
+            .padding(horizontal = Spacing.sm, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(IconSize.inline))
+        }
+        Text(text, style = MaterialTheme.typography.labelMedium, color = color)
     }
 }
 
@@ -107,7 +139,7 @@ fun ConnectionIndicator(online: Boolean, modifier: Modifier = Modifier) {
     Box(
         modifier
             .size(9.dp)
-            .clip(CircleShape)
+            .clip(BevestShapes.round)
             .background(if (online) palette.normal else palette.offline)
             .clearAndSetSemantics {
                 contentDescription = if (online) "Online" else "Offline"
@@ -173,19 +205,22 @@ fun BatteryIndicator(percent: Int?, modifier: Modifier = Modifier) {
 
 /**
  * The one card surface used everywhere: [surface] fill, a hairline border for definition
- * (which reads in both themes, unlike an alpha-blended fill), a shallow resting shadow,
- * and the standard large radius. Pass [accent] to tint the border for a card that needs
- * to pull the eye (a warning tile, a danger row).
+ * (which reads in both themes, unlike an alpha-blended fill), a shallow resting shadow.
+ *
+ * [shape] defaults to the neutral rounded card. Pass a chamfered shape from
+ * [BevestShapes] for a safety-critical surface — see `Shapes.kt` for why that
+ * distinction is worth keeping. Pass [accent] to tint the border for a card that needs
+ * to pull the eye.
  */
 @Composable
 fun BevestCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     accent: Color? = null,
+    shape: Shape = BevestShapes.card,
     contentPadding: PaddingValues = PaddingValues(Spacing.lg),
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val shape = RoundedCornerShape(Radius.lg)
     Surface(
         modifier = modifier
             .clip(shape)
@@ -219,7 +254,7 @@ fun StatTile(
         accent = accent,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(IconSize.medium))
             Text(
                 value,
                 style = StatStyle,
@@ -236,16 +271,24 @@ fun StatTile(
     }
 }
 
-/** A live sensor reading: icon, label, big tabular value with its unit, status tint. */
+/**
+ * A live sensor reading: icon, label, big tabular value with its unit, status tint.
+ *
+ * Chamfered, because this is a safety readout rather than browsable content. Pass
+ * [trace] to draw the recent history as an ECG line beneath the number — worth doing for
+ * heart rate, where the trend says more than the instantaneous value.
+ */
 @Composable
 fun MetricCard(
     icon: ImageVector,
     label: String,
     value: String,
+    modifier: Modifier = Modifier,
     unit: String? = null,
     accent: Color? = null,
     stale: Boolean = false,
-    modifier: Modifier = Modifier,
+    supporting: String? = null,
+    trace: List<Int>? = null,
 ) {
     val palette = LocalStatusPalette.current
     val tint = when {
@@ -256,6 +299,7 @@ fun MetricCard(
     BevestCard(
         modifier = modifier.fillMaxWidth(),
         accent = if (!stale) accent else null,
+        shape = BevestShapes.status,
         contentPadding = PaddingValues(Spacing.lg),
     ) {
         Row(
@@ -265,7 +309,7 @@ fun MetricCard(
             Box(
                 Modifier
                     .size(44.dp)
-                    .clip(RoundedCornerShape(Radius.md))
+                    .clip(BevestShapes.inner)
                     .background(tint.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
             ) {
@@ -293,13 +337,25 @@ fun MetricCard(
                         )
                     }
                 }
-                if (stale) {
-                    Text(
+                when {
+                    stale -> Text(
                         "Not live",
                         style = MaterialTheme.typography.labelSmall,
                         color = palette.offline,
                     )
+                    supporting != null -> Text(
+                        supporting,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
+            }
+            if (trace != null && !stale) {
+                EcgTrace(
+                    samples = trace,
+                    color = tint,
+                    modifier = Modifier.width(64.dp).height(36.dp),
+                )
             }
         }
     }
@@ -310,9 +366,9 @@ fun MetricCard(
 fun WorkerAvatar(
     name: String,
     photoUrl: String?,
-    status: SafetyStatus? = null,
-    size: androidx.compose.ui.unit.Dp = 48.dp,
     modifier: Modifier = Modifier,
+    status: SafetyStatus? = null,
+    size: Dp = 48.dp,
 ) {
     val palette = LocalStatusPalette.current
     val ring = status?.let { palette.forStatus(it) }
@@ -325,17 +381,17 @@ fun WorkerAvatar(
     Box(
         modifier
             .size(size)
-            .clip(CircleShape)
+            .clip(BevestShapes.round)
             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
-            .then(if (ring != null) Modifier.border(2.dp, ring, CircleShape) else Modifier),
+            .then(if (ring != null) Modifier.border(2.dp, ring, BevestShapes.round) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         if (!photoUrl.isNullOrBlank() && !LocalInspectionMode.current) {
             AsyncImage(
                 model = photoUrl,
                 contentDescription = null,
-                modifier = Modifier.fillMaxSize().clip(CircleShape),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(BevestShapes.round),
+                contentScale = ContentScale.Crop,
             )
         } else {
             Text(
@@ -350,9 +406,14 @@ fun WorkerAvatar(
 // ---------------------------------------------------------------- emergency
 
 /**
- * The single most important element in the app. It is also the only thing that animates:
- * a slow pulse so it is unmissable in peripheral vision. Tapping opens the emergency —
- * no confirmation, ever (plan section 23).
+ * The single most important element in the app.
+ *
+ * It carries every emphasis device the design system has, and it is the only place any
+ * of them appear together: the deepest chamfer, a hazard stripe, a pulsing glyph, and
+ * the emergency color as a full fill. That concentration is deliberate — nothing else
+ * competing for attention means an officer glancing at their phone cannot miss it.
+ *
+ * Tapping opens the emergency. No confirmation, ever (plan section 23).
  */
 @Composable
 fun EmergencyBanner(
@@ -371,7 +432,7 @@ fun EmergencyBanner(
             initialValue = 0.82f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(
-                animation = tween(900),
+                animation = tween(Motion.PULSE),
                 repeatMode = RepeatMode.Reverse,
             ),
             label = "emergencyPulseValue",
@@ -382,55 +443,178 @@ fun EmergencyBanner(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.lg))
+            .clip(BevestShapes.emergency)
             .clickable {
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 onView()
             }
             .semantics(mergeDescendants = true) {
-                contentDescription = "Emergency: $workerName. ${reason.ifBlank { "No safety response" }}. Open."
+                contentDescription =
+                    "Emergency: $workerName. ${reason.ifBlank { "No safety response" }}. Open."
             },
-        shape = RoundedCornerShape(Radius.lg),
+        shape = BevestShapes.emergency,
         color = palette.emergency,
         shadowElevation = Elevation.sheet,
     ) {
-        Row(
-            Modifier.padding(Spacing.lg),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
-        ) {
-            Icon(
-                imageVector = BevestIcons.forStatus(SafetyStatus.EMERGENCY),
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(34.dp).alpha(pulse),
-            )
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    "EMERGENCY",
-                    style = EyebrowStyle,
-                    color = Color.White.copy(alpha = 0.85f),
+        Column {
+            HazardStripe()
+            Row(
+                Modifier.padding(Spacing.lg),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
+            ) {
+                Icon(
+                    imageVector = BevestIcons.forStatus(SafetyStatus.EMERGENCY),
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(34.dp).alpha(pulse),
                 )
-                Text(
-                    workerName,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    reason.ifBlank { "No safety response" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.9f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "EMERGENCY",
+                        style = EyebrowStyle,
+                        color = Color.White.copy(alpha = 0.85f),
+                    )
+                    Text(
+                        workerName,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        reason.ifBlank { "No safety response" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.9f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(IconSize.large),
                 )
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- structure
+
+/**
+ * Section heading, underlined by the reflective band.
+ *
+ * The band is what makes a BeVest screen recognisable at a glance, and it does real work
+ * too: on a long scrolling screen it gives the eye a hard stop between groups that a
+ * bare text heading does not.
+ */
+@Composable
+fun SectionHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    supporting: String? = null,
+    trailing: @Composable (() -> Unit)? = null,
+) {
+    Column(
+        modifier.fillMaxWidth().padding(top = Spacing.sm),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                if (supporting != null) {
+                    Text(
+                        supporting,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            trailing?.invoke()
+        }
+        ReflectiveBand(emphasis = 0.7f, thickness = 2.dp)
+    }
+}
+
+/**
+ * A labelled fact in a detail screen: quiet label above, the value below.
+ *
+ * This replaces the `Text("Severity: ${alert.severity.name}")` pattern that the detail
+ * screens were built with. Separating label from value lets the value take the weight,
+ * so the screen can be skimmed for what changed rather than read line by line.
+ */
+@Composable
+fun DetailRow(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    valueColor: Color? = null,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(vertical = Spacing.sm),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        verticalAlignment = Alignment.Top,
+    ) {
+        if (icon != null) {
             Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = "View emergency",
-                tint = Color.White,
-                modifier = Modifier.size(24.dp),
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(IconSize.small).padding(top = 2.dp),
+            )
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                label.uppercase(),
+                style = EyebrowStyle,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyLarge,
+                color = valueColor ?: MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+/**
+ * A read of the data rather than the data itself — "3 workers above safe heart rate",
+ * "no incidents in 12 days". Analytics screens lead with these and put the chart
+ * underneath, because a number a user has to interpret has not finished its job.
+ */
+@Composable
+fun InsightCard(
+    text: String,
+    modifier: Modifier = Modifier,
+    icon: ImageVector = BevestIcons.Reports,
+    accent: Color? = null,
+) {
+    val tint = accent ?: MaterialTheme.colorScheme.primary
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = BevestShapes.inner,
+        color = tint.copy(alpha = 0.08f),
+    ) {
+        Row(
+            Modifier.padding(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(IconSize.medium))
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
             )
         }
     }
@@ -439,34 +623,29 @@ fun EmergencyBanner(
 // ---------------------------------------------------------------- states
 
 @Composable
-fun SectionHeader(
-    title: String,
-    modifier: Modifier = Modifier,
-    trailing: @Composable (() -> Unit)? = null,
-) {
-    Row(
-        modifier.fillMaxWidth().padding(top = Spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        trailing?.invoke()
-    }
-}
-
-@Composable
 fun LoadingState(modifier: Modifier = Modifier, label: String = "Loading…") {
-    // Kept for compatibility; skeletons are preferred on first load.
     Column(
         modifier = modifier.fillMaxSize().padding(Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.md, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         androidx.compose.material3.CircularProgressIndicator()
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
+/**
+ * An empty state that says what to do next.
+ *
+ * The glyph sits inside a dashed outline rather than a filled circle: the container is
+ * visibly a slot waiting to be filled, which is the actual message. Every caller passes
+ * a [message] naming the specific reason this list is empty, because "No data available"
+ * tells a user nothing they had not already worked out.
+ */
 @Composable
 fun EmptyState(
     title: String,
@@ -483,16 +662,21 @@ fun EmptyState(
     ) {
         Box(
             Modifier
-                .size(72.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .size(76.dp)
+                .clip(BevestShapes.round)
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    shape = BevestShapes.round,
+                )
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 icon,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(34.dp),
+                modifier = Modifier.size(IconSize.display),
             )
         }
         Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
@@ -504,18 +688,26 @@ fun EmptyState(
             modifier = Modifier.widthIn(max = 320.dp),
         )
         if (actionLabel != null && onAction != null) {
-            Button(onClick = onAction, modifier = Modifier.heightIn(min = Spacing.touchTarget)) {
-                Text(actionLabel)
-            }
+            Spacer(Modifier.height(Spacing.xs))
+            PrimaryButton(
+                text = actionLabel,
+                onClick = onAction,
+                icon = BevestIcons.Add,
+                modifier = Modifier.widthIn(max = 280.dp),
+            )
         }
     }
 }
 
+/**
+ * Failure state. Always offers a way forward: retry when the caller can retry, and a
+ * plain description of what failed when it cannot.
+ */
 @Composable
 fun ErrorState(
     message: String,
-    onRetry: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    onRetry: (() -> Unit)? = null,
 ) {
     val palette = LocalStatusPalette.current
     Column(
@@ -525,8 +717,8 @@ fun ErrorState(
     ) {
         Box(
             Modifier
-                .size(72.dp)
-                .clip(CircleShape)
+                .size(76.dp)
+                .clip(BevestShapes.round)
                 .background(palette.danger.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center,
         ) {
@@ -534,7 +726,7 @@ fun ErrorState(
                 BevestIcons.Error,
                 contentDescription = null,
                 tint = palette.danger,
-                modifier = Modifier.size(34.dp),
+                modifier = Modifier.size(IconSize.display),
             )
         }
         Text("Something went wrong", style = MaterialTheme.typography.titleMedium)
@@ -546,14 +738,72 @@ fun ErrorState(
             modifier = Modifier.widthIn(max = 320.dp),
         )
         if (onRetry != null) {
-            Button(
+            Spacer(Modifier.height(Spacing.xs))
+            PrimaryButton(
+                text = "Try again",
                 onClick = onRetry,
-                modifier = Modifier.heightIn(min = Spacing.touchTarget),
-                colors = ButtonDefaults.buttonColors(),
-            ) {
-                Icon(BevestIcons.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text("Try again", modifier = Modifier.padding(start = Spacing.sm))
-            }
+                icon = BevestIcons.Refresh,
+                modifier = Modifier.widthIn(max = 280.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Inline confirmation that something worked, shown in place rather than as a toast that
+ * can be missed. Fades to the normal status color so it reads as reassurance, not alarm.
+ */
+@Composable
+fun SuccessNote(message: String, modifier: Modifier = Modifier) {
+    val palette = LocalStatusPalette.current
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = BevestShapes.inner,
+        color = palette.normal.copy(alpha = 0.10f),
+    ) {
+        Row(
+            Modifier.padding(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            Icon(
+                BevestIcons.forStatus(SafetyStatus.NORMAL),
+                contentDescription = null,
+                tint = palette.normal,
+                modifier = Modifier.size(IconSize.small),
+            )
+            Text(message, style = MaterialTheme.typography.bodySmall, color = palette.normal)
+        }
+    }
+}
+
+/** Inline error, styled the same everywhere it appears. */
+@Composable
+fun ErrorNote(message: String, modifier: Modifier = Modifier) {
+    val palette = LocalStatusPalette.current
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = BevestShapes.inner,
+        color = palette.danger.copy(alpha = 0.10f),
+    ) {
+        Row(
+            Modifier.padding(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            Icon(
+                BevestIcons.Error,
+                contentDescription = null,
+                tint = palette.danger,
+                modifier = Modifier.size(IconSize.small),
+            )
+            Text(
+                message,
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.danger,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

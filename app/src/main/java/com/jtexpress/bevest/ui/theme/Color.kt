@@ -28,6 +28,20 @@ val WarmOnDarkMuted = Color(0xFFCBBFB2)
 val WarmOutlineDark = Color(0xFF57504A)
 val WarmOutlineVariantDark = Color(0xFF3A342F)
 
+// ---- Retroreflective band ----
+// The silver stripe across a hi-vis vest, the app's signature divider. Three stops
+// because a real reflective band is edge / bright core / edge, never a flat fill.
+val BandEdgeLight = Color(0xFFB9B0A5)
+val BandCoreLight = Color(0xFFF3F0EB)
+val BandEdgeDark = Color(0xFF4E4740)
+val BandCoreDark = Color(0xFF8C8479)
+
+// ---- Hazard ----
+// Caution-tape diagonals. Reserved for EMERGENCY only — used anywhere else it stops
+// meaning anything.
+val HazardStripeLight = Color(0xFF2A1410)
+val HazardStripeDark = Color(0xFF120807)
+
 // ---- Safety status tokens (never use raw colors per screen) ----
 val StatusNormalLight = Color(0xFF1F7A46)
 val StatusNormalDark = Color(0xFF57C083)

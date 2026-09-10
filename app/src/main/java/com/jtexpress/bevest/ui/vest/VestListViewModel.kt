@@ -23,16 +23,21 @@ data class VestListState(
     val all: List<Vest> = emptyList(),
     val filter: VestFilter = VestFilter.ALL,
 ) {
-    val visible: List<Vest>
-        get() = all.filter {
-            when (filter) {
-                VestFilter.ALL -> true
-                VestFilter.ACTIVE -> it.status == VestStatus.ACTIVE || it.status == VestStatus.ASSIGNED
-                VestFilter.AVAILABLE -> it.status == VestStatus.AVAILABLE
-                VestFilter.OFFLINE -> it.status == VestStatus.OFFLINE
-                VestFilter.MAINTENANCE -> it.status == VestStatus.MAINTENANCE
-            }
-        }.sortedBy { it.vestId }
+    val visible: List<Vest> get() = all.filter { matches(it, filter) }.sortedBy { it.vestId }
+
+    /**
+     * How many vests a filter would show. Surfaced on the chips so an officer can see
+     * that three vests need charging without switching views to find out.
+     */
+    fun countFor(f: VestFilter): Int = all.count { matches(it, f) }
+
+    private fun matches(vest: Vest, f: VestFilter): Boolean = when (f) {
+        VestFilter.ALL -> true
+        VestFilter.ACTIVE -> vest.status == VestStatus.ACTIVE || vest.status == VestStatus.ASSIGNED
+        VestFilter.AVAILABLE -> vest.status == VestStatus.AVAILABLE
+        VestFilter.OFFLINE -> vest.status == VestStatus.OFFLINE
+        VestFilter.MAINTENANCE -> vest.status == VestStatus.MAINTENANCE
+    }
 }
 
 @HiltViewModel

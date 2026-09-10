@@ -1,32 +1,17 @@
 package com.jtexpress.bevest.ui.sso
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -36,11 +21,21 @@ import com.jtexpress.bevest.domain.model.UserRole
 import com.jtexpress.bevest.ui.common.BevestScaffold
 import com.jtexpress.bevest.ui.common.EmptyState
 import com.jtexpress.bevest.ui.common.ErrorState
+import com.jtexpress.bevest.ui.common.FilterOption
+import com.jtexpress.bevest.ui.common.FilterRow
 import com.jtexpress.bevest.ui.common.ListSkeleton
+import com.jtexpress.bevest.ui.common.SearchBar
 import com.jtexpress.bevest.ui.theme.BevestIcons
-import com.jtexpress.bevest.ui.theme.Radius
+import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Spacing
 
+/**
+ * The roster.
+ *
+ * Search and filters both narrow the same list, so the empty state has to say which of
+ * the two is responsible — being told "no workers here" when the real answer is "your
+ * search matched nothing" sends the user looking for a problem that isn't there.
+ */
 @Composable
 fun WorkerDirectoryScreen(
     user: User,
@@ -53,12 +48,14 @@ fun WorkerDirectoryScreen(
         else viewModel.start(contractorId = user.contractorId ?: user.uid, siteId = null)
     }
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    val palette = LocalStatusPalette.current
+    val canAdd = user.role == UserRole.SSO
 
     BevestScaffold(
         title = "Workers",
         subtitle = if (user.role == UserRole.SSO) user.siteId else null,
         floatingActionButton = {
-            if (user.role == UserRole.SSO) {
+            if (canAdd) {
                 ExtendedFloatingActionButton(
                     onClick = onAddWorker,
                     icon = { Icon(BevestIcons.Add, contentDescription = null) },
@@ -79,64 +76,59 @@ fun WorkerDirectoryScreen(
                 modifier = Modifier.padding(padding),
             )
 
+            state.all.isEmpty() -> EmptyState(
+                title = "No workers yet",
+                message = if (canAdd) {
+                    "Register your first worker, then pair them with a vest to start monitoring."
+                } else {
+                    "No workers have been registered on this site yet."
+                },
+                icon = BevestIcons.NoWorkers,
+                actionLabel = if (canAdd) "Add worker" else null,
+                onAction = if (canAdd) onAddWorker else null,
+                modifier = Modifier.padding(padding),
+            )
+
             else -> Column(Modifier.fillMaxSize().padding(padding)) {
-                OutlinedTextField(
-                    value = state.query,
-                    onValueChange = viewModel::onQuery,
-                    placeholder = { Text("Search name or worker ID") },
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (state.query.isNotEmpty()) {
-                            IconButton(onClick = { viewModel.onQuery("") }) {
-                                Icon(Icons.Outlined.Close, contentDescription = "Clear search")
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(Radius.md),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.gutter, vertical = Spacing.sm),
+                SearchBar(
+                    query = state.query,
+                    onQueryChange = viewModel::onQuery,
+                    placeholder = "Search name or worker ID",
+                    modifier = Modifier.padding(
+                        horizontal = Spacing.gutter,
+                        vertical = Spacing.sm,
+                    ),
                 )
 
-                Row(
-                    Modifier
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = Spacing.gutter, vertical = Spacing.xs),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                ) {
-                    WorkerFilter.entries.forEach { f ->
-                        val count = state.countFor(f)
-                        FilterChip(
-                            selected = state.filter == f,
-                            onClick = { viewModel.onFilter(f) },
-                            label = {
-                                Text(
-                                    buildString {
-                                        append(f.name.lowercase().replaceFirstChar { it.uppercase() })
-                                        if (count > 0) append("  $count")
-                                    },
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
+                FilterRow(
+                    options = WorkerFilter.entries.map { f ->
+                        FilterOption(
+                            key = f.name,
+                            label = f.label(),
+                            count = state.countFor(f),
+                            accent = when (f) {
+                                WorkerFilter.WARNING -> palette.warning
+                                WorkerFilter.DANGER -> palette.danger
+                                WorkerFilter.OFFLINE -> palette.offline
+                                else -> null
                             },
-                            shape = RoundedCornerShape(Radius.pill),
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            ),
                         )
-                    }
-                }
+                    },
+                    selectedKey = state.filter.name,
+                    onSelect = { viewModel.onFilter(WorkerFilter.valueOf(it)) },
+                )
 
                 if (state.visible.isEmpty()) {
+                    val searching = state.query.isNotBlank()
                     EmptyState(
-                        title = if (state.query.isNotBlank()) "No matches" else "No workers here",
-                        message = if (state.query.isNotBlank()) {
-                            "Nothing matches \"${state.query}\". Try a different name or ID."
+                        title = if (searching) "No matches" else "Nothing in this view",
+                        message = if (searching) {
+                            "Nothing matches \"${state.query}\". Try a different name or ID, " +
+                                "or clear the filter."
                         } else {
-                            "No workers have this status right now."
+                            "No worker currently has this status."
                         },
-                        icon = if (state.query.isNotBlank()) BevestIcons.NoResults else BevestIcons.NoWorkers,
+                        icon = if (searching) BevestIcons.NoResults else BevestIcons.NoWorkers,
                     )
                 } else {
                     LazyColumn(
@@ -157,4 +149,14 @@ fun WorkerDirectoryScreen(
             }
         }
     }
+}
+
+/** Filter names as an officer would say them, not as the enum spells them. */
+private fun WorkerFilter.label(): String = when (this) {
+    WorkerFilter.ALL -> "All"
+    WorkerFilter.ACTIVE -> "On site"
+    WorkerFilter.WARNING -> "Warning"
+    WorkerFilter.DANGER -> "Danger"
+    WorkerFilter.OFFLINE -> "Offline"
+    WorkerFilter.UNASSIGNED -> "No vest"
 }

@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,22 +56,21 @@ import com.jtexpress.bevest.domain.model.UserRole
 import com.jtexpress.bevest.ui.common.BevestScaffold
 import com.jtexpress.bevest.ui.common.ConfirmationDialog
 import com.jtexpress.bevest.ui.common.DetailSkeleton
+import com.jtexpress.bevest.ui.common.ErrorNote
 import com.jtexpress.bevest.ui.common.FormField
+import com.jtexpress.bevest.ui.common.FormSection
 import com.jtexpress.bevest.ui.common.FormSkeleton
+import com.jtexpress.bevest.ui.common.PrimaryButton
 import com.jtexpress.bevest.ui.common.WorkerAvatar
+import com.jtexpress.bevest.ui.common.label
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.EyebrowStyle
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Radius
 import com.jtexpress.bevest.ui.theme.Spacing
 
-/** Human-readable role name — enum constants are not user-facing copy. */
-private fun UserRole.label(): String = when (this) {
-    UserRole.ADMIN -> "Administrator"
-    UserRole.CONTRACTOR -> "Contractor"
-    UserRole.SSO -> "Site Safety Officer"
-    UserRole.UNKNOWN -> "No role assigned"
-}
+// Role names come from the shared `Labels.kt`, alongside every other enum's user-facing
+// copy, so the app never has two spellings for the same thing.
 
 @Composable
 fun ProfileScreen(
@@ -377,27 +377,38 @@ fun EditProfileScreen(
                     .padding(horizontal = Spacing.gutter, vertical = Spacing.lg),
                 verticalArrangement = Arrangement.spacedBy(Spacing.lg),
             ) {
-                FormField(state.firstName, viewModel::onFirstName, "First name", state.firstNameError)
-                FormField(state.lastName, viewModel::onLastName, "Last name", state.lastNameError)
-                FormField(
-                    state.phone,
-                    viewModel::onPhone,
-                    "Phone number",
-                    state.phoneError,
-                    keyboardType = KeyboardType.Phone,
-                )
-                state.formError?.let { FormError(it) }
-                Button(
-                    onClick = viewModel::save,
-                    enabled = !state.submitting,
-                    shape = RoundedCornerShape(Radius.md),
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-                ) {
-                    Text(
-                        if (state.submitting) "Saving…" else "Save changes",
-                        style = MaterialTheme.typography.labelLarge,
+                FormSection(title = "Your details") {
+                    FormField(
+                        state.firstName,
+                        viewModel::onFirstName,
+                        "First name",
+                        error = state.firstNameError,
+                        required = true,
+                    )
+                    FormField(
+                        state.lastName,
+                        viewModel::onLastName,
+                        "Last name",
+                        error = state.lastNameError,
+                        required = true,
+                    )
+                    FormField(
+                        state.phone,
+                        viewModel::onPhone,
+                        "Phone number",
+                        error = state.phoneError,
+                        keyboardType = KeyboardType.Phone,
+                        imeAction = ImeAction.Done,
+                        onImeAction = viewModel::save,
                     )
                 }
+                state.formError?.let { ErrorNote(it) }
+                PrimaryButton(
+                    text = "Save changes",
+                    onClick = viewModel::save,
+                    loading = state.submitting,
+                    loadingText = "Saving…",
+                )
                 Text(
                     "Your email and role are managed by your administrator.",
                     style = MaterialTheme.typography.bodySmall,
@@ -427,51 +438,49 @@ fun ChangePasswordScreen(
                 .padding(horizontal = Spacing.gutter, vertical = Spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Spacing.lg),
         ) {
-            FormField(state.current, viewModel::onCurrent, "Current password", state.currentError, isPassword = true)
-            FormField(state.next, viewModel::onNext, "New password", state.nextError, isPassword = true)
-            FormField(state.confirm, viewModel::onConfirm, "Confirm new password", state.confirmError, isPassword = true)
-            Text(
-                "Use at least 6 characters.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            state.formError?.let { FormError(it) }
-            Button(
-                onClick = viewModel::submit,
-                enabled = !state.submitting,
-                shape = RoundedCornerShape(Radius.md),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-            ) {
-                Text(
-                    if (state.submitting) "Updating…" else "Update password",
-                    style = MaterialTheme.typography.labelLarge,
+            FormSection(title = "Confirm it's you") {
+                FormField(
+                    state.current,
+                    viewModel::onCurrent,
+                    "Current password",
+                    error = state.currentError,
+                    isPassword = true,
+                    required = true,
                 )
             }
+            FormSection(title = "New password") {
+                FormField(
+                    state.next,
+                    viewModel::onNext,
+                    "New password",
+                    error = state.nextError,
+                    // The rule belongs beside the field being validated, not in a note
+                    // at the bottom the user reads only after being rejected.
+                    helper = "At least 6 characters",
+                    isPassword = true,
+                    required = true,
+                )
+                FormField(
+                    state.confirm,
+                    viewModel::onConfirm,
+                    "Confirm new password",
+                    error = state.confirmError,
+                    isPassword = true,
+                    required = true,
+                    imeAction = ImeAction.Done,
+                    onImeAction = viewModel::submit,
+                )
+            }
+            state.formError?.let { ErrorNote(it) }
+            PrimaryButton(
+                text = "Update password",
+                onClick = viewModel::submit,
+                loading = state.submitting,
+                loadingText = "Updating…",
+            )
         }
     }
 }
 
-/** Inline form error, styled the same everywhere it appears. */
-@Composable
-private fun FormError(message: String) {
-    val palette = LocalStatusPalette.current
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(Radius.sm),
-        color = palette.danger.copy(alpha = 0.10f),
-    ) {
-        Row(
-            Modifier.padding(Spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-        ) {
-            Icon(
-                BevestIcons.Error,
-                contentDescription = null,
-                tint = palette.danger,
-                modifier = Modifier.size(18.dp),
-            )
-            Text(message, style = MaterialTheme.typography.bodySmall, color = palette.danger)
-        }
-    }
-}
+// Inline form errors now come from the shared `ErrorNote`, so a validation failure looks
+// identical on every form in the app.

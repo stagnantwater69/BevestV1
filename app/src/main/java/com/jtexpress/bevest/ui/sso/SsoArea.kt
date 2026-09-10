@@ -52,7 +52,6 @@ fun SsoArea(
                 onOpenWorker = { id -> navController.navigate(Routes.withArg(Routes.SSO_WORKER_DETAIL, id)) },
                 onOpenAlert = { id -> navController.navigate(Routes.withArg(Routes.SSO_ALERT_DETAIL, id)) },
                 onOpenAlerts = { navController.navigate(Routes.SSO_ALERTS) },
-                onOpenMap = { navController.navigate(Routes.SSO_MAP) },
                 onOpenProfile = { navController.navigate(Routes.PROFILE) },
                 onOpenSimulator = { navController.navigate(Routes.SIMULATION) },
             )

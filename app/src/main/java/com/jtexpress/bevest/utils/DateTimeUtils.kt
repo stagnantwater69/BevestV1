@@ -1,6 +1,7 @@
 package com.jtexpress.bevest.utils
 
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -9,6 +10,7 @@ object DateTimeUtils {
 
     private val dateTime = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault())
     private val dateOnly = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
+    private val timeOnly = SimpleDateFormat("HH:mm", Locale.getDefault())
     private val monthKeyFmt = SimpleDateFormat("yyyy-MM", Locale.US)
     private val monthLabelFmt = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
 
@@ -25,6 +27,35 @@ object DateTimeUtils {
     } catch (e: Exception) {
         key
     }
+
+    /**
+     * A heading for a day's worth of records: "Today", "Yesterday", or the date.
+     *
+     * Grouping a history list by this rather than printing a full timestamp on every row
+     * lets the reader see *when* a run of alerts happened from the heading, and keeps
+     * the rows themselves down to the time of day.
+     */
+    fun dayLabel(millis: Long?, now: Long = System.currentTimeMillis()): String {
+        if (millis == null || millis <= 0) return "Unknown date"
+        val startOfToday = startOfDay(now)
+        return when {
+            millis >= startOfToday -> "Today"
+            millis >= startOfToday - TimeUnit.DAYS.toMillis(1) -> "Yesterday"
+            else -> dateOnly.format(Date(millis))
+        }
+    }
+
+    /** Time of day only — pairs with [dayLabel] in a grouped list. */
+    fun timeOfDay(millis: Long?): String =
+        if (millis == null || millis <= 0) "—" else timeOnly.format(Date(millis))
+
+    private fun startOfDay(millis: Long): Long = Calendar.getInstance().apply {
+        timeInMillis = millis
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
 
     /** "just now", "2m ago", "1h 4m ago", "3d ago" (plan section 21). */
     fun relativeAge(millis: Long?, now: Long = System.currentTimeMillis()): String {

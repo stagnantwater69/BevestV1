@@ -43,3 +43,31 @@ val DarkStatusPalette = StatusPalette(
 )
 
 val LocalStatusPalette = staticCompositionLocalOf { LightStatusPalette }
+
+/**
+ * Colors for the app's signature devices, kept apart from [StatusPalette] because they
+ * carry brand meaning rather than safety meaning. See `Insignia.kt` for how they're used.
+ */
+@Immutable
+data class BrandPalette(
+    /** Outer stops of the retroreflective band. */
+    val bandEdge: Color,
+    /** Bright core of the band — the part that catches a headlight. */
+    val bandCore: Color,
+    /** Dark diagonal of hazard tape. Pairs with the emergency color. */
+    val hazard: Color,
+)
+
+val LightBrandPalette = BrandPalette(
+    bandEdge = BandEdgeLight,
+    bandCore = BandCoreLight,
+    hazard = HazardStripeLight,
+)
+
+val DarkBrandPalette = BrandPalette(
+    bandEdge = BandEdgeDark,
+    bandCore = BandCoreDark,
+    hazard = HazardStripeDark,
+)
+
+val LocalBrandPalette = staticCompositionLocalOf { LightBrandPalette }

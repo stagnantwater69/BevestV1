@@ -48,7 +48,42 @@ data class ContractorDashboardState(
     val safetyScore: Int = 100,
     val trends: List<MonthlyReport> = emptyList(),
     val recentIncidents: List<Incident> = emptyList(),
-)
+) {
+    /**
+     * The one sentence worth putting above the charts.
+     *
+     * A contractor opening this screen wants to know whether anything changed, not to
+     * re-derive it from a donut. Working the comparison out here means the wording is
+     * testable and the screen stays presentation-only.
+     */
+    val incidentInsight: String
+        get() {
+            val current = trends.lastOrNull()?.totalIncidents
+            val previous = trends.dropLast(1).lastOrNull()?.totalIncidents
+            return when {
+                trends.isEmpty() -> "Not enough history yet to show a trend."
+                current == null || previous == null ->
+                    "$monthlyIncidents ${incidentWord(monthlyIncidents)} in the last 30 days."
+                current == previous ->
+                    "Level with last month at $current ${incidentWord(current)}."
+                current < previous ->
+                    "Down from $previous to $current ${incidentWord(current)} since last month."
+                else ->
+                    "Up from $previous to $current ${incidentWord(current)} since last month."
+            }
+        }
+
+    val statusInsight: String
+        get() = when {
+            activeWorkers == 0 -> "No workers are being monitored right now."
+            danger > 0 -> "$danger of $activeWorkers monitored ${workerWord(danger)} at a dangerous level."
+            warning > 0 -> "$warning of $activeWorkers monitored ${workerWord(warning)} above a warning threshold."
+            else -> "All $activeWorkers monitored workers are within safe limits."
+        }
+
+    private fun incidentWord(n: Int) = if (n == 1) "incident" else "incidents"
+    private fun workerWord(n: Int) = if (n == 1) "worker is" else "workers are"
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel

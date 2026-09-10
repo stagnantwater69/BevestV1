@@ -16,7 +16,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.DeviceThermostat
-import androidx.compose.material.icons.outlined.DirectionsRun
+import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.outlined.Engineering
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Favorite
@@ -62,7 +62,7 @@ object BevestIcons {
     // Sensors
     val HeartRate: ImageVector = Icons.Outlined.Favorite
     val Temperature: ImageVector = Icons.Outlined.DeviceThermostat
-    val Motion: ImageVector = Icons.Outlined.DirectionsRun
+    val Motion: ImageVector = Icons.AutoMirrored.Outlined.DirectionsRun
     val Location: ImageVector = Icons.Outlined.LocationOn
     val Battery: ImageVector = Icons.Outlined.BatteryFull
     val BatteryLow: ImageVector = Icons.Outlined.BatteryAlert
@@ -96,7 +96,7 @@ object BevestIcons {
     }
 
     fun forMotion(state: MotionState): ImageVector = when (state) {
-        MotionState.MOVING -> Icons.Outlined.DirectionsRun
+        MotionState.MOVING -> Icons.AutoMirrored.Outlined.DirectionsRun
         MotionState.FALL_DETECTED -> Icons.Filled.Warning
         MotionState.INACTIVE -> Icons.Outlined.Timer
         else -> Icons.Outlined.Sensors

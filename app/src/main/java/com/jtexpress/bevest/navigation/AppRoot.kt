@@ -18,12 +18,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -43,6 +41,8 @@ import com.jtexpress.bevest.ui.admin.AdminArea
 import com.jtexpress.bevest.ui.auth.ForgotPasswordScreen
 import com.jtexpress.bevest.ui.auth.LoginScreen
 import com.jtexpress.bevest.ui.contractor.ContractorArea
+import com.jtexpress.bevest.ui.common.ReflectiveBand
+import com.jtexpress.bevest.ui.common.SecondaryButton
 import com.jtexpress.bevest.ui.sso.SsoArea
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.EyebrowStyle
@@ -180,6 +180,13 @@ private fun BrandedSplash() {
     }
 }
 
+/**
+ * A dead end the user cannot navigate out of — a disabled account, a missing role.
+ *
+ * Framed with the reflective band above and below the message so that even the screen
+ * telling someone they cannot get in still looks like BeVest, and always offers the one
+ * action that is available rather than leaving them stuck.
+ */
 @Composable
 private fun BlockedScreen(title: String, message: String, onSignOut: () -> Unit) {
     val palette = LocalStatusPalette.current
@@ -194,6 +201,7 @@ private fun BlockedScreen(title: String, message: String, onSignOut: () -> Unit)
             tint = palette.warning,
             modifier = Modifier.size(52.dp),
         )
+        ReflectiveBand(thickness = 2.dp, emphasis = 0.8f, modifier = Modifier.widthIn(max = 300.dp))
         Text("BEVEST", style = EyebrowStyle, color = MaterialTheme.colorScheme.primary)
         Text(
             title,
@@ -206,12 +214,10 @@ private fun BlockedScreen(title: String, message: String, onSignOut: () -> Unit)
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        OutlinedButton(
+        SecondaryButton(
+            text = "Sign out",
             onClick = onSignOut,
-            shape = RoundedCornerShape(Radius.md),
-            modifier = Modifier.heightIn(min = Spacing.touchTarget).padding(top = Spacing.sm),
-        ) {
-            Text("Sign out")
-        }
+            modifier = Modifier.widthIn(max = 260.dp).padding(top = Spacing.sm),
+        )
     }
 }
