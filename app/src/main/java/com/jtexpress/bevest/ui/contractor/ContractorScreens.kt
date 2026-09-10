@@ -29,6 +29,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,6 +52,8 @@ import com.jtexpress.bevest.navigation.Routes
 import com.jtexpress.bevest.ui.common.BarDatum
 import com.jtexpress.bevest.ui.common.BevestCard
 import com.jtexpress.bevest.ui.common.BevestScaffold
+import com.jtexpress.bevest.ui.common.ConfirmationDialog
+import com.jtexpress.bevest.ui.common.DangerButton
 import com.jtexpress.bevest.ui.common.DashboardSkeleton
 import com.jtexpress.bevest.ui.common.EmptyState
 import com.jtexpress.bevest.ui.common.ErrorNote
@@ -252,6 +258,9 @@ fun ContractorSsosScreen(
     LaunchedEffect(user.uid) { viewModel.start(contractorId(user)) }
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val palette = LocalStatusPalette.current
+    // Disabling an officer cuts off the person monitoring a live site, so it is
+    // confirmed rather than fired straight from the list row.
+    var pendingDisable by remember { mutableStateOf<User?>(null) }
 
     BevestScaffold(
         title = "Site Safety Officers",
@@ -317,7 +326,7 @@ fun ContractorSsosScreen(
                                     )
                                 },
                                 action = if (sso.active) {
-                                    { viewModel.disable(sso.uid) }
+                                    { pendingDisable = sso }
                                 } else {
                                     null
                                 },
@@ -328,6 +337,21 @@ fun ContractorSsosScreen(
                 }
             }
         }
+    }
+
+    pendingDisable?.let { sso ->
+        ConfirmationDialog(
+            title = "Disable this officer?",
+            message = "${sso.fullName.ifBlank { sso.email }} will lose access on their " +
+                "next app open and will stop receiving safety alerts for their site. " +
+                "Their records are kept.",
+            confirmLabel = "Disable access",
+            onConfirm = {
+                pendingDisable = null
+                viewModel.disable(sso.uid)
+            },
+            onDismiss = { pendingDisable = null },
+        )
     }
 }
 
@@ -406,7 +430,10 @@ fun PersonRow(
             }
             if (action != null) {
                 Spacer(Modifier.height(Spacing.md))
-                SecondaryButton(text = actionLabel, onClick = action)
+                // The only thing this slot is ever used for is revoking someone's
+                // access, so it gets the danger treatment rather than reading as a
+                // neutral option in brand orange.
+                DangerButton(text = actionLabel, onClick = action)
             }
         }
     }

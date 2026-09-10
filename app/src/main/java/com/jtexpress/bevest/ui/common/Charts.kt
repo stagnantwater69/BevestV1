@@ -34,6 +34,7 @@ import com.jtexpress.bevest.ui.theme.EyebrowStyle
 import com.jtexpress.bevest.ui.theme.Motion
 import com.jtexpress.bevest.ui.theme.Spacing
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -47,6 +48,9 @@ import kotlin.math.roundToInt
  */
 
 data class BarDatum(val label: String, val value: Float)
+
+/** Widest a single bar is allowed to be, so a one- or two-point series still reads. */
+private val MAX_BAR_WIDTH = 44.dp
 
 /**
  * A trend over time.
@@ -111,10 +115,18 @@ fun TrendBars(
                             .weight(1f, fill = true),
                     ) {
                         val barHeight = (size.height * fraction).coerceAtLeast(2f)
+                        // Cap the width and centre it. A short series would otherwise
+                        // stretch each bar across its whole share of the row — one data
+                        // point rendered as a full-width slab, which reads as a block of
+                        // color rather than as a chart.
+                        val barWidth = min(size.width, MAX_BAR_WIDTH.toPx())
                         drawRoundRect(
                             color = if (latest) accent else muted,
-                            topLeft = Offset(0f, size.height - barHeight),
-                            size = Size(size.width, barHeight),
+                            topLeft = Offset(
+                                (size.width - barWidth) / 2f,
+                                size.height - barHeight,
+                            ),
+                            size = Size(barWidth, barHeight),
                             cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
                         )
                     }

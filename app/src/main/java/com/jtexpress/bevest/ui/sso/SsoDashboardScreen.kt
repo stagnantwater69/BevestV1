@@ -264,11 +264,22 @@ fun WorkerLiveRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                ) {
+                    // The vitals are measured first at their natural width and the ID
+                    // takes what is left, ellipsising if it must. Without the weight a
+                    // long worker ID starves the vitals instead: they get squeezed to a
+                    // few pixels, wrap one character per line, and blow the row's height
+                    // out while showing nothing.
                     Text(
                         live.worker.workerId,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
                     live.reading?.heartRate?.let { hr ->
                         VitalInline(BevestIcons.HeartRate, "$hr")
@@ -303,6 +314,10 @@ private fun VitalInline(
             value,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // A vital is short and must never wrap; if space runs out it should be
+            // clipped as a unit rather than stacked one character per line.
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }
