@@ -6,6 +6,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -18,9 +19,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.ui.theme.BevestIcons
@@ -124,14 +127,31 @@ fun SiteStatusPanel(
 
             ReflectiveBand(thickness = 2.dp, emphasis = 0.8f)
 
-            Row(
+            // Four columns across a phone stops working once the user scales text up:
+            // at 2x, "ON SITE" and "WARNING" collide and wrap mid-word. Past a threshold
+            // the strip reflows to two rows of two, which holds all the way to the
+            // largest accessibility size. Keyed off fontScale because that is the actual
+            // cause, rather than guessing from screen width.
+            val wide = LocalDensity.current.fontScale < 1.5f
+            Column(
                 Modifier
                     .fillMaxWidth()
                     .padding(vertical = Spacing.md, horizontal = Spacing.sm),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
-                counts.forEach { count ->
-                    CountFigure(count, Modifier.weight(1f))
+                counts.chunked(if (wide) 4 else 2).forEach { row ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    ) {
+                        row.forEach { count ->
+                            CountFigure(count, Modifier.weight(1f))
+                        }
+                        // Keep a short final row aligned with the one above it.
+                        repeat((if (wide) 4 else 2) - row.size) {
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
                 }
             }
         }
@@ -160,6 +180,10 @@ private fun CountFigure(count: SiteCount, modifier: Modifier = Modifier) {
             style = EyebrowStyle,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
+            // Two lines so a long label wraps between words instead of being cut, and
+            // ellipsis rather than a mid-word break if it still does not fit.
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
