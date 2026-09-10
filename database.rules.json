@@ -7,20 +7,27 @@
       "$workerId": {
         ".read": "auth != null",
 
-        // RTDB rules cannot read Firestore, where user roles live, so we cannot
-        // check `role == 'SSO'` here. The IoT hardware will write with a device
-        // token (`auth.token.device == true`); until then, any signed-in user of
-        // this internal app may write. Production should mint an SSO custom claim
-        // and tighten this to `auth.token.role == 'SSO' || auth.token.device`.
-        ".write": "auth != null",
-        ".validate": "newData.hasChildren(['timestamp'])"
+        // Sensor fields: only the vest firmware (custom claim device == true) or an
+        // SSO/Admin (role claim set by the syncUserClaims function) may write the
+        // node. This covers the firmware, the in-app IoT simulator (run as an SSO),
+        // and the SSO tools — and blocks every other signed-in account.
+        ".write": "auth != null && (auth.token.device == true || auth.token.role == 'SSO' || auth.token.role == 'ADMIN')",
+        ".validate": "newData.hasChildren(['timestamp'])",
+
+        "safetyResponse": {
+          // The handshake target. Any signed-in user may set it (an SSO initiating a
+          // check), in addition to the vest and the cloud engine.
+          ".write": "auth != null",
+          ".validate": "newData.isString()"
+        }
       }
     },
 
     "vestsLive": {
       "$vestId": {
         ".read": "auth != null",
-        ".write": "auth != null && auth.token.device == true"
+        ".write": "auth != null && auth.token.device == true",
+        ".validate": "newData.hasChildren(['battery', 'lastSeen'])"
       }
     }
   }

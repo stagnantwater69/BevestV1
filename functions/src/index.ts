@@ -34,6 +34,11 @@ initializeApp();
 const db = getFirestore();
 const rtdb = getDatabase();
 
+// Vest telemetry mirror + offline/low-battery alerts
+export { mirrorVestLive, vestHealthSweep } from "./vests";
+// Firestore role -> Auth custom claim (needed by the RTDB rules)
+export { syncUserClaims } from "./claims";
+
 async function thresholds(): Promise<Thresholds> {
   const snap = await db.doc("settings/thresholds").get();
   if (!snap.exists) return DEFAULT_THRESHOLDS;
@@ -50,6 +55,56 @@ async function workerContext(workerId: string) {
     contractorId: (data.contractorId as string) ?? "",
     currentStatus: (data.currentStatus as string) ?? "OFFLINE",
   };
+}
+
+/**
+ * Create exactly one incident + one ACTIVE alert for an emergency. Idempotent on
+ * `incidentId`. `notifyIncident` picks up the new incident doc and sends the FCM.
+ */
+async function openIncident(p: {
+  incidentId: string;
+  workerId: string;
+  vestId?: string;
+  siteId?: string;
+  contractorId?: string;
+  type: "NO_SAFETY_RESPONSE" | "EMERGENCY_REQUEST";
+  heartRate?: number | null;
+  temperature?: number | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  message: string;
+  now: number;
+}): Promise<void> {
+  const incidentRef = db.doc(`incidents/${p.incidentId}`);
+  if ((await incidentRef.get()).exists) return;
+
+  const common = {
+    workerId: p.workerId,
+    vestId: p.vestId ?? "",
+    siteId: p.siteId ?? "",
+    contractorId: p.contractorId ?? "",
+    type: p.type,
+    severity: "EMERGENCY" as const,
+  };
+
+  await incidentRef.set({
+    ...common,
+    heartRate: p.heartRate ?? null,
+    temperature: p.temperature ?? null,
+    latitude: p.latitude ?? null,
+    longitude: p.longitude ?? null,
+    createdAt: p.now,
+    outcome: null,
+    resolutionNotes: null,
+  });
+  const alertRef = await db.collection("alerts").add({
+    ...common,
+    status: "ACTIVE",
+    message: p.message,
+    createdAt: p.now,
+    incidentId: p.incidentId,
+  });
+  await incidentRef.update({ alertId: alertRef.id });
 }
 
 /** Step 1: react to every new reading. */
@@ -90,12 +145,67 @@ export const evaluateReading = onValueWritten(
           acknowledgedAt: null,
           heartRate: reading.heartRate ?? null,
           temperature: reading.temperature ?? null,
+          latitude: reading.latitude ?? null,
+          longitude: reading.longitude ?? null,
         });
-      } else if (status === "DANGER" && existing.data()?.level === "WARNING") {
-        await windowRef.update({ level: "DANGER", dangerAt: now });
+      } else {
+        // Keep last-known vitals + location fresh so an incident born from this
+        // window carries where the worker actually was.
+        const patch: Record<string, unknown> = {
+          heartRate: reading.heartRate ?? existing.data()?.heartRate ?? null,
+          temperature: reading.temperature ?? existing.data()?.temperature ?? null,
+        };
+        if (reading.latitude != null) patch.latitude = reading.latitude;
+        if (reading.longitude != null) patch.longitude = reading.longitude;
+        if (status === "DANGER" && existing.data()?.level === "WARNING") {
+          patch.level = "DANGER";
+          patch.dangerAt = now;
+        }
+        await windowRef.update(patch);
       }
       if (reading.safetyResponse === "ACKNOWLEDGED") {
         await windowRef.update({ acknowledgedAt: now });
+      }
+    } else if (status === "EMERGENCY" && reading.safetyResponse === "EMERGENCY_REQUESTED") {
+      // Manual SOS — the worker held the button. (NO_RESPONSE / ESCALATED already
+      // flow through escalate()'s DANGER path, so they're excluded here.)
+      // The currentStatus guard + openIncident's id check keep this to one incident.
+      if (ctx.currentStatus !== "EMERGENCY") {
+        const existing = await windowRef.get();
+        const startedAt = (existing.data()?.startedAt as number) ?? now;
+        await windowRef.set(
+          {
+            workerId,
+            vestId: ctx.vestId,
+            siteId: ctx.siteId,
+            contractorId: ctx.contractorId,
+            level: "EMERGENCY",
+            reason: "Manual emergency request",
+            startedAt,
+            emergencyAt: now,
+            acknowledgedAt: null,
+            heartRate: reading.heartRate ?? null,
+            temperature: reading.temperature ?? null,
+            latitude: reading.latitude ?? null,
+            longitude: reading.longitude ?? null,
+          },
+          { merge: true }
+        );
+        await db.doc(`workers/${workerId}`).update({ currentStatus: "EMERGENCY" });
+        await openIncident({
+          incidentId: `${workerId}_${startedAt}`,
+          workerId,
+          vestId: ctx.vestId,
+          siteId: ctx.siteId,
+          contractorId: ctx.contractorId,
+          type: "EMERGENCY_REQUEST",
+          heartRate: reading.heartRate ?? null,
+          temperature: reading.temperature ?? null,
+          latitude: reading.latitude ?? null,
+          longitude: reading.longitude ?? null,
+          message: "Manual emergency request",
+          now,
+        });
       }
     } else if (status === "NORMAL") {
       // condition cleared before escalation
@@ -137,39 +247,20 @@ export const escalate = onSchedule("every 1 minutes", async () => {
       await db.doc(`workers/${workerId}`).update({ currentStatus: "EMERGENCY" });
       await rtdb.ref(`liveReadings/${workerId}/safetyResponse`).set("NO_RESPONSE");
 
-      // Create exactly one incident + alert per window.
-      const incidentId = `${workerId}_${w.startedAt}`;
-      const incidentRef = db.doc(`incidents/${incidentId}`);
-      if (!(await incidentRef.get()).exists) {
-        await incidentRef.set({
-          workerId,
-          vestId: w.vestId ?? "",
-          siteId: w.siteId ?? "",
-          contractorId: w.contractorId ?? "",
-          type: "NO_SAFETY_RESPONSE",
-          severity: "EMERGENCY",
-          heartRate: w.heartRate ?? null,
-          temperature: w.temperature ?? null,
-          latitude: null,
-          longitude: null,
-          createdAt: now,
-          outcome: null,
-          resolutionNotes: null,
-        });
-        const alertRef = await db.collection("alerts").add({
-          workerId,
-          vestId: w.vestId ?? "",
-          siteId: w.siteId ?? "",
-          contractorId: w.contractorId ?? "",
-          type: "NO_SAFETY_RESPONSE",
-          severity: "EMERGENCY",
-          status: "ACTIVE",
-          message: w.reason ?? "No safety response",
-          createdAt: now,
-          incidentId,
-        });
-        await incidentRef.update({ alertId: alertRef.id });
-      }
+      await openIncident({
+        incidentId: `${workerId}_${w.startedAt}`,
+        workerId,
+        vestId: w.vestId,
+        siteId: w.siteId,
+        contractorId: w.contractorId,
+        type: "NO_SAFETY_RESPONSE",
+        heartRate: w.heartRate ?? null,
+        temperature: w.temperature ?? null,
+        latitude: w.latitude ?? null,
+        longitude: w.longitude ?? null,
+        message: w.reason ?? "No safety response",
+        now,
+      });
     }
   }
 });

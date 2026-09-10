@@ -1,0 +1,11 @@
+# Wokwi simulator config (VS Code extension).
+#
+# 1. Build first:            pio run
+# 2. Start the simulator:    F1  ->  "Wokwi: Start Simulator"
+#
+# The paths below point at the PlatformIO build output for the `esp32dev` env.
+
+[wokwi]
+version = 1
+firmware = '.pio/build/esp32dev/firmware.bin'
+elf = '.pio/build/esp32dev/firmware.elf'

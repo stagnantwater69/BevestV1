@@ -9,6 +9,7 @@ export interface Thresholds {
   warningDurationSeconds: number;
   responseTimeoutSeconds: number;
   offlineTimeoutSeconds: number;
+  lowBatteryPercent: number;
 }
 
 export const DEFAULT_THRESHOLDS: Thresholds = {
@@ -17,6 +18,7 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
   warningDurationSeconds: 5 * 60,
   responseTimeoutSeconds: 15,
   offlineTimeoutSeconds: 60,
+  lowBatteryPercent: 20,
 };
 
 export interface Reading {
@@ -25,6 +27,9 @@ export interface Reading {
   motionState?: string | null;
   fallDetected?: boolean | null;
   safetyResponse?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  battery?: number | null;
   timestamp?: number | null;
 }
 

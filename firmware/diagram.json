@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "author": "BeVest",
+  "editor": "wokwi",
+  "comment": "Milestone 1 board: ESP32 + safety button + buzzer only. Run with SENSORS_SIMULATED 1. See firmware/README.md -> 'Wokwi' for the full sensor wiring.",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-pushbutton", "id": "btn", "top": 180, "left": -180,
+      "attrs": { "color": "red", "label": "Safety button" } },
+    { "type": "wokwi-buzzer", "id": "bz", "top": 180, "left": 120,
+      "attrs": { "volume": "0.1" } }
+  ],
+  "connections": [
+    [ "esp:D26", "btn:1.l", "purple", [] ],
+    [ "btn:2.l", "esp:GND.1", "black", [] ],
+
+    [ "esp:D25", "bz:1", "orange", [] ],
+    [ "bz:2", "esp:GND.1", "black", [] ]
+  ]
+}
