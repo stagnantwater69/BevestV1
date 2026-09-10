@@ -7,5 +7,9 @@
             android:name=".devgallery.DesignGalleryActivity"
             android:exported="true"
             android:theme="@style/Theme.Bevest" />
+        <activity
+            android:name=".devgallery.RowGalleryActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Bevest" />
     </application>
 </manifest>
