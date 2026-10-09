@@ -626,6 +626,7 @@ body {
 .um-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .um-table th {

@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { FiPlus, FiFilter, FiCalendar, FiEdit2, FiSlash, FiChevronLeft, FiChevronRight, FiCheckCircle, FiLock, FiRefreshCw } from 'react-icons/fi';
+import React, { useState, useEffect } from 'react';
+import { FiPlus, FiFilter, FiCalendar, FiEdit2, FiSlash, FiChevronLeft, FiChevronRight, FiCheckCircle, FiLock, FiRefreshCw, FiSearch } from 'react-icons/fi';
 import { TbHistory } from 'react-icons/tb';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { secondaryAuth, db } from './firebase';
 
 const UserManagement = () => {
@@ -18,12 +18,50 @@ const UserManagement = () => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const users = [
-    { initials: 'JD', name: 'Johnathan Doe', uid: 'U9-9902', role: 'CIVIL ENGINEER', status: 'Active', lastLogin: 'Oct 24, 2026', time: '09:45 AM', color: '#fed7aa' },
-    { initials: 'AM', name: 'Angela Martinez', uid: 'U9-4421', role: 'CIVIL ENGINEER', status: 'Active', lastLogin: 'Oct 23, 2026', time: '14:12 PM', color: '#fed7aa' },
-    { initials: 'SK', name: 'Samuel Kim', uid: 'U8-1002', role: 'CIVIL ENGINEER', status: 'Active', lastLogin: 'Oct 22, 2026', time: '11:05 AM', color: '#fed7aa' },
-    { initials: 'RW', name: 'Robert White', uid: 'U8-3139', role: 'CIVIL ENGINEER', status: 'Active', lastLogin: 'Oct 22, 2026', time: 'Connected', color: '#fed7aa' },
-  ];
+  const [users, setUsers] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const querySnapshot = await getDocs(collection(db, "users"));
+        const usersData = [];
+        querySnapshot.forEach((doc) => {
+          usersData.push({ id: doc.id, ...doc.data() });
+        });
+        setUsers(usersData);
+      } catch (err) {
+        console.error("Error fetching users:", err);
+      }
+    };
+    if (view === 'list') {
+      fetchUsers();
+    }
+  }, [view]);
+
+  const filteredUsers = users
+    .filter(u => {
+      const matchesSearch = `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                            (u.email || '').toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesRole = roleFilter ? (u.role || '').toLowerCase() === roleFilter.toLowerCase() : true;
+      return matchesSearch && matchesRole;
+    })
+    .sort((a, b) => {
+      const nameA = `${a.firstName || ''} ${a.lastName || ''}`.toLowerCase();
+      const nameB = `${b.firstName || ''} ${b.lastName || ''}`.toLowerCase();
+      if (sortOrder === 'asc') {
+        return nameA.localeCompare(nameB);
+      } else {
+        return nameB.localeCompare(nameA);
+      }
+    });
+
+  const totalPages = Math.ceil(filteredUsers.length / itemsPerPage) || 1;
+  const paginatedUsers = filteredUsers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const handleGeneratePassword = () => {
     const randomNum = Math.floor(1000 + Math.random() * 9000);
@@ -201,68 +239,92 @@ const UserManagement = () => {
 
       <div className="um-summary-card">
         <div className="stat-title">ACTIVE USERS</div>
-        <div className="stat-value">10</div>
+        <div className="stat-value">{users.length}</div>
       </div>
 
       <div className="um-table-container">
-        <div className="filter-bar">
-          <button className="filter-btn"><FiFilter /> Filter by Role</button>
-          <button className="filter-btn"><FiCalendar /> Last Login</button>
+        <div className="filter-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="search-bar" style={{ width: '300px', backgroundColor: '#fff', border: '1px solid var(--border-color)', margin: 0 }}>
+            <FiSearch className="search-icon" />
+            <input 
+              type="text" 
+              placeholder="Search users by name or email..." 
+              value={searchQuery}
+              onChange={(e) => {setSearchQuery(e.target.value); setCurrentPage(1);}}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <select className="filter-btn" style={{ appearance: 'auto' }} value={roleFilter} onChange={(e) => {setRoleFilter(e.target.value); setCurrentPage(1);}}>
+              <option value="">All Roles</option>
+              <option value="SSO">Site Safety Officer</option>
+              <option value="Contractor">Contractor</option>
+              <option value="Admin">Admin</option>
+            </select>
+          </div>
         </div>
 
         <table className="um-table">
           <thead>
             <tr>
-              <th>NAME & ID</th>
-              <th>ROLE</th>
-              <th>STATUS</th>
-              <th>LAST LOGIN</th>
-              <th className="align-right">ACTIONS</th>
+              <th onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')} style={{ cursor: 'pointer', userSelect: 'none', width: '30%' }}>
+                NAME {sortOrder === 'asc' ? '↑' : '↓'}
+              </th>
+              <th style={{ width: '20%' }}>ROLE</th>
+              <th style={{ width: '15%' }}>STATUS</th>
+              <th style={{ width: '20%' }}>LAST LOGIN</th>
+              <th className="align-right" style={{ width: '15%' }}>ACTIONS</th>
             </tr>
           </thead>
           <tbody>
-            {users.map((user, idx) => (
-              <tr key={idx}>
-                <td>
-                  <div className="user-cell">
-                    <div className="user-avatar" style={{ backgroundColor: user.color }}>{user.initials}</div>
-                    <div className="user-info">
-                      <span className="user-name">{user.name}</span>
-                      <span className="user-uid">UID: {user.uid}</span>
+            {paginatedUsers.map((user) => {
+              const initials = ((user.firstName?.[0] || '') + (user.lastName?.[0] || '')).toUpperCase() || 'U';
+              return (
+                <tr key={user.id}>
+                  <td>
+                    <div className="user-cell">
+                      <div className="user-avatar" style={{ backgroundColor: '#fed7aa' }}>{initials}</div>
+                      <div className="user-info">
+                        <span className="user-name">{user.firstName} {user.lastName}</span>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td>
-                  <span className="badge role-badge">{user.role}</span>
-                </td>
-                <td>
-                  <div className="status-indicator">
-                    <span className="status-dot active"></span>
-                    {user.status}
-                  </div>
-                </td>
-                <td>
-                  <div className="login-info">
-                    <span className="login-date">{user.lastLogin}</span>
-                    <span className="login-time">{user.time}</span>
-                  </div>
-                </td>
-                <td className="align-right">
-                  <div className="action-buttons">
-                    <button className="action-btn" title="Edit"><FiEdit2 /></button>
-                    <button className="action-btn" title="History"><TbHistory /></button>
-                    <button className="action-btn" title="Disable"><FiSlash /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td>
+                    <span className="badge role-badge">{user.role}</span>
+                  </td>
+                  <td>
+                    <div className="status-indicator">
+                      <span className="status-dot active"></span>
+                      {user.status || 'Active'}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="login-info">
+                      <span className="login-date">--</span>
+                      <span className="login-time"></span>
+                    </div>
+                  </td>
+                  <td className="align-right">
+                    <div className="action-buttons">
+                      <button className="action-btn" title="Edit"><FiEdit2 /></button>
+                      <button className="action-btn" title="History"><TbHistory /></button>
+                      <button className="action-btn" title="Disable"><FiSlash /></button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
 
-        <div className="pagination">
-          <button className="page-btn"><FiChevronLeft /></button>
-          <button className="page-btn active">1</button>
-          <button className="page-btn"><FiChevronRight /></button>
+        <div className="pagination" style={{ justifyContent: 'space-between' }}>
+          <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+            Showing {filteredUsers.length === 0 ? 0 : ((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredUsers.length)} of {filteredUsers.length} users
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button className="page-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => Math.max(1, p - 1))}><FiChevronLeft /></button>
+            <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Page {currentPage} of {totalPages}</span>
+            <button className="page-btn" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}><FiChevronRight /></button>
+          </div>
         </div>
       </div>
     </div>
