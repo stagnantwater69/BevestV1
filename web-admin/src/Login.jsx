@@ -5,7 +5,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import logo from './assets/bevest_logo.png';
 
-const Login = () => {
+const Login = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -35,8 +35,7 @@ const Login = () => {
         } else {
           // Success: User is Admin
           console.log('Admin logged in successfully!');
-          // In a full app, you would redirect to a dashboard here
-          // e.g. navigate('/dashboard');
+          if (onLogin) onLogin(user);
         }
       } else {
         await auth.signOut();
