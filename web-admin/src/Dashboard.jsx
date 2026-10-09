@@ -5,6 +5,7 @@ import {
 } from 'react-icons/fi';
 import logo from './assets/bevest_logo.png';
 import { auth } from './firebase';
+import UserManagement from './UserManagement';
 
 const Dashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('Overview');
@@ -77,77 +78,92 @@ const Dashboard = ({ onLogout }) => {
         </header>
 
         {/* Dashboard Area */}
-        <div className="dashboard-content">
-          <div className="page-header">
-            <h1>System Dashboard</h1>
-            <p>Real-time oversight across all active project sites.</p>
-          </div>
+        {activeTab === 'Overview' && (
+          <div className="dashboard-content">
+            <div className="page-header">
+              <h1>System Dashboard</h1>
+              <p>Real-time oversight across all active project sites.</p>
+            </div>
 
-          {/* Stats Cards */}
-          <div className="stats-grid">
-            <div className="stat-card">
-              <div className="stat-title">TOTAL CONTRACTORS</div>
-              <div className="stat-value">12</div>
+            {/* Stats Cards */}
+            <div className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-title">TOTAL CONTRACTORS</div>
+                <div className="stat-value">12</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-title">SAFETY OFFICERS / WORKERS</div>
+                <div className="stat-value">5 / 143</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-title">TOTAL VESTS</div>
+                <div className="stat-value">150</div>
+              </div>
+              <div className="stat-card highlight">
+                <div className="stat-title">FLEET HEALTH (ACTIVE VESTS)</div>
+                <div className="stat-value">142</div>
+              </div>
             </div>
-            <div className="stat-card">
-              <div className="stat-title">SAFETY OFFICERS / WORKERS</div>
-              <div className="stat-value">5 / 143</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-title">TOTAL VESTS</div>
-              <div className="stat-value">150</div>
-            </div>
-            <div className="stat-card highlight">
-              <div className="stat-title">FLEET HEALTH (ACTIVE VESTS)</div>
-              <div className="stat-value">142</div>
-            </div>
-          </div>
 
-          {/* Recent Activity */}
-          <div className="recent-activity-container">
-            <div className="activity-header">
-              <h2>Recent Admin Activity</h2>
-              <a href="#" className="view-all">View All Logs</a>
+            {/* Recent Activity */}
+            <div className="recent-activity-container">
+              <div className="activity-header">
+                <h2>Recent Admin Activity</h2>
+                <a href="#" className="view-all">View All Logs</a>
+              </div>
+              
+              <table className="activity-table">
+                <thead>
+                  <tr>
+                    <th>ACTIVITY TYPE</th>
+                    <th>DESCRIPTION</th>
+                    <th>TIME</th>
+                    <th>STATUS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <div className="cell-flex"><FiUserPlus style={{color: '#3b82f6'}}/> User Action</div>
+                    </td>
+                    <td>New Contractor Added: Elias Vance</td>
+                    <td>2 mins ago</td>
+                    <td><span className="badge success">SUCCESS</span></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div className="cell-flex"><FiSettings style={{color: '#64748b'}}/> System Config</div>
+                    </td>
+                    <td>Maintenance mode turned on</td>
+                    <td>3 hrs ago</td>
+                    <td><span className="badge config">CONFIG</span></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div className="cell-flex"><FiActivity style={{color: '#f59e0b'}}/> Vest Assigned</div>
+                    </td>
+                    <td>Vest V-1024 assigned to Worker W-89</td>
+                    <td>5 hrs ago</td>
+                    <td><span className="badge success">SUCCESS</span></td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-            
-            <table className="activity-table">
-              <thead>
-                <tr>
-                  <th>ACTIVITY TYPE</th>
-                  <th>DESCRIPTION</th>
-                  <th>TIME</th>
-                  <th>STATUS</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>
-                    <div className="cell-flex"><FiUserPlus style={{color: '#3b82f6'}}/> User Action</div>
-                  </td>
-                  <td>New Contractor Added: Elias Vance</td>
-                  <td>2 mins ago</td>
-                  <td><span className="badge success">SUCCESS</span></td>
-                </tr>
-                <tr>
-                  <td>
-                    <div className="cell-flex"><FiSettings style={{color: '#64748b'}}/> System Config</div>
-                  </td>
-                  <td>Maintenance mode turned on</td>
-                  <td>3 hrs ago</td>
-                  <td><span className="badge config">CONFIG</span></td>
-                </tr>
-                <tr>
-                  <td>
-                    <div className="cell-flex"><FiActivity style={{color: '#f59e0b'}}/> Vest Assigned</div>
-                  </td>
-                  <td>Vest V-1024 assigned to Worker W-89</td>
-                  <td>5 hrs ago</td>
-                  <td><span className="badge success">SUCCESS</span></td>
-                </tr>
-              </tbody>
-            </table>
           </div>
-        </div>
+        )}
+
+        {activeTab === 'User Management' && (
+          <UserManagement />
+        )}
+
+        {activeTab === 'System Management' && (
+          <div className="dashboard-content">
+            <div className="page-header">
+              <h1>System Management</h1>
+              <p>Manage system configurations, backup and compliance settings.</p>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
