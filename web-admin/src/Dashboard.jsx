@@ -103,10 +103,10 @@ const Dashboard = ({ onLogout }) => {
           onClick={() => { setActiveTab('Profile'); setIsMobileMenuOpen(false); }}
           style={{ cursor: 'pointer' }}
         >
-          <div className="avatar">
-            <FiUsers />
+          <div className="avatar" style={{ backgroundColor: '#fce7db', color: '#ea580c', fontWeight: 700, fontSize: '0.875rem' }}>
+            WA
           </div>
-          <span className="username">Admin User</span>
+          <span className="username">Web Admin</span>
         </div>
 
         <nav className="sidebar-nav">
