@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  FiSearch, FiBell, FiHelpCircle, FiSettings, 
-  FiGrid, FiUsers, FiShield, FiUserPlus, FiActivity, FiClock, FiX
+  FiGrid, FiUsers, FiShield, FiUserPlus, FiActivity, FiClock, FiX, FiMenu
 } from 'react-icons/fi';
 import logo from './assets/bevest_logo.png';
 import { auth, db } from './firebase';
@@ -11,6 +10,7 @@ import UserManagement from './UserManagement';
 const Dashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('Overview');
   const [showLogsModal, setShowLogsModal] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [contractorCount, setContractorCount] = useState(0);
   const [officerCount, setOfficerCount] = useState(0);
   const [workerCount, setWorkerCount] = useState(0);
@@ -74,10 +74,22 @@ const Dashboard = ({ onLogout }) => {
   };
 
   return (
-    <div className="dashboard-container">
+    <div className="dashboard-container" style={{ position: 'relative' }}>
+      
+      {/* Mobile Header (Only visible on mobile) */}
+      <div className="mobile-header">
+        <div className="mobile-logo-group">
+          <img src={logo} alt="Bevest" />
+          <h2>BeVest Admin</h2>
+        </div>
+        <button className="burger-btn" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+          {isMobileMenuOpen ? <FiX /> : <FiMenu />}
+        </button>
+      </div>
+
       {/* Sidebar */}
-      <aside className="sidebar">
-        <div className="sidebar-header">
+      <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`}>
+        <div className="sidebar-header desktop-only">
           <img src={logo} alt="Bevest" className="sidebar-logo" />
           <div className="sidebar-title-group">
             <h2>BeVest Admin</h2>
@@ -95,19 +107,19 @@ const Dashboard = ({ onLogout }) => {
         <nav className="sidebar-nav">
           <button 
             className={`nav-item ${activeTab === 'Overview' ? 'active' : ''}`}
-            onClick={() => setActiveTab('Overview')}
+            onClick={() => { setActiveTab('Overview'); setIsMobileMenuOpen(false); }}
           >
             <FiGrid /> Overview
           </button>
           <button 
             className={`nav-item ${activeTab === 'User Management' ? 'active' : ''}`}
-            onClick={() => setActiveTab('User Management')}
+            onClick={() => { setActiveTab('User Management'); setIsMobileMenuOpen(false); }}
           >
             <FiUsers /> User Management
           </button>
           <button 
             className={`nav-item ${activeTab === 'System Management' ? 'active' : ''}`}
-            onClick={() => setActiveTab('System Management')}
+            onClick={() => { setActiveTab('System Management'); setIsMobileMenuOpen(false); }}
           >
             <FiShield /> System Management
           </button>
@@ -122,19 +134,6 @@ const Dashboard = ({ onLogout }) => {
 
       {/* Main Content */}
       <main className="main-content">
-        {/* Topbar */}
-        <header className="topbar">
-          <div className="search-bar">
-            <FiSearch className="search-icon" />
-            <input type="text" placeholder="Search system logs, workers, or vests..." />
-          </div>
-          <div className="topbar-actions">
-            <button className="icon-btn"><FiBell /></button>
-            <button className="icon-btn"><FiHelpCircle /></button>
-            <button className="icon-btn"><FiSettings /></button>
-          </div>
-        </header>
-
         {/* Dashboard Area */}
         {activeTab === 'Overview' && (
           <div className="dashboard-content">
