@@ -1,15 +1,48 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FiSearch, FiBell, FiHelpCircle, FiSettings, 
   FiGrid, FiUsers, FiShield, FiUserPlus, FiActivity, FiClock, FiX
 } from 'react-icons/fi';
 import logo from './assets/bevest_logo.png';
-import { auth } from './firebase';
+import { auth, db } from './firebase';
+import { collection, getDocs } from 'firebase/firestore';
 import UserManagement from './UserManagement';
 
 const Dashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('Overview');
   const [showLogsModal, setShowLogsModal] = useState(false);
+  const [contractorCount, setContractorCount] = useState(0);
+  const [officerCount, setOfficerCount] = useState(0);
+  const [workerCount, setWorkerCount] = useState(0);
+  const [vestCount, setVestCount] = useState(0);
+
+  useEffect(() => {
+    const fetchCounts = async () => {
+      try {
+        const usersSnapshot = await getDocs(collection(db, 'users'));
+        let contractors = 0;
+        let officers = 0;
+        usersSnapshot.forEach((doc) => {
+          const role = doc.data().role;
+          if (role && role.toLowerCase() === 'contractor') contractors++;
+          if (role && role.toUpperCase() === 'SSO') officers++;
+        });
+        setContractorCount(contractors);
+        setOfficerCount(officers);
+
+        const workersSnapshot = await getDocs(collection(db, 'workers'));
+        setWorkerCount(workersSnapshot.size);
+
+        const vestsSnapshot = await getDocs(collection(db, 'vests'));
+        setVestCount(vestsSnapshot.size);
+      } catch (err) {
+        console.error("Error fetching counts:", err);
+      }
+    };
+    if (activeTab === 'Overview') {
+      fetchCounts();
+    }
+  }, [activeTab]);
 
   const activityLogs = [
     { id: 1, action: "Contractor account created for jimz@bevest.com", time: "42d ago" },
@@ -94,23 +127,30 @@ const Dashboard = ({ onLogout }) => {
               <p>Real-time oversight across all active project sites.</p>
             </div>
 
+            {/* Stats Section Header */}
+            <div className="section-header">
+              <h2>People</h2>
+              <p className="section-subtitle">Accounts and monitored workers</p>
+              <hr className="section-divider" />
+            </div>
+
             {/* Stats Cards */}
             <div className="stats-grid">
               <div className="stat-card">
-                <div className="stat-title">TOTAL CONTRACTORS</div>
-                <div className="stat-value">12</div>
+                <div className="stat-title">CONTRACTORS</div>
+                <div className="stat-value">{contractorCount}</div>
               </div>
               <div className="stat-card">
-                <div className="stat-title">SAFETY OFFICERS / WORKERS</div>
-                <div className="stat-value">5 / 143</div>
+                <div className="stat-title">OFFICERS</div>
+                <div className="stat-value">{officerCount}</div>
               </div>
               <div className="stat-card">
-                <div className="stat-title">TOTAL VESTS</div>
-                <div className="stat-value">150</div>
+                <div className="stat-title">WORKERS</div>
+                <div className="stat-value">{workerCount}</div>
               </div>
-              <div className="stat-card highlight">
-                <div className="stat-title">FLEET HEALTH (ACTIVE VESTS)</div>
-                <div className="stat-value">142</div>
+              <div className="stat-card">
+                <div className="stat-title">VESTS</div>
+                <div className="stat-value">{vestCount}</div>
               </div>
             </div>
 
