@@ -15,6 +15,7 @@ const Dashboard = ({ onLogout }) => {
   const [officerCount, setOfficerCount] = useState(0);
   const [workerCount, setWorkerCount] = useState(0);
   const [vestCount, setVestCount] = useState(0);
+  const [vestStats, setVestStats] = useState({ active: 0, offline: 0, other: 0 });
 
   useEffect(() => {
     const fetchCounts = async () => {
@@ -34,7 +35,17 @@ const Dashboard = ({ onLogout }) => {
         setWorkerCount(workersSnapshot.size);
 
         const vestsSnapshot = await getDocs(collection(db, 'vests'));
+        let activeVests = 0;
+        let offlineVests = 0;
+        let otherVests = 0;
+        vestsSnapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data.online === 'true' || data.online === true) activeVests++;
+          else if (data.online === 'false' || data.online === false) offlineVests++;
+          else otherVests++;
+        });
         setVestCount(vestsSnapshot.size);
+        setVestStats({ active: activeVests, offline: offlineVests, other: otherVests });
       } catch (err) {
         console.error("Error fetching counts:", err);
       }
@@ -43,6 +54,11 @@ const Dashboard = ({ onLogout }) => {
       fetchCounts();
     }
   }, [activeTab]);
+
+  const totalVests = vestStats.active + vestStats.offline + vestStats.other;
+  const activePct = totalVests ? Math.round((vestStats.active / totalVests) * 100) : 0;
+  const offlinePct = totalVests ? Math.round((vestStats.offline / totalVests) * 100) : 0;
+  const otherPct = totalVests ? Math.round((vestStats.other / totalVests) * 100) : 0;
 
   const activityLogs = [
     { id: 1, action: "Contractor account created for jimz@bevest.com", time: "42d ago" },
@@ -154,26 +170,85 @@ const Dashboard = ({ onLogout }) => {
               </div>
             </div>
 
-            {/* Recent Activity */}
-            <div className="recent-activity-container">
-              <div className="activity-header">
-                <div>
-                  <h2>Recent Activity</h2>
-                  <p className="activity-subtitle">Administrative actions across the system</p>
-                </div>
-                <button onClick={() => setShowLogsModal(true)} className="view-all" style={{background: 'none', border: 'none', cursor: 'pointer'}}>Full Activity Log</button>
-              </div>
+            {/* Dashboard Columns */}
+            <div className="dashboard-columns">
               
-              <div className="activity-list">
-                {activityLogs.slice(0, 3).map(log => (
-                  <div key={log.id} className="activity-row">
-                    <FiClock className="activity-icon" />
-                    <div className="activity-details">
-                      <p>{log.action}</p>
-                      <span className="activity-time">{log.time}</span>
+              {/* Fleet Health Column */}
+              <div className="fleet-health-column">
+                <div className="section-header">
+                  <h2>Fleet health</h2>
+                  <p className="section-subtitle">How the vest hardware is doing</p>
+                  <hr className="section-divider" />
+                </div>
+                
+                <div className="fleet-card">
+                  {/* Progress Bar */}
+                  <div className="fleet-progress-bar">
+                    <div className="progress-segment active" style={{ width: `${activePct}%` }}></div>
+                    <div className="progress-segment offline" style={{ width: `${offlinePct}%` }}></div>
+                    <div className="progress-segment other" style={{ width: `${otherPct}%` }}></div>
+                  </div>
+                  
+                  {/* Legend/Stats */}
+                  <div className="fleet-stats">
+                    <div className="fleet-stat-row">
+                      <div className="stat-label">
+                        <span className="dot dot-active"></span> Active
+                      </div>
+                      <div className="stat-values">
+                        <span className="count">{vestStats.active}</span>
+                        <span className="pct">{activePct}%</span>
+                      </div>
+                    </div>
+                    <div className="fleet-stat-row">
+                      <div className="stat-label">
+                        <span className="dot dot-offline"></span> Offline
+                      </div>
+                      <div className="stat-values">
+                        <span className="count">{vestStats.offline}</span>
+                        <span className="pct">{offlinePct}%</span>
+                      </div>
+                    </div>
+                    <div className="fleet-stat-row">
+                      <div className="stat-label">
+                        <span className="dot dot-other"></span> Other
+                      </div>
+                      <div className="stat-values">
+                        <span className="count">{vestStats.other}</span>
+                        <span className="pct">{otherPct}%</span>
+                      </div>
                     </div>
                   </div>
-                ))}
+                </div>
+              </div>
+
+              {/* Recent Activity Column */}
+              <div className="recent-activity-column">
+                <div className="section-header">
+                  <h2>Recent Activity</h2>
+                  <p className="section-subtitle">Administrative actions across the system</p>
+                  <hr className="section-divider" />
+                </div>
+                <div className="recent-activity-container">
+                  <div className="activity-header">
+                    <div>
+                      {/* Subtitle moved to section header above */}
+                    </div>
+                    <button onClick={() => setShowLogsModal(true)} className="view-all" style={{background: 'none', border: 'none', cursor: 'pointer'}}>Full Activity Log</button>
+                  </div>
+                  
+                  <div className="activity-list">
+                    {activityLogs.slice(0, 3).map(log => (
+                      <div key={log.id} className="activity-row">
+                        <FiClock className="activity-icon" />
+                        <div className="activity-details">
+                          <p>{log.action}</p>
+                          <span className="activity-time">{log.time}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

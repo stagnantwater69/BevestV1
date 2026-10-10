@@ -1082,3 +1082,99 @@ body {
   border-top: 1px solid var(--border-color);
   margin-top: 0.5rem;
 }
+
+/* Dashboard Columns Layout */
+.dashboard-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin-top: 2rem;
+}
+
+/* Fleet Health Card */
+.fleet-card {
+  background-color: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.fleet-progress-bar {
+  display: flex;
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 2rem;
+  background-color: #f1f5f9;
+}
+
+.progress-segment.active {
+  background-color: #10b981;
+}
+
+.progress-segment.offline {
+  background-color: #94a3b8;
+}
+
+.progress-segment.other {
+  background-color: #d97706;
+}
+
+.fleet-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.fleet-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stat-label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--text-main);
+  font-weight: 500;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dot-active {
+  background-color: #10b981;
+}
+
+.dot-offline {
+  background-color: #94a3b8;
+}
+
+.dot-other {
+  background-color: #d97706;
+}
+
+.stat-values {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.875rem;
+}
+
+.stat-values .count {
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.stat-values .pct {
+  color: var(--text-muted);
+  width: 30px;
+  text-align: right;
+  font-size: 0.75rem;
+}
