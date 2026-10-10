@@ -6,6 +6,7 @@ import logo from './assets/bevest_logo.png';
 import { auth, db } from './firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import UserManagement from './UserManagement';
+import AdminProfile from './AdminProfile';
 
 const Dashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('Overview');
@@ -97,7 +98,11 @@ const Dashboard = ({ onLogout }) => {
           </div>
         </div>
         
-        <div className="sidebar-user">
+        <div 
+          className="sidebar-user" 
+          onClick={() => { setActiveTab('Profile'); setIsMobileMenuOpen(false); }}
+          style={{ cursor: 'pointer' }}
+        >
           <div className="avatar">
             <FiUsers />
           </div>
@@ -264,6 +269,10 @@ const Dashboard = ({ onLogout }) => {
               <p>Manage system configurations, backup and compliance settings.</p>
             </div>
           </div>
+        )}
+
+        {activeTab === 'Profile' && (
+          <AdminProfile />
         )}
       </main>
 
