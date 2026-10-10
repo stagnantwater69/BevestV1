@@ -752,6 +752,7 @@ body {
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s;
+  flex-shrink: 0;
 }
 
 .action-btn:hover {
@@ -1247,5 +1248,17 @@ body {
   .dashboard-content {
     padding: 1.25rem;
     overflow-y: visible;
+  }
+  
+  .um-form-grid {
+    grid-template-columns: 1fr;
+    display: grid;
+    gap: 1rem;
+  }
+  
+  .um-search-bar {
+    width: 100% !important;
+    max-width: none !important;
+    flex: 1 1 100% !important;
   }
 }

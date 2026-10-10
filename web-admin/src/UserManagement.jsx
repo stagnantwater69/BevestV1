@@ -129,13 +129,13 @@ const UserManagement = () => {
         </div>
 
         <div className="add-user-card">
-          <div className="form-section-container">
-            <div className="form-section-info">
+          <div className="form-section-container" style={{ display: 'flex', flexWrap: 'wrap', gap: '2rem' }}>
+            <div className="form-section-info" style={{ flex: '1 1 250px' }}>
               <h3>Personal Data</h3>
               <p>Core identity information for the employee or contractor.</p>
             </div>
             
-            <div className="form-grid">
+            <div className="form-grid um-form-grid" style={{ flex: '2 1 400px' }}>
               <div className="form-group-custom">
                 <label className="form-label">First Name</label>
                 <input 
@@ -227,7 +227,7 @@ const UserManagement = () => {
 
   return (
     <div className="dashboard-content">
-      <div className="page-header-flex">
+      <div className="page-header-flex" style={{ flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h1>User Management</h1>
           <p>Manage system access, roles, and safety credentials for all personnel.</p>
@@ -243,8 +243,8 @@ const UserManagement = () => {
       </div>
 
       <div className="um-table-container">
-        <div className="filter-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div className="search-bar" style={{ width: '300px', backgroundColor: '#fff', border: '1px solid var(--border-color)', margin: 0 }}>
+        <div className="filter-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+          <div className="search-bar um-search-bar" style={{ flex: '1 1 300px', backgroundColor: '#fff', border: '1px solid var(--border-color)', margin: 0 }}>
             <FiSearch className="search-icon" />
             <input 
               type="text" 
@@ -263,9 +263,10 @@ const UserManagement = () => {
           </div>
         </div>
 
-        <table className="um-table">
-          <thead>
-            <tr>
+        <div className="table-responsive-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
+          <table className="um-table" style={{ minWidth: '800px' }}>
+            <thead>
+              <tr>
               <th onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')} style={{ cursor: 'pointer', userSelect: 'none', width: '30%' }}>
                 NAME {sortOrder === 'asc' ? '↑' : '↓'}
               </th>
@@ -315,8 +316,9 @@ const UserManagement = () => {
             })}
           </tbody>
         </table>
+        </div>
 
-        <div className="pagination" style={{ justifyContent: 'space-between' }}>
+        <div className="pagination" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
           <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
             Showing {filteredUsers.length === 0 ? 0 : ((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredUsers.length)} of {filteredUsers.length} users
           </span>
