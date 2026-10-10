@@ -1178,3 +1178,74 @@ body {
   text-align: right;
   font-size: 0.75rem;
 }
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .dashboard-columns {
+    grid-template-columns: 1fr;
+  }
+  .search-bar {
+    width: 250px;
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-container {
+    flex-direction: column;
+  }
+  
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    height: auto;
+    min-height: 60px;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    overflow-x: auto;
+  }
+  
+  .sidebar-header {
+    border-bottom: none;
+    padding: 0.5rem 1rem;
+    min-width: max-content;
+  }
+  
+  .sidebar-title-group,
+  .sidebar-user,
+  .sidebar-footer {
+    display: none;
+  }
+  
+  .sidebar-nav {
+    flex-direction: row;
+    align-items: center;
+    padding: 0 1rem;
+    margin: 0;
+  }
+  
+  .nav-item {
+    width: auto;
+    padding: 0.5rem 0.75rem;
+    white-space: nowrap;
+  }
+  
+  .main-content {
+    overflow-y: auto;
+  }
+  
+  .topbar {
+    height: auto;
+    padding: 1rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+  
+  .search-bar {
+    width: 100%;
+  }
+  
+  .dashboard-content {
+    padding: 1.25rem;
+    overflow-y: visible;
+  }
+}
