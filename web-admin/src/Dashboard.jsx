@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   FiSearch, FiBell, FiHelpCircle, FiSettings, 
-  FiGrid, FiUsers, FiShield, FiUserPlus, FiActivity
+  FiGrid, FiUsers, FiShield, FiUserPlus, FiActivity, FiClock, FiX
 } from 'react-icons/fi';
 import logo from './assets/bevest_logo.png';
 import { auth } from './firebase';
@@ -9,6 +9,15 @@ import UserManagement from './UserManagement';
 
 const Dashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('Overview');
+  const [showLogsModal, setShowLogsModal] = useState(false);
+
+  const activityLogs = [
+    { id: 1, action: "Contractor account created for jimz@bevest.com", time: "42d ago" },
+    { id: 2, action: "Contractor account created for roch@bevest.com", time: "42d ago" },
+    { id: 3, action: "Contractor account created for test@gmail.com", time: "42d ago" },
+    { id: 4, action: "Maintenance mode disabled", time: "42d ago" },
+    { id: 5, action: "Maintenance mode enabled", time: "42d ago" }
+  ];
 
   const handleSignOut = () => {
     auth.signOut();
@@ -108,46 +117,24 @@ const Dashboard = ({ onLogout }) => {
             {/* Recent Activity */}
             <div className="recent-activity-container">
               <div className="activity-header">
-                <h2>Recent Admin Activity</h2>
-                <a href="#" className="view-all">View All Logs</a>
+                <div>
+                  <h2>Recent Activity</h2>
+                  <p className="activity-subtitle">Administrative actions across the system</p>
+                </div>
+                <button onClick={() => setShowLogsModal(true)} className="view-all" style={{background: 'none', border: 'none', cursor: 'pointer'}}>Full Activity Log</button>
               </div>
               
-              <table className="activity-table">
-                <thead>
-                  <tr>
-                    <th>ACTIVITY TYPE</th>
-                    <th>DESCRIPTION</th>
-                    <th>TIME</th>
-                    <th>STATUS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>
-                      <div className="cell-flex"><FiUserPlus style={{color: '#3b82f6'}}/> User Action</div>
-                    </td>
-                    <td>New Contractor Added: Elias Vance</td>
-                    <td>2 mins ago</td>
-                    <td><span className="badge success">SUCCESS</span></td>
-                  </tr>
-                  <tr>
-                    <td>
-                      <div className="cell-flex"><FiSettings style={{color: '#64748b'}}/> System Config</div>
-                    </td>
-                    <td>Maintenance mode turned on</td>
-                    <td>3 hrs ago</td>
-                    <td><span className="badge config">CONFIG</span></td>
-                  </tr>
-                  <tr>
-                    <td>
-                      <div className="cell-flex"><FiActivity style={{color: '#f59e0b'}}/> Vest Assigned</div>
-                    </td>
-                    <td>Vest V-1024 assigned to Worker W-89</td>
-                    <td>5 hrs ago</td>
-                    <td><span className="badge success">SUCCESS</span></td>
-                  </tr>
-                </tbody>
-              </table>
+              <div className="activity-list">
+                {activityLogs.slice(0, 3).map(log => (
+                  <div key={log.id} className="activity-row">
+                    <FiClock className="activity-icon" />
+                    <div className="activity-details">
+                      <p>{log.action}</p>
+                      <span className="activity-time">{log.time}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -165,6 +152,31 @@ const Dashboard = ({ onLogout }) => {
           </div>
         )}
       </main>
+
+      {/* Logs Modal */}
+      {showLogsModal && (
+        <div className="modal-overlay">
+          <div className="modal-content activity-modal">
+            <div className="modal-header">
+              <h2>Full Activity Log</h2>
+              <button className="close-btn" onClick={() => setShowLogsModal(false)}><FiX /></button>
+            </div>
+            <div className="modal-body">
+              <div className="activity-list">
+                {activityLogs.map(log => (
+                  <div key={log.id} className="activity-row">
+                    <FiClock className="activity-icon" />
+                    <div className="activity-details">
+                      <p>{log.action}</p>
+                      <span className="activity-time">{log.time}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
