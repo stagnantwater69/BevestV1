@@ -10,7 +10,7 @@ function App() {
     if (user.role === 'CONTRACTOR') {
       return <ContractorDashboard user={user} onLogout={() => setUser(null)} />;
     }
-    return <Dashboard onLogout={() => setUser(null)} />;
+    return <Dashboard user={user} onLogout={() => setUser(null)} />;
   }
 
   return (

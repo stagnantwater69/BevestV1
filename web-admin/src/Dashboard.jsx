@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { 
   FiGrid, FiUsers, FiShield, FiUserPlus, FiActivity, FiClock, FiX, FiMenu
 } from 'react-icons/fi';
+import { TbCpu } from 'react-icons/tb';
 import logo from './assets/bevest_logo.png';
 import { auth, db } from './firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import UserManagement from './UserManagement';
 import AdminProfile from './AdminProfile';
+import SimulationScreen from './simulation/SimulationScreen';
 
-const Dashboard = ({ onLogout }) => {
+const Dashboard = ({ user, onLogout }) => {
   const [activeTab, setActiveTab] = useState('Overview');
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -127,6 +129,12 @@ const Dashboard = ({ onLogout }) => {
             onClick={() => { setActiveTab('System Management'); setIsMobileMenuOpen(false); }}
           >
             <FiShield /> System Management
+          </button>
+          <button 
+            className={`nav-item ${activeTab === 'IoT Simulation' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('IoT Simulation'); setIsMobileMenuOpen(false); }}
+          >
+            <TbCpu /> IoT Simulation
           </button>
         </nav>
         
@@ -268,6 +276,12 @@ const Dashboard = ({ onLogout }) => {
               <h1>System Management</h1>
               <p>Manage system configurations, backup and compliance settings.</p>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'IoT Simulation' && (
+          <div className="dashboard-content">
+            <SimulationScreen user={user} />
           </div>
         )}
 

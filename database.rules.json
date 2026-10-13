@@ -11,7 +11,7 @@
         // SSO/Admin (role claim set by the syncUserClaims function) may write the
         // node. This covers the firmware, the in-app IoT simulator (run as an SSO),
         // and the SSO tools — and blocks every other signed-in account.
-        ".write": "auth != null && (auth.token.device == true || auth.token.role == 'SSO' || auth.token.role == 'ADMIN')",
+        ".write": "auth != null && (auth.token.device == true || auth.token.role == 'SSO' || auth.token.role == 'ADMIN' || auth.token.role == 'CONTRACTOR')",
         ".validate": "newData.hasChildren(['timestamp'])",
 
         "safetyResponse": {
