@@ -5,15 +5,16 @@ import {
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { secondaryAuth, db } from '../firebase';
-import { useContractorSsos, STATUS_COLOR, initialsOf } from './contractorData';
+import { useContractorSsos, useContractorSites, siteLabel, STATUS_COLOR, initialsOf } from './contractorData';
 import { PageHeader, SearchBox, Badge, EmptyState, ErrorState, Skeleton } from './ui';
 
 /**
  * Site Safety Officers directory for the contractor.
  * Port of ContractorSsosScreen (ContractorScreens.kt) and SsoListViewModel.
  */
-const ContractorSsos = ({ contractorId, onAdd, onBack, backLabel = 'Dashboard' }) => {
+const ContractorSsos = ({ contractorId, onAdd, onOpen, onBack, backLabel = 'Dashboard' }) => {
   const { loading, error, ssos } = useContractorSsos(contractorId);
+  const { sites } = useContractorSites(contractorId);
   const [queryText, setQueryText] = useState('');
   const [pendingDisable, setPendingDisable] = useState(null);
   const [disabling, setDisabling] = useState(false);
@@ -93,7 +94,15 @@ const ContractorSsos = ({ contractorId, onAdd, onBack, backLabel = 'Dashboard' }
       ) : (
         <div className="ct-list">
           {visible.map((sso) => (
-            <div key={sso.uid} className="ct-row" id={`ct-sso-${sso.uid}`}>
+            <div
+              key={sso.uid}
+              className="ct-row ct-row-clickable"
+              id={`ct-sso-${sso.uid}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpen(sso.uid)}
+              onKeyDown={(e) => { if (e.key === 'Enter') onOpen(sso.uid); }}
+            >
               <div
                 className="ct-avatar"
                 style={{
@@ -108,7 +117,7 @@ const ContractorSsos = ({ contractorId, onAdd, onBack, backLabel = 'Dashboard' }
                 <span className="ct-row-title">{sso.fullName || sso.email}</span>
                 <span className="ct-row-sub">{sso.email}</span>
                 <span className="ct-row-meta">
-                  {sso.siteId ? `Assigned to Site ${sso.siteId}` : 'No site assigned'}
+                  {siteLabel(sites, sso.siteId)}
                 </span>
               </div>
 
@@ -121,7 +130,7 @@ const ContractorSsos = ({ contractorId, onAdd, onBack, backLabel = 'Dashboard' }
                 <button
                   className="btn-secondary ct-disable-btn"
                   title="Disable access"
-                  onClick={() => setPendingDisable(sso)}
+                  onClick={(e) => { e.stopPropagation(); setPendingDisable(sso); }}
                 >
                   <FiSlash /> Disable
                 </button>

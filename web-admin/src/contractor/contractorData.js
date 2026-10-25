@@ -411,3 +411,40 @@ export function useContractorSsos(contractorId) {
   }, [contractorId]);
   return state;
 }
+
+/**
+ * Project sites owned by this contractor (`projects` collection; an SSO's
+ * `siteId` is the project's document id). Mirrors ProjectRepositoryImpl.
+ */
+export function useContractorSites(contractorId) {
+  const [state, setState] = useState({ loading: true, sites: [] });
+  useEffect(() => {
+    if (!contractorId) return undefined;
+    const q = query(collection(db, 'projects'), where('contractorId', '==', contractorId));
+    return onSnapshot(
+      q,
+      (qs) => setState({
+        loading: false,
+        sites: qs.docs
+          .map((d) => {
+            const v = d.data();
+            return { id: d.id, name: v.name || d.id, location: v.location || '', active: v.active !== false };
+          })
+          .filter((s) => s.active)
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      }),
+      (err) => {
+        console.error('Sites listener failed:', err);
+        setState({ loading: false, sites: [] });
+      },
+    );
+  }, [contractorId]);
+  return state;
+}
+
+/** Friendly site name for a siteId, falling back to the raw id. */
+export const siteLabel = (sites, siteId) => {
+  if (!siteId) return 'No site assigned';
+  const site = sites.find((s) => s.id === siteId);
+  return site ? site.name : siteId;
+};
