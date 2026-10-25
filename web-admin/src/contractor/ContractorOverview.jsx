@@ -1,12 +1,13 @@
 import React, { useMemo } from 'react';
-import { FiShield, FiClock, FiFileText, FiUserCheck } from 'react-icons/fi';
+import { FiShield, FiClock, FiUserCheck } from 'react-icons/fi';
 import {
-  STATUS_COLOR, buildMonthlyReports, monthLabel, plural, useContractorSsos,
+  STATUS_COLOR, buildMonthlyReports, useContractorSsos,
 } from './contractorData';
 import {
-  PageHeader, SectionHeader, StatTile, Insight, TrendBars, ErrorState,
+  PageHeader, SectionHeader, StatTile, ErrorState,
   Skeleton,
 } from './ui';
+import IncidentTrendChart from './IncidentTrendChart';
 
 const DAY = 24 * 3600 * 1000;
 
@@ -28,22 +29,11 @@ const ContractorOverview = ({ contractorId, data, onNavigate }) => {
     const monthlyIncidents = incidents.filter((i) => i.createdAt >= now - 30 * DAY).length;
     const trends = buildMonthlyReports(incidents, activeWorkers, 6).reverse(); // oldest first
     const safetyScore = trends.length ? trends[trends.length - 1].safetyPercentage : 100;
-
-    const word = (n) => plural(n, 'incident', 'incidents');
-    const current = trends[trends.length - 1]?.totalIncidents;
-    const previous = trends[trends.length - 2]?.totalIncidents;
-    let incidentInsight;
-    if (!trends.length) incidentInsight = 'Not enough history yet to show a trend.';
-    else if (current == null || previous == null) incidentInsight = `${monthlyIncidents} ${word(monthlyIncidents)} in the last 30 days.`;
-    else if (current === previous) incidentInsight = `Level with last month at ${current} ${word(current)}.`;
-    else if (current < previous) incidentInsight = `Down from ${previous} to ${current} ${word(current)} since last month.`;
-    else incidentInsight = `Up from ${previous} to ${current} ${word(current)} since last month.`;
-
     const currentMonthKey = trends[trends.length - 1]?.monthKey;
 
     return {
       activeWorkers, monthlyIncidents,
-      trends, safetyScore, incidentInsight, currentMonthKey,
+      trends, safetyScore, currentMonthKey,
     };
   }, [workers, incidents, now]);
 
@@ -92,13 +82,7 @@ const ContractorOverview = ({ contractorId, data, onNavigate }) => {
       <section className="ct-incident-trend-section">
         <SectionHeader title="Incident trend" supporting="Recorded incidents by month" />
         <div className="ct-card">
-          <Insight icon={FiFileText} text={state.incidentInsight} accent={STATUS_COLOR.WARNING} />
-          <TrendBars
-            data={state.trends.map((t) => ({
-              label: monthLabel(t.monthKey).slice(0, 3),
-              value: t.totalIncidents,
-            }))}
-          />
+          <IncidentTrendChart incidents={incidents} />
         </div>
       </section>
     </>

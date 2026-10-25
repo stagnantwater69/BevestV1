@@ -921,3 +921,28 @@
     display: none;
   }
 }
+
+/* Incident trend line chart */
+.ct-chart-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.ct-chart-select {
+  min-width: 160px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 8px;
+  background-color: #ffffff;
+  color: var(--text-main, #0f172a);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.ct-line-chart {
+  position: relative;
+  height: 320px;
+}
