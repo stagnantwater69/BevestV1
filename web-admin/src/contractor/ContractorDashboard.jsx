@@ -1,35 +1,37 @@
 import React, { useState } from 'react';
 import { FiGrid, FiUsers, FiFileText, FiX, FiMenu } from 'react-icons/fi';
+import { TbCpu } from 'react-icons/tb';
 import logo from '../assets/bevest_logo.png';
 import { auth } from '../firebase';
 import { useContractorData, initialsOf } from './contractorData';
 import ContractorOverview from './ContractorOverview';
-import ContractorWorkers from './ContractorWorkers';
 import ContractorReports, { MonthlyReportDetail, IncidentHistory } from './ContractorReports';
 import ContractorSsos, { AddSso } from './ContractorSsos';
 import ContractorProfile from './ContractorProfile';
+import SimulationScreen from '../simulation/SimulationScreen';
 import './contractor.css';
 
 /**
  * Contractor web area. Same shell as the Admin dashboard (sidebar, user chip,
  * nav items, sign-out footer, mobile burger menu) with the contractor's mobile
- * tabs — Dashboard, Workers, Reports — as its navigation.
+ * tabs — Dashboard, Workers, Reports, IoT Simulation — as its navigation.
  */
 const NAV = [
-  { key: 'Dashboard', icon: FiGrid },
-  { key: 'Workers', icon: FiUsers },
-  { key: 'Reports', icon: FiFileText },
+  { key: 'Dashboard', label: 'Dashboard', icon: FiGrid },
+  { key: 'SSOs', label: 'Site Safety Officers', icon: FiUsers },
+  { key: 'Reports', label: 'Reports', icon: FiFileText },
+  { key: 'Simulation', label: 'IoT Simulation', icon: TbCpu },
 ];
 
 // Which nav tab each sub-page belongs to (for the active highlight).
 const PARENT_TAB = {
   Dashboard: 'Dashboard',
-  SSOs: 'Dashboard',
-  AddSso: 'Dashboard',
-  Workers: 'Workers',
+  SSOs: 'SSOs',
+  AddSso: 'SSOs',
   Reports: 'Reports',
   ReportDetail: 'Reports',
   Incidents: 'Reports',
+  Simulation: 'Simulation',
   Profile: null,
 };
 
@@ -57,8 +59,6 @@ const ContractorDashboard = ({ user, onLogout }) => {
 
   const renderPage = () => {
     switch (route.page) {
-      case 'Workers':
-        return <ContractorWorkers data={data} />;
       case 'Reports':
         return (
           <ContractorReports
@@ -84,17 +84,25 @@ const ContractorDashboard = ({ user, onLogout }) => {
           <ContractorSsos
             contractorId={contractorId}
             onAdd={() => go('AddSso')}
-            onBack={() => go(route.from === 'Reports' ? 'Reports' : 'Dashboard')}
+            onBack={route.from === 'Dashboard' || route.from === 'Reports' ? () => go(route.from) : null}
             backLabel={route.from === 'Reports' ? 'Reports' : 'Dashboard'}
           />
         );
       case 'AddSso':
         return <AddSso contractorId={contractorId} onDone={() => go('SSOs')} />;
+      case 'Simulation':
+        return <SimulationScreen user={user} />;
       case 'Profile':
         return <ContractorProfile user={user} profile={profile} onProfileChange={setProfile} />;
       case 'Dashboard':
       default:
-        return <ContractorOverview data={data} onManageSsos={() => go('SSOs')} onNavigate={go} />;
+        return (
+          <ContractorOverview
+            contractorId={contractorId}
+            data={data}
+            onNavigate={go}
+          />
+        );
     }
   };
 
@@ -143,14 +151,14 @@ const ContractorDashboard = ({ user, onLogout }) => {
         </div>
 
         <nav className="sidebar-nav">
-          {NAV.map(({ key, icon: Icon }) => (
+          {NAV.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
               id={`ct-nav-${key.toLowerCase()}`}
               className={`nav-item ${activeTab === key ? 'active' : ''}`}
               onClick={() => go(key)}
             >
-              <Icon /> {key}
+              <Icon /> {label || key}
             </button>
           ))}
         </nav>

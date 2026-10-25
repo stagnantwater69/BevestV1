@@ -8,7 +8,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import UserManagement from './UserManagement';
 import AdminProfile from './AdminProfile';
 
-const Dashboard = ({ onLogout }) => {
+const Dashboard = ({ user, onLogout }) => {
   const [activeTab, setActiveTab] = useState('Overview');
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
