@@ -7,6 +7,7 @@ import { useContractorData, initialsOf } from './contractorData';
 import ContractorOverview from './ContractorOverview';
 import ContractorReports, { MonthlyReportDetail, IncidentHistory } from './ContractorReports';
 import ContractorSsos, { AddSso } from './ContractorSsos';
+import SsoProfile from './SsoProfile';
 import ContractorProfile from './ContractorProfile';
 import SimulationScreen from '../simulation/SimulationScreen';
 import './contractor.css';
@@ -27,6 +28,7 @@ const NAV = [
 const PARENT_TAB = {
   Dashboard: 'Dashboard',
   SSOs: 'SSOs',
+  SsoProfile: 'SSOs',
   AddSso: 'SSOs',
   Reports: 'Reports',
   ReportDetail: 'Reports',
@@ -84,8 +86,18 @@ const ContractorDashboard = ({ user, onLogout }) => {
           <ContractorSsos
             contractorId={contractorId}
             onAdd={() => go('AddSso')}
+            onOpen={(uid) => go('SsoProfile', uid)}
             onBack={route.from === 'Dashboard' || route.from === 'Reports' ? () => go(route.from) : null}
             backLabel={route.from === 'Reports' ? 'Reports' : 'Dashboard'}
+          />
+        );
+      case 'SsoProfile':
+        return (
+          <SsoProfile
+            contractorId={contractorId}
+            uid={route.param}
+            workers={data.workers}
+            onBack={() => go('SSOs')}
           />
         );
       case 'AddSso':
