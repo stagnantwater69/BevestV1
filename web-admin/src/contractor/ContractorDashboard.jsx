@@ -5,7 +5,6 @@ import logo from '../assets/bevest_logo.png';
 import { auth } from '../firebase';
 import { useContractorData, initialsOf } from './contractorData';
 import ContractorOverview from './ContractorOverview';
-import ContractorWorkers from './ContractorWorkers';
 import ContractorReports, { MonthlyReportDetail, IncidentHistory } from './ContractorReports';
 import ContractorSsos, { AddSso } from './ContractorSsos';
 import ContractorProfile from './ContractorProfile';
@@ -19,7 +18,7 @@ import './contractor.css';
  */
 const NAV = [
   { key: 'Dashboard', label: 'Dashboard', icon: FiGrid },
-  { key: 'Workers', label: 'Workers', icon: FiUsers },
+  { key: 'SSOs', label: 'Site Safety Officers', icon: FiUsers },
   { key: 'Reports', label: 'Reports', icon: FiFileText },
   { key: 'Simulation', label: 'IoT Simulation', icon: TbCpu },
 ];
@@ -27,9 +26,8 @@ const NAV = [
 // Which nav tab each sub-page belongs to (for the active highlight).
 const PARENT_TAB = {
   Dashboard: 'Dashboard',
-  SSOs: 'Dashboard',
-  AddSso: 'Dashboard',
-  Workers: 'Workers',
+  SSOs: 'SSOs',
+  AddSso: 'SSOs',
   Reports: 'Reports',
   ReportDetail: 'Reports',
   Incidents: 'Reports',
@@ -61,8 +59,6 @@ const ContractorDashboard = ({ user, onLogout }) => {
 
   const renderPage = () => {
     switch (route.page) {
-      case 'Workers':
-        return <ContractorWorkers data={data} />;
       case 'Reports':
         return (
           <ContractorReports
@@ -88,7 +84,7 @@ const ContractorDashboard = ({ user, onLogout }) => {
           <ContractorSsos
             contractorId={contractorId}
             onAdd={() => go('AddSso')}
-            onBack={() => go(route.from === 'Reports' ? 'Reports' : 'Dashboard')}
+            onBack={route.from === 'Dashboard' || route.from === 'Reports' ? () => go(route.from) : null}
             backLabel={route.from === 'Reports' ? 'Reports' : 'Dashboard'}
           />
         );
@@ -100,7 +96,13 @@ const ContractorDashboard = ({ user, onLogout }) => {
         return <ContractorProfile user={user} profile={profile} onProfileChange={setProfile} />;
       case 'Dashboard':
       default:
-        return <ContractorOverview data={data} onManageSsos={() => go('SSOs')} onNavigate={go} />;
+        return (
+          <ContractorOverview
+            contractorId={contractorId}
+            data={data}
+            onNavigate={go}
+          />
+        );
     }
   };
 

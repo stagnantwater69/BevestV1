@@ -57,8 +57,16 @@ export const SectionHeader = ({ title, supporting, trailing }) => (
   </div>
 );
 
-export const StatTile = ({ icon: Icon, value, label, accent }) => (
-  <div className="ct-stat-tile" style={{ '--accent': accent || 'var(--primary-color)' }}>
+export const StatTile = ({ icon: Icon, value, label, accent, onClick, id }) => (
+  <div
+    id={id}
+    className={`ct-stat-tile ${onClick ? 'clickable' : ''}`}
+    style={{ '--accent': accent || 'var(--primary-color)' }}
+    onClick={onClick}
+    role={onClick ? 'button' : undefined}
+    tabIndex={onClick ? 0 : undefined}
+    onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
+  >
     <div className="ct-stat-icon"><Icon /></div>
     <div className="ct-stat-body">
       <div className={`ct-stat-value ${accent ? 'accented' : ''}`}>{value}</div>
