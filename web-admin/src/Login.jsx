@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FiMail, FiLock, FiArrowRight } from 'react-icons/fi';
+import { FiArrowRight } from 'react-icons/fi';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
@@ -66,7 +66,6 @@ const Login = ({ onLogin }) => {
               <label className="form-label">EMAIL/USERNAME</label>
             </div>
             <div className="input-wrapper">
-              <FiMail className="input-icon" />
               <input
                 type="email"
                 className="form-input"
@@ -84,7 +83,6 @@ const Login = ({ onLogin }) => {
               <a href="#" className="forgot-link">Forgot?</a>
             </div>
             <div className="input-wrapper">
-              <FiLock className="input-icon" />
               <input
                 type="password"
                 className="form-input"
