@@ -51,17 +51,19 @@ service cloud.firestore {
       allow list: if isAdmin()
                   || (isContractor() && request.query.limit <= 200);
       allow delete: if isAdmin();
-      // Only an existing admin provisions accounts. The very first admin must be
-      // seeded out-of-band — create the users/{uid} doc from the Firebase console
-      // (or a one-off Admin SDK script) after that user signs up. There is
-      // deliberately no self-service path to an ADMIN role from the client.
-      allow create: if isAdmin();
+      // Admin provisions any account. Contractors can provision SSO accounts under their own contractorId.
+      allow create: if isAdmin()
+                 || (isContractor() && request.resource.data.role == 'SSO' && request.resource.data.contractorId == request.auth.uid);
       allow update: if isAdmin()
                     || (request.auth.uid == uid
                         && request.resource.data.role == resource.data.role
                         && request.resource.data.active == resource.data.active
                         && request.resource.data.contractorId == resource.data.contractorId
-                        && request.resource.data.siteId == resource.data.siteId);
+                        && request.resource.data.siteId == resource.data.siteId)
+                    || (isContractor()
+                        && resource.data.contractorId == request.auth.uid
+                        && request.resource.data.role == resource.data.role
+                        && request.resource.data.contractorId == resource.data.contractorId);
     }
 
     // ---- workers ----

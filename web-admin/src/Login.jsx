@@ -20,22 +20,23 @@ const Login = ({ onLogin }) => {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Verify Admin Role
+      // Verify web role (Admin or Contractor). SSOs use the mobile app only.
       const userDocRef = doc(db, 'users', user.uid);
       const userDocSnap = await getDoc(userDocRef);
 
       if (userDocSnap.exists()) {
         const userData = userDocSnap.data();
-        if (userData.role !== 'ADMIN') {
+        const role = String(userData.role || '').trim().toUpperCase();
+        if (role !== 'ADMIN' && role !== 'CONTRACTOR') {
           await auth.signOut();
-          setError('Unauthorized Access: Admin privileges required.');
+          setError('Unauthorized Access: Admin or Contractor privileges required.');
         } else if (userData.active === false) {
           await auth.signOut();
           setError('Account is inactive.');
         } else {
-          // Success: User is Admin
-          console.log('Admin logged in successfully!');
-          if (onLogin) onLogin(user);
+          // Success: route to the role-specific web experience
+          console.log(`${role} logged in successfully!`);
+          if (onLogin) onLogin({ uid: user.uid, email: user.email, role, profile: userData });
         }
       } else {
         await auth.signOut();
