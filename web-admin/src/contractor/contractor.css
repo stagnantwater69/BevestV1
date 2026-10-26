@@ -990,3 +990,505 @@
   flex-shrink: 0;
 }
 
+/* ------------------------------------------------------------- Contractor Subscription Styles (Wireframe 2) */
+
+.subscription-container {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  padding-bottom: 3rem;
+}
+
+.sub-toast-success {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  background-color: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 12px;
+  color: #065f46;
+  font-size: 0.95rem;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.1);
+  animation: fadeIn 0.3s ease;
+}
+
+/* Current Active Subscription Banner */
+.current-sub-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  padding: 2rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
+.current-sub-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 2rem;
+  flex-wrap: wrap;
+  padding-bottom: 1.75rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.current-sub-title-group {
+  flex: 1 1 340px;
+}
+
+.current-sub-kicker {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #ea580c;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.current-sub-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 0.35rem 0 0.5rem 0;
+  flex-wrap: wrap;
+}
+
+.current-sub-heading-row h2 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.sub-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sub-status-pill.active {
+  background-color: #dcfce7;
+  color: #15803d;
+}
+
+.sub-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #16a34a;
+}
+
+.current-sub-desc {
+  font-size: 0.9rem;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.current-sub-pricing-badge {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.current-sub-price-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.current-sub-price-val {
+  font-size: 2rem;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.current-sub-price-unit {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #64748b;
+  margin-left: 0.2rem;
+}
+
+.sub-discount-tag {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #15803d;
+  background-color: #ecfdf5;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  margin-top: 0.25rem;
+}
+
+/* Metadata Grid */
+.sub-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.25rem;
+  padding: 1.75rem 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.sub-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.sub-meta-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background-color: #fff7ed;
+  color: #ea580c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.sub-meta-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sub-meta-value {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 0.15rem;
+}
+
+/* Quota Progress */
+.sub-quota-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  padding-top: 1.75rem;
+}
+
+.sub-quota-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sub-quota-labels {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.875rem;
+}
+
+.sub-quota-title {
+  font-weight: 600;
+  color: #334155;
+  display: flex;
+  align-items: center;
+}
+
+.sub-quota-count {
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.sub-quota-count strong {
+  color: #0f172a;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.sub-progress-track {
+  width: 100%;
+  height: 8px;
+  background-color: #f1f5f9;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.sub-progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.4s ease;
+}
+
+.sub-quota-subtext {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+/* ------------------ Wireframe 2 Pricing Section ------------------ */
+
+.sub-plans-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+.sub-plans-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+.sub-plans-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 0.25rem;
+}
+
+.sub-plans-subtitle {
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+/* Wireframe 2 Pill Toggle */
+.sub-toggle-pill-container {
+  display: inline-flex;
+  align-items: center;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 9999px;
+  padding: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.sub-toggle-pill-btn {
+  border: none;
+  background-color: transparent;
+  padding: 0.55rem 1.75rem;
+  border-radius: 9999px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  letter-spacing: 0.05em;
+}
+
+.sub-toggle-pill-btn.active {
+  background-color: #ea580c;
+  background-image: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.35);
+}
+
+/* 3 Cards Grid - Business, Enterprise, Custom */
+.sub-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+  align-items: stretch;
+}
+
+@media (max-width: 992px) {
+  .sub-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Individual Plan Card */
+.sub-tier-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 24px;
+  padding: 2.25rem 1.75rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  position: relative;
+}
+
+.sub-tier-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.07);
+}
+
+.sub-tier-card.is-active-plan {
+  border: 2px solid #ea580c;
+  box-shadow: 0 6px 24px rgba(234, 88, 12, 0.12);
+}
+
+.sub-card-badge {
+  position: absolute;
+  top: -12px;
+  right: 24px;
+  background-color: #ea580c;
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  box-shadow: 0 2px 6px rgba(234, 88, 12, 0.3);
+}
+
+.sub-tier-header {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.sub-tier-tag {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.5rem;
+}
+
+.sub-price-block {
+  min-height: 85px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.sub-price-original {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #94a3b8;
+  text-decoration: line-through;
+  height: 1.25rem;
+}
+
+.sub-price-main {
+  font-size: 2.25rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-top: 0.15rem;
+}
+
+.sub-price-cycle {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #94a3b8;
+  margin-top: 0.25rem;
+}
+
+.sub-tier-divider {
+  border: none;
+  border-top: 1px solid #f1f5f9;
+  margin: 1.5rem 0;
+}
+
+/* Feature bullets */
+.sub-features-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  flex-grow: 1;
+}
+
+.sub-feature-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.875rem;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.sub-bullet-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.sub-tier-footer {
+  margin-top: 2rem;
+}
+
+/* Action button matching Wireframe 2 */
+.sub-action-pill-btn {
+  width: 100%;
+  padding: 0.75rem 1.5rem;
+  border-radius: 9999px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.sub-action-pill-btn.btn-active {
+  background-color: #ea580c;
+  background-image: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(234, 88, 12, 0.25);
+}
+
+.sub-action-pill-btn.btn-active:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(234, 88, 12, 0.35);
+}
+
+.sub-action-pill-btn.btn-current {
+  background-color: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  cursor: default;
+}
+
+/* Modals */
+.sub-modal {
+  max-width: 480px;
+  background-color: #ffffff;
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+}
+
+.sub-modal-summary {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sub-modal-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.875rem;
+  color: #475569;
+}
+
+

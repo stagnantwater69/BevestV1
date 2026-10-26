@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
-import { FiGrid, FiUsers, FiFileText, FiX, FiMenu } from 'react-icons/fi';
+import React, { useState, useEffect } from 'react';
+import { FiGrid, FiUsers, FiFileText, FiCreditCard, FiX, FiMenu } from 'react-icons/fi';
 import { TbCpu } from 'react-icons/tb';
+import { doc, onSnapshot } from 'firebase/firestore';
 import logo from '../assets/bevest_logo.png';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
 import { useContractorData, initialsOf } from './contractorData';
 import ContractorOverview from './ContractorOverview';
 import ContractorReports, { MonthlyReportDetail, IncidentHistory } from './ContractorReports';
 import ContractorSsos, { AddSso } from './ContractorSsos';
 import SsoProfile from './SsoProfile';
 import ContractorProfile from './ContractorProfile';
+import ContractorSubscription from './ContractorSubscription';
 import SimulationScreen from '../simulation/SimulationScreen';
 import './contractor.css';
 
@@ -21,6 +23,7 @@ const NAV = [
   { key: 'Dashboard', label: 'Dashboard', icon: FiGrid },
   { key: 'SSOs', label: 'Site Safety Officers', icon: FiUsers },
   { key: 'Reports', label: 'Reports', icon: FiFileText },
+  { key: 'Subscription', label: 'Subscription', icon: FiCreditCard },
   { key: 'Simulation', label: 'IoT Simulation', icon: TbCpu },
 ];
 
@@ -33,6 +36,7 @@ const PARENT_TAB = {
   Reports: 'Reports',
   ReportDetail: 'Reports',
   Incidents: 'Reports',
+  Subscription: 'Subscription',
   Simulation: 'Simulation',
   Profile: null,
 };
@@ -45,6 +49,17 @@ const ContractorDashboard = ({ user, onLogout }) => {
   // A contractor's own uid is their contractorId (see firestore.rules / AccountRepositoryImpl).
   const contractorId = profile.contractorId || user.uid;
   const data = useContractorData(contractorId);
+
+  // Subscribe to realtime profile & subscription updates
+  useEffect(() => {
+    if (!contractorId) return;
+    const unsub = onSnapshot(doc(db, 'users', contractorId), (snap) => {
+      if (snap.exists()) {
+        setProfile((prev) => ({ ...prev, ...snap.data() }));
+      }
+    });
+    return () => unsub();
+  }, [contractorId]);
 
   const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || user.email;
   const activeTab = PARENT_TAB[route.page];
@@ -104,6 +119,8 @@ const ContractorDashboard = ({ user, onLogout }) => {
         return <AddSso contractorId={contractorId} onDone={() => go('SSOs')} />;
       case 'Simulation':
         return <SimulationScreen user={user} />;
+      case 'Subscription':
+        return <ContractorSubscription user={user} profile={profile} data={data} />;
       case 'Profile':
         return <ContractorProfile user={user} profile={profile} onProfileChange={setProfile} />;
       case 'Dashboard':
