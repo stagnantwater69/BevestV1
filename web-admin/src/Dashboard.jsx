@@ -6,6 +6,7 @@ import logo from './assets/bevest_logo.png';
 import { auth, db } from './firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import UserManagement from './UserManagement';
+import SystemManagement from './SystemManagement';
 import AdminProfile from './AdminProfile';
 
 const Dashboard = ({ user, onLogout }) => {
@@ -263,12 +264,7 @@ const Dashboard = ({ user, onLogout }) => {
         )}
 
         {activeTab === 'System Management' && (
-          <div className="dashboard-content">
-            <div className="page-header">
-              <h1>System Management</h1>
-              <p>Manage system configurations, backup and compliance settings.</p>
-            </div>
-          </div>
+          <SystemManagement user={user} />
         )}
 
         {activeTab === 'Profile' && (
