@@ -7,6 +7,7 @@ import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { secondaryAuth, db } from '../firebase';
 import { useContractorSsos, useContractorSites, siteLabel, STATUS_COLOR, initialsOf } from './contractorData';
 import { PageHeader, SearchBox, Badge, EmptyState, ErrorState, Skeleton } from './ui';
+import { logActivity } from '../activityLogger';
 
 /**
  * Site Safety Officers directory for the contractor.
@@ -36,6 +37,7 @@ const ContractorSsos = ({ contractorId, onAdd, onOpen, onBack, backLabel = 'Dash
         active: false,
         status: 'Inactive'
       });
+      logActivity(`Disabled Site Safety Officer: ${pendingDisable.fullName || pendingDisable.email}`);
       setPendingDisable(null);
     } catch (err) {
       console.error('Error disabling SSO:', err);
@@ -246,6 +248,8 @@ export const AddSso = ({ contractorId, onDone }) => {
 
       // Sign out secondary auth
       await secondaryAuth.signOut();
+
+      logActivity(`Created Site Safety Officer: ${formData.firstName.trim()} ${formData.lastName.trim()} (${formData.email.trim()})`);
 
       onDone();
     } catch (err) {

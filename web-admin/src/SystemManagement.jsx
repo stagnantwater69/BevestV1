@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  FiCamera, FiUploadCloud, FiPlus, FiSearch, FiCheckCircle, FiAlertCircle, 
+  FiCamera, FiUploadCloud, FiSearch, FiCheckCircle, FiAlertCircle, 
   FiRefreshCw, FiTrash2, FiPrinter, FiDownload, FiUser, FiShield, FiCpu, 
   FiWifi, FiWifiOff, FiX, FiEye, FiCheck, FiChevronLeft, FiChevronRight,
-  FiClock, FiTag, FiLayers, FiMinimize2
+  FiClock, FiTag, FiMinimize2
 } from 'react-icons/fi';
 import { 
-  collection, doc, getDocs, setDoc, deleteDoc, updateDoc, onSnapshot, query, orderBy 
+  collection, doc, getDocs, setDoc, deleteDoc, updateDoc, onSnapshot 
 } from 'firebase/firestore';
 import { db } from './firebase';
 import jsQR from 'jsqr';
 import QRCode from 'qrcode';
+import { logActivity } from './activityLogger';
 
 const SystemManagement = ({ user }) => {
   const [vests, setVests] = useState([]);
@@ -23,12 +24,9 @@ const SystemManagement = ({ user }) => {
 
   // Modals state
   const [showScannerModal, setShowScannerModal] = useState(false);
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showManualModal, setShowManualModal] = useState(false);
   const [showQrViewerModal, setShowQrViewerModal] = useState(null); // vest object
 
   // Form states
-  const [manualVestId, setManualVestId] = useState('');
   const [scanFeedback, setScanFeedback] = useState({ type: '', message: '' });
   const [isProcessing, setIsProcessing] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
@@ -180,6 +178,7 @@ const SystemManagement = ({ user }) => {
         type: 'success',
         message: `✓ Success! Vest "${vestId}" has been added to the company directory by ${currentAdminName}. SSOs can now assign this vest to workers on site.`
       });
+      logActivity(`Registered new vest: ${vestId}`, currentAdminEmail);
       setIsProcessing(false);
       return true;
     } catch (err) {
@@ -329,6 +328,7 @@ const SystemManagement = ({ user }) => {
           assignedVestId: null
         });
       }
+      logActivity(`Unassigned vest: ${vest.id}`, currentAdminEmail);
       alert(`Vest ${vest.id} is now Unassigned and Available for SSO pairing.`);
     } catch (err) {
       console.error('Error unassigning vest:', err);
@@ -348,6 +348,7 @@ const SystemManagement = ({ user }) => {
           assignedVestId: null
         });
       }
+      logActivity(`Removed vest: ${vest.id} from directory`, currentAdminEmail);
       alert(`Vest ${vest.id} removed from company directory.`);
     } catch (err) {
       console.error('Error deleting vest:', err);
@@ -427,14 +428,6 @@ const SystemManagement = ({ user }) => {
             accept="image/*" 
             style={{ display: 'none' }} 
           />
-
-          <button 
-            className="btn-secondary" 
-            onClick={() => { setManualVestId(''); setScanFeedback({ type: '', message: '' }); setShowManualModal(true); }}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
-          >
-            <FiPlus /> Add Vest ID
-          </button>
         </div>
       </div>
 
@@ -795,92 +788,6 @@ const SystemManagement = ({ user }) => {
                 style={{ padding: '0.7rem 1.25rem', fontSize: '0.875rem', fontWeight: 600, borderRadius: '8px' }}
               >
                 Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ----------------- MANUAL VEST ID MODAL (Centered Pop-up) ----------------- */}
-      {showManualModal && (
-        <div className="modal-overlay modal-backdrop" onClick={() => !isProcessing && setShowManualModal(false)}>
-          <div className="modal-content modal-popup" onClick={e => e.stopPropagation()} style={{ maxWidth: '440px', padding: '2rem 2.25rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-              <div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>Add Vest Manually</h3>
-              </div>
-              <button 
-                type="button" 
-                onClick={() => setShowManualModal(false)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.35rem', color: '#94a3b8', padding: '0.2rem', display: 'flex', alignItems: 'center', transition: 'color 0.2s' }}
-                title="Close"
-              >
-                <FiX />
-              </button>
-            </div>
-
-            <p style={{ color: '#64748b', fontSize: '0.875rem', lineHeight: 1.5, margin: '0 0 1.5rem 0' }}>
-              Enter the printed serial code or Vest ID (e.g. <strong style={{ color: '#0f172a' }}>VEST-001</strong>) found underneath the vest QR tag.
-            </p>
-
-            <div style={{ marginBottom: '1.25rem' }}>
-              <label className="form-label" style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', letterSpacing: '0.05em', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
-                VEST IDENTIFIER (ID)
-              </label>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="e.g. VEST-001"
-                value={manualVestId}
-                onChange={(e) => setManualVestId(e.target.value)}
-                style={{ width: '100%', padding: '0.75rem 1rem', fontSize: '0.95rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && manualVestId.trim()) {
-                    registerScannedVest(manualVestId).then(ok => { if (ok) setManualVestId(''); });
-                  }
-                }}
-              />
-            </div>
-
-            {scanFeedback.message && (
-              <div 
-                style={{ 
-                  marginBottom: '1.25rem', 
-                  padding: '0.75rem 1rem', 
-                  borderRadius: '8px', 
-                  fontSize: '0.85rem',
-                  lineHeight: 1.45,
-                  backgroundColor: scanFeedback.type === 'success' ? '#ecfdf5' : scanFeedback.type === 'warning' ? '#fffbeb' : '#fef2f2',
-                  color: scanFeedback.type === 'success' ? '#065f46' : scanFeedback.type === 'warning' ? '#92400e' : '#991b1b',
-                  border: `1px solid ${scanFeedback.type === 'success' ? '#a7f3d0' : scanFeedback.type === 'warning' ? '#fde68a' : '#fecaca'}`
-                }}
-              >
-                {scanFeedback.message}
-              </div>
-            )}
-
-            <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.75rem', marginTop: '1.75rem', width: '100%' }}>
-              <button 
-                type="button" 
-                className="btn-secondary" 
-                onClick={() => setShowManualModal(false)}
-                disabled={isProcessing}
-                style={{ padding: '0.7rem 1.25rem', fontSize: '0.875rem', fontWeight: 600, borderRadius: '8px' }}
-              >
-                Cancel
-              </button>
-              <button 
-                type="button" 
-                className="btn-primary" 
-                onClick={async () => {
-                  const ok = await registerScannedVest(manualVestId);
-                  if (ok) setManualVestId('');
-                }}
-                disabled={isProcessing || !manualVestId.trim()}
-                style={{ padding: '0.7rem 1.35rem', fontSize: '0.875rem', fontWeight: 600, borderRadius: '8px' }}
-              >
-                {isProcessing ? 'Adding...' : 'Add to Directory'}
               </button>
             </div>
           </div>

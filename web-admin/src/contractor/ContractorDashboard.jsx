@@ -129,6 +129,7 @@ const ContractorDashboard = ({ user, onLogout }) => {
           <ContractorOverview
             contractorId={contractorId}
             data={data}
+            profile={profile}
             onNavigate={go}
           />
         );

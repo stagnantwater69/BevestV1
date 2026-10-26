@@ -4,10 +4,11 @@ import {
 } from 'react-icons/fi';
 import logo from './assets/bevest_logo.png';
 import { auth, db } from './firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import UserManagement from './UserManagement';
 import SystemManagement from './SystemManagement';
 import AdminProfile from './AdminProfile';
+import { formatTimeAgo } from './activityLogger';
 
 const Dashboard = ({ user, onLogout }) => {
   const [activeTab, setActiveTab] = useState('Overview');
@@ -18,6 +19,70 @@ const Dashboard = ({ user, onLogout }) => {
   const [workerCount, setWorkerCount] = useState(0);
   const [vestCount, setVestCount] = useState(0);
   const [vestStats, setVestStats] = useState({ active: 0, offline: 0, other: 0 });
+
+  // Real-time Activity Logs from Firestore database
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(true);
+
+  // Subscribe to activityLog in real-time from Firestore
+  useEffect(() => {
+    let unsubscribe = () => {};
+    try {
+      const q = query(
+        collection(db, 'activityLog'),
+        orderBy('createdAt', 'desc'),
+        limit(50)
+      );
+
+      unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const logs = [];
+          snapshot.forEach((doc) => {
+            const d = doc.data();
+            logs.push({
+              id: doc.id,
+              action: d.message || d.action || 'Activity recorded',
+              actorId: d.actorId || 'System',
+              createdAt: d.createdAt || d.timestamp,
+              time: formatTimeAgo(d.createdAt || d.timestamp)
+            });
+          });
+          setActivityLogs(logs);
+          setLogsLoading(false);
+        },
+        (err) => {
+          console.warn('Falling back to unordered activityLog fetch:', err);
+          const fallbackUnsub = onSnapshot(collection(db, 'activityLog'), (snapshot) => {
+            const logs = [];
+            snapshot.forEach((doc) => {
+              const d = doc.data();
+              logs.push({
+                id: doc.id,
+                action: d.message || d.action || 'Activity recorded',
+                actorId: d.actorId || 'System',
+                createdAt: d.createdAt || d.timestamp,
+                time: formatTimeAgo(d.createdAt || d.timestamp)
+              });
+            });
+            logs.sort((a, b) => {
+              const timeA = typeof a.createdAt === 'number' ? a.createdAt : (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0);
+              const timeB = typeof b.createdAt === 'number' ? b.createdAt : (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0);
+              return timeB - timeA;
+            });
+            setActivityLogs(logs.slice(0, 50));
+            setLogsLoading(false);
+          });
+          unsubscribe = fallbackUnsub;
+        }
+      );
+    } catch (err) {
+      console.error('Error setting up activity log listener:', err);
+      setLogsLoading(false);
+    }
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const fetchCounts = async () => {
@@ -61,14 +126,6 @@ const Dashboard = ({ user, onLogout }) => {
   const activePct = totalVests ? Math.round((vestStats.active / totalVests) * 100) : 0;
   const offlinePct = totalVests ? Math.round((vestStats.offline / totalVests) * 100) : 0;
   const otherPct = totalVests ? Math.round((vestStats.other / totalVests) * 100) : 0;
-
-  const activityLogs = [
-    { id: 1, action: "Contractor account created for jimz@bevest.com", time: "42d ago" },
-    { id: 2, action: "Contractor account created for roch@bevest.com", time: "42d ago" },
-    { id: 3, action: "Contractor account created for test@gmail.com", time: "42d ago" },
-    { id: 4, action: "Maintenance mode disabled", time: "42d ago" },
-    { id: 5, action: "Maintenance mode enabled", time: "42d ago" }
-  ];
 
   const handleSignOut = () => {
     auth.signOut();
@@ -239,19 +296,36 @@ const Dashboard = ({ user, onLogout }) => {
                     <div>
                       {/* Subtitle moved to section header above */}
                     </div>
-                    <button onClick={() => setShowLogsModal(true)} className="view-all" style={{background: 'none', border: 'none', cursor: 'pointer'}}>Full Activity Log</button>
+                    <button onClick={() => setShowLogsModal(true)} className="view-all" style={{background: 'none', border: 'none', cursor: 'pointer'}}>
+                      Full Activity Log ({activityLogs.length})
+                    </button>
                   </div>
                   
                   <div className="activity-list">
-                    {activityLogs.slice(0, 3).map(log => (
-                      <div key={log.id} className="activity-row">
-                        <FiClock className="activity-icon" />
-                        <div className="activity-details">
-                          <p>{log.action}</p>
-                          <span className="activity-time">{log.time}</span>
-                        </div>
+                    {logsLoading ? (
+                      <div style={{ padding: '1.5rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
+                        Loading recent activity...
                       </div>
-                    ))}
+                    ) : activityLogs.length === 0 ? (
+                      <div style={{ padding: '1.5rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
+                        No recent activity recorded yet.
+                      </div>
+                    ) : (
+                      activityLogs.slice(0, 5).map(log => (
+                        <div key={log.id} className="activity-row">
+                          <FiClock className="activity-icon" />
+                          <div className="activity-details">
+                            <p>{log.action}</p>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.15rem' }}>
+                              <span className="activity-time">{formatTimeAgo(log.createdAt)}</span>
+                              {log.actorId && log.actorId !== 'System' && (
+                                <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>• {log.actorId}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               </div>
@@ -275,22 +349,33 @@ const Dashboard = ({ user, onLogout }) => {
       {/* Logs Modal */}
       {showLogsModal && (
         <div className="modal-overlay">
-          <div className="modal-content activity-modal">
+          <div className="modal-content activity-modal" style={{ maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div className="modal-header">
-              <h2>Full Activity Log</h2>
+              <h2>Full Activity Log ({activityLogs.length})</h2>
               <button className="close-btn" onClick={() => setShowLogsModal(false)}><FiX /></button>
             </div>
-            <div className="modal-body">
+            <div className="modal-body" style={{ overflowY: 'auto' }}>
               <div className="activity-list">
-                {activityLogs.map(log => (
-                  <div key={log.id} className="activity-row">
-                    <FiClock className="activity-icon" />
-                    <div className="activity-details">
-                      <p>{log.action}</p>
-                      <span className="activity-time">{log.time}</span>
+                {activityLogs.length === 0 ? (
+                  <p style={{ textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>
+                    No activity records found in database.
+                  </p>
+                ) : (
+                  activityLogs.map(log => (
+                    <div key={log.id} className="activity-row">
+                      <FiClock className="activity-icon" />
+                      <div className="activity-details">
+                        <p style={{ fontWeight: 600, color: '#0f172a' }}>{log.action}</p>
+                        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.2rem' }}>
+                          <span className="activity-time">{formatTimeAgo(log.createdAt)}</span>
+                          {log.actorId && (
+                            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>By: {log.actorId}</span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           </div>
