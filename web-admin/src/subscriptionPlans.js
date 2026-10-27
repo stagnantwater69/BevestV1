@@ -150,7 +150,7 @@ export function calculateRenewalDate(assignedDate, billingCycle = 'monthly') {
  * Safe fallback subscription for contractor accounts.
  */
 export function getContractorSubscription(userDocData = {}) {
-  if (userDocData && userDocData.subscription && userDocData.subscription.planId) {
+  if (userDocData && userDocData.subscription && userDocData.subscription.planId && userDocData.subscription.planId !== 'NONE') {
     const sub = userDocData.subscription;
     const plan = SUBSCRIPTION_PLANS[sub.planId] || SUBSCRIPTION_PLANS.BUSINESS;
     const assigned = sub.assignedAt || userDocData.createdAt || new Date();
@@ -158,6 +158,7 @@ export function getContractorSubscription(userDocData = {}) {
     const renew = sub.renewDate || calculateRenewalDate(assigned, billingCycle);
 
     return {
+      hasPlan: true,
       planId: plan.id,
       planName: plan.name,
       billingCycle,
@@ -170,29 +171,27 @@ export function getContractorSubscription(userDocData = {}) {
       assignedAt: assigned,
       renewDate: renew,
       status: sub.status || 'Active',
-      isCustom: plan.isCustom || false,
+      isCustom: plan.isCustom || sub.planId === 'CUSTOM',
       customNotes: sub.customNotes || ''
     };
   }
 
-  // Default Business Plan fallback
-  const plan = SUBSCRIPTION_PLANS.BUSINESS;
-  const assigned = userDocData.createdAt || new Date();
-  const renew = calculateRenewalDate(assigned, 'monthly');
-
+  // Contractors start with no subscription plan
   return {
-    planId: plan.id,
-    planName: plan.name,
-    billingCycle: 'monthly',
-    vestLimit: plan.vests,
-    ssoLimit: plan.ssos,
-    storageGb: plan.storageGb,
-    monthlyPrice: plan.monthlyPrice,
-    annualPrice: plan.annualPrice,
-    discountPercent: plan.discountPercent,
-    assignedAt: assigned,
-    renewDate: renew,
-    status: 'Active',
-    isCustom: false
+    hasPlan: false,
+    planId: 'NONE',
+    planName: 'No Subscription Plan',
+    billingCycle: 'none',
+    vestLimit: 0,
+    ssoLimit: 0,
+    storageGb: 0,
+    monthlyPrice: 0,
+    annualPrice: 0,
+    discountPercent: 0,
+    assignedAt: null,
+    renewDate: null,
+    status: 'No Plan',
+    isCustom: false,
+    customNotes: ''
   };
 }

@@ -4,6 +4,7 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import logo from './assets/bevest_logo.png';
+import { logActivity } from './activityLogger';
 
 const Login = ({ onLogin }) => {
   const [email, setEmail] = useState('');
@@ -30,12 +31,13 @@ const Login = ({ onLogin }) => {
         if (role !== 'ADMIN' && role !== 'CONTRACTOR') {
           await auth.signOut();
           setError('Unauthorized Access: Admin or Contractor privileges required.');
-        } else if (userData.active === false) {
+        } else if (userData.active === false || userData.status === 'Disabled') {
           await auth.signOut();
-          setError('Account is inactive.');
+          setError('This account has been disabled. Please contact your administrator.');
         } else {
           // Success: route to the role-specific web experience
           console.log(`${role} logged in successfully!`);
+          logActivity(`${role === 'ADMIN' ? 'Admin' : 'Contractor'} signed in: ${user.email}`, user.email);
           if (onLogin) onLogin({ uid: user.uid, email: user.email, role, profile: userData });
         }
       } else {

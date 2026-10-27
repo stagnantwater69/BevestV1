@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { FiShield, FiClock, FiUserCheck } from 'react-icons/fi';
+import { FiShield, FiClock, FiUserCheck, FiCreditCard } from 'react-icons/fi';
 import {
   STATUS_COLOR, buildMonthlyReports, useContractorSsos,
 } from './contractorData';
@@ -8,6 +8,7 @@ import {
   Skeleton,
 } from './ui';
 import IncidentTrendChart from './IncidentTrendChart';
+import { getContractorSubscription } from '../subscriptionPlans';
 
 const DAY = 24 * 3600 * 1000;
 
@@ -15,9 +16,10 @@ const DAY = 24 * 3600 * 1000;
  * Port of ContractorDashboardScreen: the contractor's overview across every site.
  * Focuses on trend — "are we getting safer?" — with monthly incident history.
  */
-const ContractorOverview = ({ contractorId, data, onNavigate }) => {
+const ContractorOverview = ({ contractorId, data, profile, onNavigate }) => {
   const { loading, error, workers, incidents, now } = data;
   const { ssos, loading: ssosLoading } = useContractorSsos(contractorId);
+  const subscription = getContractorSubscription(profile);
 
   const activeSsos = useMemo(
     () => ssos.filter((s) => s.active !== false).length,
@@ -50,6 +52,42 @@ const ContractorOverview = ({ contractorId, data, onNavigate }) => {
   return (
     <>
       {header}
+
+      {/* No Subscription Plan Notification Banner (Contractor can freely access all dashboard features) */}
+      {!subscription.hasPlan && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: '#fff7ed',
+          border: '1px solid #fed7aa',
+          borderRadius: '12px',
+          padding: '0.85rem 1.25rem',
+          marginBottom: '1.5rem',
+          gap: '1rem',
+          flexWrap: 'wrap'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ padding: '0.45rem', backgroundColor: '#ffedd5', color: '#ea580c', borderRadius: '8px', display: 'flex' }}>
+              <FiCreditCard style={{ fontSize: '1.25rem' }} />
+            </div>
+            <div>
+              <strong style={{ color: '#9a3412', fontSize: '0.9rem', display: 'block' }}>Account Active (No Subscription Plan)</strong>
+              <span style={{ color: '#7c2d12', fontSize: '0.825rem' }}>
+                You have full access to your safety dashboard, site monitoring, and reports. Choose a subscription package to activate smart vest hardware quotas and Site Safety Officers.
+              </span>
+            </div>
+          </div>
+          <button 
+            type="button"
+            className="btn-primary" 
+            onClick={() => onNavigate('Subscription')}
+            style={{ padding: '0.45rem 1rem', fontSize: '0.825rem', whiteSpace: 'nowrap' }}
+          >
+            View Plans
+          </button>
+        </div>
+      )}
 
       {/* ---- Headline figures ---- */}
       <div className="ct-stat-grid three">
