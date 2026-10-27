@@ -7,21 +7,30 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,6 +89,17 @@ fun SsoDashboardScreen(
     LaunchedEffect(user.siteId) { viewModel.start(user.siteId) }
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val palette = LocalStatusPalette.current
+    // Which count in the status panel was tapped; its workers show in a sheet.
+    var openGroup by remember { mutableStateOf<StatusGroup?>(null) }
+
+    openGroup?.let { group ->
+        StatusGroupSheet(
+            group = group,
+            workers = state.workers.filter(group.matches),
+            onOpenWorker = { id -> openGroup = null; onOpenWorker(id) },
+            onDismiss = { openGroup = null },
+        )
+    }
 
     BevestScaffold(
         title = "Safety dashboard",
@@ -140,10 +160,10 @@ fun SsoDashboardScreen(
                         supporting = state.supporting,
                         live = state.workers.any { !it.stale },
                         counts = listOf(
-                            SiteCount(state.onSiteCount, "On site"),
-                            SiteCount(state.warningCount, "Warning", palette.warning),
-                            SiteCount(state.dangerCount, "Danger", palette.danger),
-                            SiteCount(state.offlineCount, "Offline", palette.offline),
+                            SiteCount(state.onSiteCount, "On site", onClick = { openGroup = StatusGroup.ON_SITE }),
+                            SiteCount(state.warningCount, "Warning", palette.warning, onClick = { openGroup = StatusGroup.WARNING }),
+                            SiteCount(state.dangerCount, "Danger", palette.danger, onClick = { openGroup = StatusGroup.DANGER }),
+                            SiteCount(state.offlineCount, "Offline", palette.offline, onClick = { openGroup = StatusGroup.OFFLINE }),
                         ),
                         modifier = Modifier.animateContentSize(),
                     )
@@ -203,6 +223,57 @@ fun SsoDashboardScreen(
                     }
                 } else {
                     items(state.workers, key = { it.worker.workerId }) { live ->
+                        WorkerLiveRow(live, onClick = { onOpenWorker(live.worker.workerId) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The groups behind the status panel's counts, matching how each count is computed. */
+private enum class StatusGroup(val title: String, val matches: (WorkerLive) -> Boolean) {
+    ON_SITE("On site", { it.status != SafetyStatus.OFFLINE }),
+    WARNING("Warning", { it.status == SafetyStatus.WARNING }),
+    DANGER("Danger", { it.status == SafetyStatus.DANGER || it.status == SafetyStatus.EMERGENCY }),
+    OFFLINE("Offline", { it.status == SafetyStatus.OFFLINE }),
+}
+
+/** The workers behind one count, with their live readings; tap one to open them. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StatusGroupSheet(
+    group: StatusGroup,
+    workers: List<WorkerLive>,
+    onOpenWorker: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            Modifier.padding(horizontal = Spacing.gutter),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            SectionHeader(
+                title = group.title,
+                supporting = if (workers.size == 1) "1 worker" else "${workers.size} workers",
+            )
+            if (workers.isEmpty()) {
+                EmptyState(
+                    title = "No workers here",
+                    message = "Nobody on this site is ${group.title.lowercase()} right now.",
+                    icon = BevestIcons.NoWorkers,
+                    modifier = Modifier.heightIn(min = 180.dp),
+                )
+                Spacer(Modifier.height(Spacing.xl))
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(Spacing.md),
+                    contentPadding = PaddingValues(bottom = Spacing.xxl),
+                ) {
+                    items(workers, key = { it.worker.workerId }) { live ->
                         WorkerLiveRow(live, onClick = { onOpenWorker(live.worker.workerId) })
                     }
                 }

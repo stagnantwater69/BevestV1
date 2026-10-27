@@ -44,6 +44,7 @@ enum class Scenario(val label: String) {
     FALL("Fall detected"),
     INACTIVITY("Prolonged inactivity"),
     EMERGENCY_REQUEST("Manual emergency"),
+    OFFLINE("Vest offline"),
 }
 
 /** What the app is currently showing for one simulated worker. */
@@ -60,7 +61,7 @@ data class SimWorker(
     val battery: Int = 96,
     val motion: MotionState = MotionState.MOVING,
 ) {
-    enum class Phase { NORMAL, WARNING, DANGER, EMERGENCY }
+    enum class Phase { NORMAL, WARNING, DANGER, EMERGENCY, OFFLINE }
 }
 
 data class SimulationState(
@@ -103,7 +104,8 @@ class SimulationEngine @Inject constructor(
     /** Mutable per-worker sim data, keyed by workerId. Projected into [state]. */
     private val sim = mutableMapOf<String, MutableSim>()
     private val elapsedTicks = mutableMapOf<String, Int>()
-    private val openAlertId = mutableMapOf<String, String>()
+    /** Every alert this run has opened per worker — a scenario can raise DANGER then EMERGENCY. */
+    private val openAlertIds = mutableMapOf<String, MutableList<String>>()
     private val incidentRaised = mutableSetOf<String>()
 
     private var gpsCenter = 10.3157 to 123.8854
@@ -146,7 +148,7 @@ class SimulationEngine @Inject constructor(
                 return@launch
             }
             workers.firstOrNull()?.let { /* keep default center; could read last GPS */ }
-            sim.clear(); elapsedTicks.clear(); openAlertId.clear(); incidentRaised.clear()
+            sim.clear(); elapsedTicks.clear(); openAlertIds.clear(); incidentRaised.clear()
             workers.forEach { worker ->
                 val sw = SimWorker(
                     workerId = worker.workerId,
@@ -170,7 +172,9 @@ class SimulationEngine @Inject constructor(
 
     fun start() {
         if (!state.value.canStream || loop?.isActive == true) return
-        val firstId = sim.keys.firstOrNull()
+        // Probe with a vest that is meant to be transmitting, so an offline one stays offline.
+        val firstId = sim.entries.firstOrNull { it.value.w.scenario != Scenario.OFFLINE }?.key
+            ?: sim.keys.firstOrNull()
         if (firstId == null) {
             _state.update { it.copy(message = "No workers to stream.") }
             return
@@ -209,7 +213,10 @@ class SimulationEngine @Inject constructor(
         _state.update { it.copy(streaming = false) }
         log("Live stream stopped")
         scope.launch { sim.keys.forEach { monitoring.clearReading(it) } }
-        sim.values.forEach { it.w = it.w.copy(phase = SimWorker.Phase.NORMAL, motion = MotionState.MOVING) }
+        sim.values.forEach {
+            val phase = if (it.w.scenario == Scenario.OFFLINE) SimWorker.Phase.OFFLINE else SimWorker.Phase.NORMAL
+            it.w = it.w.copy(phase = phase, motion = MotionState.MOVING)
+        }
         elapsedTicks.clear()
         publish()
     }
@@ -224,21 +231,28 @@ class SimulationEngine @Inject constructor(
             s.w = s.w.copy(phase = SimWorker.Phase.NORMAL, motion = MotionState.MOVING)
             scope.launch { monitoring.setSafetyResponse(workerId, SafetyResponseState.NONE) }
         }
+        if (scenario == Scenario.OFFLINE) {
+            // A dead vest sends nothing: drop its live reading and let the tick skip it.
+            resolveOpenAlert(workerId, "Vest went offline")
+            s.w = s.w.copy(phase = SimWorker.Phase.OFFLINE, motion = MotionState.MOVING)
+            scope.launch { monitoring.clearReading(workerId) }
+        }
         log("${s.w.name}: scenario → ${scenario.label}")
         publish()
-        if (!state.value.streaming && scenario != Scenario.HEALTHY) start()
+        if (!state.value.streaming && scenario != Scenario.HEALTHY && scenario != Scenario.OFFLINE) start()
     }
 
     /** Jump a worker straight to a raised incident, skipping the wait. */
     fun escalateNow(workerId: String) {
         val s = sim[workerId] ?: return
-        if (s.w.scenario == Scenario.HEALTHY) setScenario(workerId, Scenario.FALL)
+        if (s.w.scenario == Scenario.HEALTHY || s.w.scenario == Scenario.OFFLINE) setScenario(workerId, Scenario.FALL)
         elapsedTicks[workerId] = 999
         scope.launch { tick(workerId); publish() }
     }
 
     private suspend fun tick(id: String) {
         val s = sim[id] ?: return
+        if (s.w.scenario == Scenario.OFFLINE) return
         val ticks = (elapsedTicks[id] ?: 0) + 1
         elapsedTicks[id] = ticks
         val sc = s.w.scenario
@@ -275,6 +289,7 @@ class SimulationEngine @Inject constructor(
                 response = SafetyResponseState.EMERGENCY_REQUESTED
                 hr = drift(hr, 110, 95, 130, 6)
             }
+            Scenario.OFFLINE -> Unit // never reached — skipped at the top of tick()
         }
         val battery = (s.w.battery - if (Random.nextInt(3) == 0) 1 else 0).coerceIn(5, 100)
 
@@ -316,7 +331,7 @@ class SimulationEngine @Inject constructor(
         )
 
         // --- raise the records the cloud engine would raise ---
-        if (phase == SimWorker.Phase.DANGER && !openAlertId.containsKey(id)) {
+        if (phase == SimWorker.Phase.DANGER && openAlertIds[id].isNullOrEmpty()) {
             raiseAlert(s.w, AlertSeverity.DANGER)
         }
         if (phase == SimWorker.Phase.EMERGENCY) {
@@ -342,6 +357,7 @@ class SimulationEngine @Inject constructor(
         Scenario.FALL -> AlertType.FALL_DETECTED
         Scenario.INACTIVITY -> AlertType.INACTIVITY
         Scenario.EMERGENCY_REQUEST -> AlertType.EMERGENCY_REQUEST
+        Scenario.OFFLINE -> AlertType.VEST_OFFLINE
         Scenario.HEALTHY -> AlertType.NO_SAFETY_RESPONSE
     }
 
@@ -351,13 +367,17 @@ class SimulationEngine @Inject constructor(
         Scenario.FALL -> "Fall detected — no movement since"
         Scenario.INACTIVITY -> "Prolonged inactivity detected"
         Scenario.EMERGENCY_REQUEST -> "Worker pressed the emergency button"
+        Scenario.OFFLINE -> "Vest stopped transmitting"
         Scenario.HEALTHY -> "No safety response"
     }
 
     private fun raiseAlert(w: SimWorker, severity: AlertSeverity) {
+        // Reserve the id before the write, so the incident raised right after links to
+        // this alert and a later recovery can close it.
+        val ref = firestore.collection(FirebasePaths.ALERTS).document()
+        openAlertIds.getOrPut(w.workerId) { mutableListOf() }.add(ref.id)
         scope.launch {
             try {
-                val ref = firestore.collection(FirebasePaths.ALERTS).document()
                 ref.set(
                     baseRecord(w) + mapOf(
                         "type" to typeFor(w.scenario).name,
@@ -366,7 +386,6 @@ class SimulationEngine @Inject constructor(
                         "message" to messageFor(w),
                     ),
                 ).await()
-                openAlertId[w.workerId] = ref.id
                 log("${w.name}: ${severity.name} alert raised")
             } catch (e: Exception) {
                 Log.e(TAG, "raiseAlert failed", e)
@@ -381,7 +400,7 @@ class SimulationEngine @Inject constructor(
                 val ref = firestore.collection(FirebasePaths.INCIDENTS).document()
                 ref.set(
                     baseRecord(w) + mapOf(
-                        "alertId" to openAlertId[w.workerId],
+                        "alertId" to openAlertIds[w.workerId]?.lastOrNull(),
                         "type" to typeFor(w.scenario).name,
                         "severity" to AlertSeverity.EMERGENCY.name,
                         "heartRate" to w.heartRate,
@@ -401,17 +420,19 @@ class SimulationEngine @Inject constructor(
     }
 
     private fun resolveOpenAlert(workerId: String, notes: String) {
-        val alertId = openAlertId.remove(workerId) ?: return
+        val alertIds = openAlertIds.remove(workerId) ?: return
         scope.launch {
-            runCatching {
-                firestore.collection(FirebasePaths.ALERTS).document(alertId).update(
-                    mapOf(
-                        "status" to AlertStatus.RESOLVED.name,
-                        "resolvedAt" to System.currentTimeMillis(),
-                        "resolutionNotes" to notes,
-                        "resolvedBy" to (authRepository.currentUserId() ?: "simulator"),
-                    ),
-                ).await()
+            alertIds.forEach { alertId ->
+                runCatching {
+                    firestore.collection(FirebasePaths.ALERTS).document(alertId).update(
+                        mapOf(
+                            "status" to AlertStatus.RESOLVED.name,
+                            "resolvedAt" to System.currentTimeMillis(),
+                            "resolutionNotes" to notes,
+                            "resolvedBy" to (authRepository.currentUserId() ?: "simulator"),
+                        ),
+                    ).await()
+                }
             }
         }
     }
@@ -481,7 +502,9 @@ class SimulationEngine @Inject constructor(
                                 "contractorId" to w.contractorId,
                                 "type" to type.name,
                                 "severity" to severity.name,
-                                "status" to if (resolved) AlertStatus.RESOLVED.name else AlertStatus.ACTIVE.name,
+                                // History is past events: the alert is long over even when
+                                // the incident review is still open, so it never goes live.
+                                "status" to AlertStatus.RESOLVED.name,
                                 "message" to "${type.name.replace('_', ' ').lowercase(Locale.US)} · ${w.name}",
                                 "createdAt" to createdAt,
                                 "incidentId" to incidentRef.id,
@@ -543,7 +566,7 @@ class SimulationEngine @Inject constructor(
                 }
                 sim.keys.forEach { monitoring.clearReading(it) }
                 sim.values.forEach { it.w = it.w.copy(scenario = Scenario.HEALTHY, phase = SimWorker.Phase.NORMAL) }
-                openAlertId.clear(); incidentRaised.clear(); elapsedTicks.clear()
+                openAlertIds.clear(); incidentRaised.clear(); elapsedTicks.clear()
                 publish()
                 log("Reset — removed $deleted simulated records")
                 _state.update { it.copy(busy = false, message = "Cleared all simulated data.") }

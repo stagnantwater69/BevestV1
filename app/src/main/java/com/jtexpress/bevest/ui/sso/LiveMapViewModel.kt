@@ -2,6 +2,7 @@ package com.jtexpress.bevest.ui.sso
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.repository.MonitoringRepository
 import com.jtexpress.bevest.domain.repository.SettingsRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
@@ -24,7 +25,9 @@ data class LiveMapState(
     val noSite: Boolean = false,
     val markers: List<WorkerLive> = emptyList(),
 ) {
-    val located get() = markers.filter { it.reading?.latitude != null && it.reading.longitude != null }
+    /** Workers whose vests are reporting; offline workers are left off the map. */
+    val online get() = markers.filter { it.status != SafetyStatus.OFFLINE }
+    val located get() = online.filter { it.reading?.latitude != null && it.reading.longitude != null }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)

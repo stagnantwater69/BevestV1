@@ -117,7 +117,8 @@ class AlertRepositoryImpl @Inject constructor(
         outcome: String,
         notes: String,
     ): Outcome<Unit> = try {
-        incidents.document(incidentId).update(
+        val ref = incidents.document(incidentId)
+        ref.update(
             mapOf(
                 "outcome" to outcome,
                 "resolutionNotes" to notes,
@@ -125,6 +126,11 @@ class AlertRepositoryImpl @Inject constructor(
                 "resolvedAt" to FieldValue.serverTimestamp(),
             ),
         ).await()
+        // Closing the incident closes the alert it grew from, or that alert stays
+        // "active" on the dashboard forever.
+        ref.get().await().getString("alertId")?.takeIf { it.isNotBlank() }?.let { alertId ->
+            runCatching { resolveAlert(alertId, byUserId, notes.ifBlank { outcome }) }
+        }
         Outcome.Success(Unit)
     } catch (e: Exception) {
         Outcome.Failure(e.toAppError())

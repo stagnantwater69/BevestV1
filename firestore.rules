@@ -55,6 +55,15 @@ service cloud.firestore {
       allow create: if isAdmin()
                  || (isContractor() && request.resource.data.role == 'SSO' && request.resource.data.contractorId == request.auth.uid);
       allow update: if isAdmin()
+                    // A contractor manages their own officers: edit details, move them
+                    // to another site, or disable them — but never change who they are
+                    // (role, email) or which contractor they belong to.
+                    || (isContractor()
+                        && resource.data.role == 'SSO'
+                        && resource.data.contractorId == request.auth.uid
+                        && request.resource.data.role == resource.data.role
+                        && request.resource.data.contractorId == resource.data.contractorId
+                        && request.resource.data.email == resource.data.email)
                     || (request.auth.uid == uid
                         && request.resource.data.role == resource.data.role
                         && request.resource.data.active == resource.data.active
@@ -110,10 +119,12 @@ service cloud.firestore {
       allow read: if isAdmin()
                   || (isSso() && resource.data.siteId == mySiteId())
                   || (isContractor() && resource.data.contractorId == myContractorId());
-      // Real incidents come only from the cloud engine. Simulated ones (flagged
-      // `simulated == true`) may be created/removed by any signed-in user so the
-      // app can be demoed before the IoT layer exists.
+      // Real incidents come from the cloud engine or, while the project has no
+      // cloud functions (free plan), from an SSO's app escalating a fall on their own
+      // site. Simulated ones (flagged `simulated == true`) may be created/removed by
+      // any signed-in user so the app can be demoed before the IoT layer exists.
       allow create: if isAdmin()
+                    || (isSso() && request.resource.data.siteId == mySiteId())
                     || (isSignedIn() && request.resource.data.simulated == true);
       allow update: if isAdmin()
                     || (isSso() && resource.data.siteId == mySiteId())
