@@ -21,7 +21,19 @@ interface UserRepository {
 
     fun observeUsersByRole(role: com.jtexpress.bevest.domain.model.UserRole): Flow<Outcome<List<User>>>
 
+    /** Every account regardless of role (admin only). */
+    fun observeAllUsers(): Flow<Outcome<List<User>>>
+
     suspend fun updateProfile(uid: String, firstName: String, lastName: String, phone: String): Outcome<Unit>
+
+    /** A contractor editing one of their officers, including the site they monitor. */
+    suspend fun updateSso(
+        uid: String,
+        firstName: String,
+        lastName: String,
+        phone: String,
+        siteId: String?,
+    ): Outcome<Unit>
 
     suspend fun addFcmToken(uid: String, token: String): Outcome<Unit>
 

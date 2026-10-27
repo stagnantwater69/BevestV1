@@ -262,6 +262,7 @@ private fun SimWorkerCard(
         SimWorker.Phase.WARNING -> palette.warning
         SimWorker.Phase.DANGER -> palette.danger
         SimWorker.Phase.EMERGENCY -> palette.emergency
+        SimWorker.Phase.OFFLINE -> palette.offline
     }
     Surface(
         shape = RoundedCornerShape(Radius.md),
@@ -311,7 +312,10 @@ private fun SimWorkerCard(
                 }
             }
 
-            if (worker.scenario != Scenario.HEALTHY && worker.phase != SimWorker.Phase.EMERGENCY) {
+            if (worker.scenario != Scenario.HEALTHY &&
+                worker.scenario != Scenario.OFFLINE &&
+                worker.phase != SimWorker.Phase.EMERGENCY
+            ) {
                 OutlinedButton(
                     onClick = onEscalate,
                     modifier = Modifier.fillMaxWidth(),

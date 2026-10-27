@@ -86,6 +86,8 @@ class UserRepositoryImpl @Inject constructor(
     override fun observeSsos(contractorId: String): Flow<Outcome<List<User>>> =
         users.whereEqualTo("role", UserRole.SSO.name)
             .whereEqualTo("contractorId", contractorId)
+            // The rules only let a contractor list /users with a bounded query.
+            .limit(200)
             .snapshots()
             .map { qs -> Outcome.Success(qs.documents.map { it.toUser() }) as Outcome<List<User>> }
             .catch { emit(Outcome.Failure(it.toAppError())) }
@@ -99,6 +101,11 @@ class UserRepositoryImpl @Inject constructor(
             .map { qs -> Outcome.Success(qs.documents.map { it.toUser() }) as Outcome<List<User>> }
             .catch { emit(Outcome.Failure(it.toAppError())) }
 
+    override fun observeAllUsers(): Flow<Outcome<List<User>>> =
+        users.snapshots()
+            .map { qs -> Outcome.Success(qs.documents.map { it.toUser() }) as Outcome<List<User>> }
+            .catch { emit(Outcome.Failure(it.toAppError())) }
+
     override suspend fun updateProfile(
         uid: String,
         firstName: String,
@@ -107,6 +114,26 @@ class UserRepositoryImpl @Inject constructor(
     ): Outcome<Unit> = try {
         users.document(uid).update(
             mapOf("firstName" to firstName, "lastName" to lastName, "phone" to phone),
+        ).await()
+        Outcome.Success(Unit)
+    } catch (e: Exception) {
+        Outcome.Failure(e.toAppError())
+    }
+
+    override suspend fun updateSso(
+        uid: String,
+        firstName: String,
+        lastName: String,
+        phone: String,
+        siteId: String?,
+    ): Outcome<Unit> = try {
+        users.document(uid).update(
+            mapOf(
+                "firstName" to firstName,
+                "lastName" to lastName,
+                "phone" to phone,
+                "siteId" to siteId,
+            ),
         ).await()
         Outcome.Success(Unit)
     } catch (e: Exception) {

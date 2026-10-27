@@ -30,12 +30,28 @@ data class SsoDashboardState(
     val activeAlerts: List<Alert> = emptyList(),
 ) {
     val emergencies get() = workers.filter { it.status == SafetyStatus.EMERGENCY }
-    val dangerCount get() = workers.count { it.status == SafetyStatus.DANGER }
+    // An emergency is danger that went unanswered — it must not drop out of the count.
+    val dangerCount get() = workers.count {
+        it.status == SafetyStatus.DANGER || it.status == SafetyStatus.EMERGENCY
+    }
     val warningCount get() = workers.count { it.status == SafetyStatus.WARNING }
     val offlineCount get() = workers.count { it.status == SafetyStatus.OFFLINE }
     val onSiteCount get() = workers.count { it.status != SafetyStatus.OFFLINE }
+    /**
+     * The emergency worth a banner: an open EMERGENCY alert whose worker is still in
+     * trouble right now. An alert nobody closed shouldn't keep shouting once the
+     * worker's readings are back to normal — it stays in "Needs attention" instead.
+     */
     val topEmergencyAlert: Alert?
-        get() = activeAlerts.firstOrNull { it.severity == AlertSeverity.EMERGENCY }
+        get() {
+            val inTrouble = workers
+                .filter { it.status == SafetyStatus.EMERGENCY || it.status == SafetyStatus.DANGER }
+                .map { it.worker.workerId }
+                .toSet()
+            return activeAlerts.firstOrNull {
+                it.severity == AlertSeverity.EMERGENCY && it.workerId in inTrouble
+            }
+        }
 
     /**
      * The worst state anyone on site is in. Drives the dashboard's headline and the

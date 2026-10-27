@@ -12,9 +12,10 @@ import com.jtexpress.bevest.ui.common.profileDestinations
 @Composable
 fun AdminArea(user: User, onSignOut: () -> Unit) {
     RoleScaffold(
+        // Mirrors the web admin's sidebar: Overview, User Management, System Management.
         tabs = listOf(
-            BottomTab(Routes.ADMIN_DASHBOARD, "Dashboard", BevestIcons.Dashboard),
-            BottomTab(Routes.ADMIN_CONTRACTORS, "Contractors", BevestIcons.Contractors),
+            BottomTab(Routes.ADMIN_DASHBOARD, "Overview", BevestIcons.Dashboard),
+            BottomTab(Routes.ADMIN_USERS, "Users", BevestIcons.Workers),
             BottomTab(Routes.ADMIN_SYSTEM, "System", BevestIcons.System),
         ),
         startRoute = Routes.ADMIN_DASHBOARD,
@@ -22,18 +23,17 @@ fun AdminArea(user: User, onSignOut: () -> Unit) {
         composable(Routes.ADMIN_DASHBOARD) {
             AdminDashboardScreen(user = user, navigate = { route -> navController.navigate(route) })
         }
-        composable(Routes.ADMIN_CONTRACTORS) {
-            AdminContractorsScreen(
-                onAdd = { navController.navigate(Routes.ADMIN_ADD_CONTRACTOR) },
-                onOpen = { id -> navController.navigate(Routes.withArg(Routes.ADMIN_CONTRACTOR_DETAIL, id)) },
+        composable(Routes.ADMIN_USERS) {
+            AdminUsersScreen(
+                onAdd = { navController.navigate(Routes.ADMIN_ADD_USER) },
+                onOpen = { uid -> navController.navigate(Routes.withArg(Routes.ADMIN_USER_DETAIL, uid)) },
             )
         }
-        composable(Routes.ADMIN_ADD_CONTRACTOR) {
-            AddContractorScreen(actorId = user.uid, onDone = { navController.popBackStack() })
+        composable(Routes.ADMIN_ADD_USER) {
+            AddUserScreen(actorId = user.uid, onDone = { navController.popBackStack() })
         }
-        composable("${Routes.ADMIN_CONTRACTOR_DETAIL}/{contractorId}") { entry ->
-            AdminContractorDetailScreen(
-                contractorId = entry.arguments?.getString("contractorId").orEmpty(),
+        composable("${Routes.ADMIN_USER_DETAIL}/{uid}") {
+            AdminUserDetailScreen(
                 actorId = user.uid,
                 onBack = { navController.popBackStack() },
             )

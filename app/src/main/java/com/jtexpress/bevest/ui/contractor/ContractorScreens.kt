@@ -23,7 +23,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -37,19 +36,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.jtexpress.bevest.BuildConfig
 import com.jtexpress.bevest.domain.model.AlertSeverity
 import com.jtexpress.bevest.domain.model.Incident
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.model.User
-import com.jtexpress.bevest.navigation.Routes
-import com.jtexpress.bevest.ui.common.BarDatum
 import com.jtexpress.bevest.ui.common.BevestCard
 import com.jtexpress.bevest.ui.common.BevestScaffold
 import com.jtexpress.bevest.ui.common.ConfirmationDialog
@@ -62,7 +60,6 @@ import com.jtexpress.bevest.ui.common.FilterOption
 import com.jtexpress.bevest.ui.common.FilterRow
 import com.jtexpress.bevest.ui.common.FormField
 import com.jtexpress.bevest.ui.common.FormSection
-import com.jtexpress.bevest.ui.common.InsightCard
 import com.jtexpress.bevest.ui.common.ListSkeleton
 import com.jtexpress.bevest.ui.common.PrimaryButton
 import com.jtexpress.bevest.ui.common.ProfileAction
@@ -73,10 +70,8 @@ import com.jtexpress.bevest.ui.common.StatTile
 import com.jtexpress.bevest.ui.common.StatusBadge
 import com.jtexpress.bevest.ui.common.StatusBar
 import com.jtexpress.bevest.ui.common.StatusSlice
-import com.jtexpress.bevest.ui.common.TrendBars
 import com.jtexpress.bevest.ui.common.WorkerAvatar
 import com.jtexpress.bevest.ui.common.label
-import com.jtexpress.bevest.ui.sso.WorkerDirectoryScreen
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.BevestShapes
 import com.jtexpress.bevest.ui.theme.ComponentHeight
@@ -94,14 +89,16 @@ private fun contractorId(user: User) = user.contractorId ?: user.uid
  * The contractor's overview across every site.
  *
  * Where the officer's dashboard is about *now*, this one is about *trend* — a contractor
- * is answering "are we getting safer?", not "who needs help this minute". So each block
- * leads with a sentence stating the answer and puts the chart underneath as evidence,
- * rather than presenting a chart and leaving the reader to do the comparison themselves.
+ * is answering "are we getting safer?", not "who needs help this minute". Each headline
+ * figure opens the screen that explains it, the same as on the web dashboard.
  */
 @Composable
 fun ContractorDashboardScreen(
     user: User,
-    navigate: (String) -> Unit,
+    onOpenProfile: () -> Unit,
+    onOpenSsos: () -> Unit,
+    onOpenReport: (monthKey: String) -> Unit,
+    onOpenIncidents: () -> Unit,
     viewModel: ContractorDashboardViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(user.uid) { viewModel.start(contractorId(user)) }
@@ -111,14 +108,7 @@ fun ContractorDashboardScreen(
     BevestScaffold(
         title = "Safety overview",
         subtitle = "All sites",
-        actions = {
-            if (BuildConfig.DEBUG) {
-                IconButton(onClick = { navigate(Routes.SIMULATION) }) {
-                    Icon(BevestIcons.Simulator, contentDescription = "IoT simulation")
-                }
-            }
-            ProfileAction(user, onClick = { navigate(Routes.PROFILE) })
-        },
+        actions = { ProfileAction(user, onClick = onOpenProfile) },
     ) { padding ->
         when {
             state.loading -> DashboardSkeleton(Modifier.padding(padding))
@@ -134,9 +124,10 @@ fun ContractorDashboardScreen(
                 // ---- Headline figures ----
                 Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
                     StatTile(
-                        icon = BevestIcons.Workers,
-                        value = state.activeWorkers.toString(),
-                        label = "Active workers",
+                        icon = BevestIcons.Officer,
+                        value = state.activeSsos.toString(),
+                        label = "Active SSO",
+                        onClick = onOpenSsos,
                         modifier = Modifier.weight(1f),
                     )
                     StatTile(
@@ -144,107 +135,32 @@ fun ContractorDashboardScreen(
                         value = "${state.safetyScore}%",
                         label = "Safety score",
                         accent = if (state.safetyScore >= 90) palette.normal else palette.warning,
+                        onClick = state.currentMonthKey?.let { key -> { onOpenReport(key) } },
                         modifier = Modifier.weight(1f),
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
-                    StatTile(
-                        icon = BevestIcons.Alerts,
-                        value = state.todaysAlerts.toString(),
-                        label = "Alerts today",
-                        accent = if (state.todaysAlerts > 0) palette.warning else null,
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatTile(
-                        icon = BevestIcons.History,
-                        value = state.monthlyIncidents.toString(),
-                        label = "Incidents (30d)",
-                        accent = if (state.monthlyIncidents > 0) palette.danger else null,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-
-                // ---- Who is where, right now ----
-                SectionHeader(
-                    title = "Worker status",
-                    supporting = "Across every site you run",
+                StatTile(
+                    icon = BevestIcons.History,
+                    value = state.monthlyIncidents.toString(),
+                    label = "Incidents (30d)",
+                    accent = if (state.monthlyIncidents > 0) palette.danger else null,
+                    onClick = onOpenIncidents,
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                BevestCard {
-                    InsightCard(
-                        text = state.statusInsight,
-                        icon = BevestIcons.Workers,
-                        accent = when {
-                            state.danger > 0 -> palette.danger
-                            state.warning > 0 -> palette.warning
-                            else -> palette.normal
-                        },
-                    )
-                    Spacer(Modifier.height(Spacing.lg))
-                    StatusBar(
-                        slices = listOf(
-                            StatusSlice("Normal", state.normal, palette.normal),
-                            StatusSlice("Warning", state.warning, palette.warning),
-                            StatusSlice("Danger", state.danger, palette.danger),
-                        ),
-                    )
-                }
 
                 // ---- Trend ----
-                if (state.trends.isNotEmpty()) {
-                    SectionHeader(
-                        title = "Incident trend",
-                        supporting = "Recorded incidents by month",
-                    )
-                    BevestCard {
-                        InsightCard(
-                            text = state.incidentInsight,
-                            icon = BevestIcons.Reports,
-                            accent = palette.warning,
-                        )
-                        Spacer(Modifier.height(Spacing.lg))
-                        TrendBars(
-                            data = state.trends.map {
-                                BarDatum(
-                                    DateTimeUtils.monthLabel(it.monthKey).take(3),
-                                    it.totalIncidents.toFloat(),
-                                )
-                            },
-                        )
-                    }
-                }
-
-                // ---- Recent incidents ----
                 SectionHeader(
-                    title = "Recent incidents",
-                    supporting = "Newest first",
+                    title = "Incident trend",
+                    supporting = "Recorded incidents by month or by day",
                 )
-                if (state.recentIncidents.isEmpty()) {
-                    EmptyState(
-                        title = "No incidents recorded",
-                        message = "Incidents appear here once an alert is closed with an outcome.",
-                        icon = BevestIcons.History,
-                        modifier = Modifier.heightIn(min = 200.dp),
-                    )
-                } else {
-                    state.recentIncidents.take(5).forEach { incident ->
-                        IncidentRow(incident, onClick = null)
-                    }
+                BevestCard {
+                    IncidentTrendChart(incidents = state.incidents)
                 }
 
-                SecondaryButton(
-                    text = "Manage Site Safety Officers",
-                    onClick = { navigate(Routes.CONTRACTOR_SSOS) },
-                    icon = BevestIcons.Officer,
-                )
                 Spacer(Modifier.height(Spacing.lg))
             }
         }
     }
-}
-
-@Composable
-fun ContractorWorkersScreen(user: User, onOpenWorker: (String) -> Unit) {
-    WorkerDirectoryScreen(user = user, onOpenWorker = onOpenWorker, onAddWorker = {})
 }
 
 // -------------------------------------------------------------------- SSOs
@@ -253,6 +169,7 @@ fun ContractorWorkersScreen(user: User, onOpenWorker: (String) -> Unit) {
 fun ContractorSsosScreen(
     user: User,
     onAdd: () -> Unit,
+    onOpen: (uid: String) -> Unit,
     viewModel: SsoListViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(user.uid) { viewModel.start(contractorId(user)) }
@@ -264,6 +181,7 @@ fun ContractorSsosScreen(
 
     BevestScaffold(
         title = "Site Safety Officers",
+        subtitle = "Officers monitoring workers on your sites",
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = onAdd,
@@ -317,8 +235,9 @@ fun ContractorSsosScreen(
                             PersonRow(
                                 name = sso.fullName.ifBlank { sso.email },
                                 email = sso.email,
-                                supporting = sso.siteId?.let { "Site $it" } ?: "No site assigned",
+                                supporting = state.siteName(sso.siteId),
                                 active = sso.active,
+                                onClick = { onOpen(sso.uid) },
                                 trailing = {
                                     StatusBadge(
                                         text = if (sso.active) "Active" else "Disabled",
@@ -512,10 +431,15 @@ fun AddSsoScreen(
                     "Temporary password",
                     error = state.errors["tempPassword"],
                     helper = "They change this from their profile after signing in",
-                    isPassword = true,
+                    // Shown, not masked: the contractor has to pass it on to the officer.
                     required = true,
                     imeAction = ImeAction.Done,
                     onImeAction = viewModel::submit,
+                )
+                SecondaryButton(
+                    text = if (state.tempPassword.isBlank()) "Generate password" else "Generate a new one",
+                    onClick = viewModel::generatePassword,
+                    icon = BevestIcons.Refresh,
                 )
             }
 
@@ -546,7 +470,10 @@ fun ContractorReportsScreen(
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val palette = LocalStatusPalette.current
 
-    BevestScaffold(title = "Reports") { padding ->
+    BevestScaffold(
+        title = "Reports",
+        subtitle = "Monthly summaries and the full incident record",
+    ) { padding ->
         when {
             state.loading -> ListSkeleton(modifier = Modifier.padding(padding))
 
@@ -563,10 +490,21 @@ fun ContractorReportsScreen(
                 verticalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
                 item(key = "incidents-link") {
-                    SecondaryButton(
-                        text = "Incident history",
-                        onClick = onOpenIncidents,
+                    QuickLink(
                         icon = BevestIcons.History,
+                        title = "Incident history",
+                        supporting = state.incidentCount?.let {
+                            "$it ${if (it == 1) "incident" else "incidents"} on record"
+                        } ?: "Every recorded incident",
+                        onClick = onOpenIncidents,
+                    )
+                }
+                item(key = "ssos-link") {
+                    QuickLink(
+                        icon = BevestIcons.Officer,
+                        title = "Site Safety Officers",
+                        supporting = "Manage who monitors your sites",
+                        onClick = onOpenSsos,
                     )
                 }
                 item(key = "monthly-header") {
@@ -618,6 +556,11 @@ fun ContractorReportsScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
+                                SeverityCounts(
+                                    warning = report.warningCount,
+                                    danger = report.dangerCount,
+                                    emergency = report.emergencyCount,
+                                )
                                 StatusBadge(
                                     text = "${report.safetyPercentage}% safe",
                                     color = if (healthy) palette.normal else palette.warning,
@@ -733,7 +676,11 @@ fun MonthlyReportDetailScreen(
                         )
                     } else {
                         state.incidents.forEach { incident ->
-                            IncidentRow(incident, onClick = null)
+                            IncidentRow(
+                                incident,
+                                workerName = state.workerNames[incident.workerId],
+                                onClick = null,
+                            )
                         }
                     }
                     Spacer(Modifier.height(Spacing.lg))
@@ -817,6 +764,7 @@ fun ContractorIncidentsScreen(
                         items(state.visible, key = { it.incidentId }) { incident ->
                             IncidentRow(
                                 incident,
+                                workerName = state.workerNames[incident.workerId],
                                 onClick = { onOpenIncident(incident.incidentId) },
                             )
                         }
@@ -835,6 +783,7 @@ fun ContractorIncidentsScreen(
 @Composable
 private fun IncidentRow(
     incident: Incident,
+    workerName: String?,
     onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
@@ -886,7 +835,7 @@ private fun IncidentRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "Worker ${incident.workerId}",
+                    workerName ?: "Worker ${incident.workerId}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -901,5 +850,84 @@ private fun IncidentRow(
                 color = if (open) palette.warning else palette.normal,
             )
         }
+    }
+}
+
+/** A tappable row that opens another screen: icon, title, one line of context, chevron. */
+@Composable
+private fun QuickLink(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    supporting: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = ComponentHeight.listRow)
+            .clip(BevestShapes.card)
+            .clickable(onClick = onClick),
+        shape = BevestShapes.card,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(
+            Modifier.padding(Spacing.lg),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(BevestShapes.tile)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(IconSize.medium),
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    supporting,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(IconSize.large),
+            )
+        }
+    }
+}
+
+/** A month's incidents split by severity, as three small colored counts. */
+@Composable
+private fun SeverityCounts(warning: Int, danger: Int, emergency: Int) {
+    val palette = LocalStatusPalette.current
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+        modifier = Modifier.semantics(mergeDescendants = true) {
+            contentDescription = "$warning warning, $danger danger, $emergency emergency"
+        },
+    ) {
+        listOf(warning to palette.warning, danger to palette.danger, emergency to palette.emergency)
+            .forEach { (count, color) ->
+                Box(
+                    Modifier
+                        .clip(BevestShapes.tile)
+                        .background(color.copy(alpha = 0.12f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(count.toString(), style = MaterialTheme.typography.labelSmall, color = color)
+                }
+            }
     }
 }

@@ -17,16 +17,16 @@ object Routes {
 
     // Admin
     const val ADMIN_DASHBOARD = "admin_dashboard"
-    const val ADMIN_CONTRACTORS = "admin_contractors"
-    const val ADMIN_CONTRACTOR_DETAIL = "admin_contractor_detail" // /{contractorId}
-    const val ADMIN_ADD_CONTRACTOR = "admin_add_contractor"
+    const val ADMIN_USERS = "admin_users"
+    const val ADMIN_USER_DETAIL = "admin_user_detail" // /{uid}
+    const val ADMIN_ADD_USER = "admin_add_user"
     const val ADMIN_SYSTEM = "admin_system"
     const val ADMIN_ACTIVITY = "admin_activity"
 
     // Contractor
     const val CONTRACTOR_DASHBOARD = "contractor_dashboard"
-    const val CONTRACTOR_WORKERS = "contractor_workers"
     const val CONTRACTOR_SSOS = "contractor_ssos"
+    const val CONTRACTOR_SSO_DETAIL = "contractor_sso_detail" // /{uid}
     const val CONTRACTOR_ADD_SSO = "contractor_add_sso"
     const val CONTRACTOR_REPORTS = "contractor_reports"
     const val CONTRACTOR_REPORT_DETAIL = "contractor_report_detail" // /{monthKey}
