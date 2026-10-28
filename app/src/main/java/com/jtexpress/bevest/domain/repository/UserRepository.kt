@@ -35,6 +35,9 @@ interface UserRepository {
         siteId: String?,
     ): Outcome<Unit>
 
+    /** A contractor choosing or changing their own plan. */
+    suspend fun updateSubscription(uid: String, subscription: com.jtexpress.bevest.domain.model.Subscription): Outcome<Unit>
+
     suspend fun addFcmToken(uid: String, token: String): Outcome<Unit>
 
     suspend fun removeFcmToken(uid: String, token: String): Outcome<Unit>

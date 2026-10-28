@@ -12,6 +12,7 @@ import androidx.compose.material.icons.outlined.BatteryFull
 import androidx.compose.material.icons.outlined.Bloodtype
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Business
+import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Dashboard
@@ -58,6 +59,7 @@ object BevestIcons {
     val Contractors: ImageVector = Icons.Outlined.Business
     val System: ImageVector = Icons.Outlined.SettingsSuggest
     val Reports: ImageVector = Icons.Outlined.Assessment
+    val Subscription: ImageVector = Icons.Outlined.CreditCard
 
     // Sensors
     val HeartRate: ImageVector = Icons.Outlined.Favorite

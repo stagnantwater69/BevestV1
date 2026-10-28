@@ -30,6 +30,7 @@ fun ContractorArea(user: User, onSignOut: () -> Unit) {
             add(BottomTab(Routes.CONTRACTOR_DASHBOARD, "Dashboard", BevestIcons.Dashboard))
             add(BottomTab(Routes.CONTRACTOR_SSOS, "SSO", BevestIcons.Officer))
             add(BottomTab(Routes.CONTRACTOR_REPORTS, "Reports", BevestIcons.Reports))
+            add(BottomTab(Routes.CONTRACTOR_SUBSCRIPTION, "Plan", BevestIcons.Subscription))
             // Demo tooling: a tab in debug builds, absent from release.
             if (BuildConfig.DEBUG) add(BottomTab(Routes.SIMULATION, "Simulation", BevestIcons.Simulator))
         },
@@ -42,6 +43,13 @@ fun ContractorArea(user: User, onSignOut: () -> Unit) {
                 onOpenSsos = { navController.openTab(Routes.CONTRACTOR_SSOS) },
                 onOpenReport = { key -> navController.navigate(Routes.withArg(Routes.CONTRACTOR_REPORT_DETAIL, key)) },
                 onOpenIncidents = { navController.navigate(Routes.CONTRACTOR_INCIDENTS) },
+                onOpenSubscription = { navController.openTab(Routes.CONTRACTOR_SUBSCRIPTION) },
+            )
+        }
+        composable(Routes.CONTRACTOR_SUBSCRIPTION) {
+            ContractorSubscriptionScreen(
+                user = user,
+                onOpenProfile = { navController.navigate(Routes.PROFILE) },
             )
         }
         composable(Routes.CONTRACTOR_SSOS) {
