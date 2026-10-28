@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jtexpress.bevest.domain.model.Incident
 import com.jtexpress.bevest.domain.repository.AlertRepository
+import com.jtexpress.bevest.domain.safety.AlertResponder
 import com.jtexpress.bevest.utils.Outcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,7 @@ data class IncidentDetailState(
 class IncidentDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val alertRepository: AlertRepository,
+    private val responder: AlertResponder,
 ) : ViewModel() {
 
     private val incidentId: String = savedStateHandle.get<String>("incidentId").orEmpty()
@@ -46,7 +48,10 @@ class IncidentDetailViewModel @Inject constructor(
         local.value = null to true
         viewModelScope.launch {
             local.value = when (val r = alertRepository.resolveIncident(incidentId, byUserId, outcome, notes)) {
-                is Outcome.Success -> "Incident resolved." to false
+                is Outcome.Success -> {
+                    state.value.incident?.workerId?.let { responder.resolved(it) }
+                    "Incident resolved." to false
+                }
                 is Outcome.Failure -> r.error.message to false
             }
         }

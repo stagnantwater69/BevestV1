@@ -92,11 +92,20 @@ fun SsoDashboardScreen(
     // Which count in the status panel was tapped; its workers show in a sheet.
     var openGroup by remember { mutableStateOf<StatusGroup?>(null) }
 
+    // Someone in danger is opened at their alert — the same page the danger banner and
+    // notification open — so the officer can acknowledge straight away.
+    val openDangerOrWorker: (String) -> Unit = { id ->
+        state.dangerAlertFor(id)?.let { onOpenAlert(it.alertId) } ?: onOpenWorker(id)
+    }
+
     openGroup?.let { group ->
         StatusGroupSheet(
             group = group,
             workers = state.workers.filter(group.matches),
-            onOpenWorker = { id -> openGroup = null; onOpenWorker(id) },
+            onOpenWorker = { id ->
+                openGroup = null
+                if (group == StatusGroup.DANGER) openDangerOrWorker(id) else onOpenWorker(id)
+            },
             onDismiss = { openGroup = null },
         )
     }
@@ -162,7 +171,18 @@ fun SsoDashboardScreen(
                         counts = listOf(
                             SiteCount(state.onSiteCount, "On site", onClick = { openGroup = StatusGroup.ON_SITE }),
                             SiteCount(state.warningCount, "Warning", palette.warning, onClick = { openGroup = StatusGroup.WARNING }),
-                            SiteCount(state.dangerCount, "Danger", palette.danger, onClick = { openGroup = StatusGroup.DANGER }),
+                            SiteCount(
+                                state.dangerCount,
+                                "Danger",
+                                palette.danger,
+                                onClick = {
+                                    // One worker in danger: go straight to their alert.
+                                    val inDanger = state.workers.filter(StatusGroup.DANGER.matches)
+                                    val only = inDanger.singleOrNull()?.worker?.workerId
+                                    val alert = only?.let { state.dangerAlertFor(it) }
+                                    if (alert != null) onOpenAlert(alert.alertId) else openGroup = StatusGroup.DANGER
+                                },
+                            ),
                             SiteCount(state.offlineCount, "Offline", palette.offline, onClick = { openGroup = StatusGroup.OFFLINE }),
                         ),
                         modifier = Modifier.animateContentSize(),

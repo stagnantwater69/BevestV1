@@ -114,8 +114,8 @@ class SafetyWatcher @Inject constructor(
         for (worker in s.workers) {
             val reading = s.readings[worker.workerId] ?: continue
             val status = engine.evaluate(reading, s.now)
-            val fell = reading.fallDetected || reading.motionState == MotionState.FALL_DETECTED
-            if (!fell || (status != SafetyStatus.DANGER && status != SafetyStatus.EMERGENCY)) continue
+            val fell = (reading.fallDetected || reading.motionState == MotionState.FALL_DETECTED) &&
+                (status == SafetyStatus.DANGER || status == SafetyStatus.EMERGENCY)
 
             val fallAlert = s.alerts.firstOrNull {
                 it.workerId == worker.workerId && it.type == AlertType.FALL_DETECTED
@@ -123,9 +123,10 @@ class SafetyWatcher @Inject constructor(
             when {
                 // A fall with no open alert yet (the simulator raises its own, so a
                 // simulated fall already has one and is left alone).
-                fallAlert == null -> openFallAlert(worker, reading)
+                fallAlert == null -> if (fell) openFallAlert(worker, reading)
 
-                // Still unanswered after the timeout: escalate.
+                // Still unanswered after the timeout: escalate. The vest clears the fall
+                // flag after one reading, so this must not wait for it to still be set.
                 fallAlert.status == AlertStatus.ACTIVE &&
                     fallAlert.severity != AlertSeverity.EMERGENCY &&
                     reading.safetyResponse != SafetyResponseState.ACKNOWLEDGED &&
@@ -234,9 +235,20 @@ class SafetyWatcher @Inject constructor(
                 for (alert in alerts) {
                     val seen = notified[alert.alertId]
                     notified[alert.alertId] = alert.severity
+                    // Once any officer acknowledges it, stop the siren on every phone.
+                    if (alert.status != AlertStatus.ACTIVE) {
+                        NotificationHelper.cancel(context, alert.alertId)
+                        continue
+                    }
                     if (first || seen == alert.severity) continue
                     if (seen != null && alert.severity.ordinal <= seen.ordinal) continue
                     notify(alert, names[alert.workerId] ?: "Worker ${alert.workerId}")
+                }
+                // Resolved alerts leave the active list; silence those too.
+                val open = alerts.mapTo(HashSet()) { it.alertId }
+                (notified.keys - open).forEach { id ->
+                    NotificationHelper.cancel(context, id)
+                    notified.remove(id)
                 }
                 first = false
             }
@@ -256,10 +268,11 @@ class SafetyWatcher @Inject constructor(
             context = context,
             title = title,
             body = body,
+            // This watcher only runs for SSOs, the people on site: danger gets the siren.
             channelId = if (alert.severity == AlertSeverity.WARNING) {
                 NotificationChannels.WARNING
             } else {
-                NotificationChannels.CRITICAL
+                NotificationChannels.EMERGENCY
             },
             type = "ALERT",
             targetId = alert.alertId,

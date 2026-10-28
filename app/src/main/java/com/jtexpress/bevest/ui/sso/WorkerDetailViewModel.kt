@@ -7,6 +7,7 @@ import com.jtexpress.bevest.domain.model.SafetyResponseState
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.model.SensorReading
 import com.jtexpress.bevest.domain.model.Worker
+import com.jtexpress.bevest.domain.repository.AlertRepository
 import com.jtexpress.bevest.domain.repository.MonitoringRepository
 import com.jtexpress.bevest.domain.repository.SettingsRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
@@ -45,6 +46,7 @@ class WorkerDetailViewModel @Inject constructor(
     private val workerRepository: WorkerRepository,
     private val monitoringRepository: MonitoringRepository,
     private val settingsRepository: SettingsRepository,
+    private val alertRepository: AlertRepository,
 ) : ViewModel() {
 
     private val workerId: String = savedStateHandle.get<String>("workerId").orEmpty()
@@ -74,16 +76,22 @@ class WorkerDetailViewModel @Inject constructor(
                         }
                     },
                     settingsRepository.observeThresholds(),
+                    alertRepository.observeActiveAlerts(workerOutcome.data.siteId),
                     actionMessage,
                     heartRateHistory,
-                ) { reading, thresholds, message, history ->
+                ) { reading, thresholds, alertsOutcome, message, history ->
                     val engine = SafetyStatusEngine(thresholds)
                     val now = System.currentTimeMillis()
                     WorkerDetailState(
                         loading = false,
                         worker = workerOutcome.data,
                         reading = reading,
-                        status = engine.evaluate(reading, now),
+                        status = engine.evaluate(
+                            reading,
+                            (alertsOutcome as? Outcome.Success)?.data.orEmpty(),
+                            workerId,
+                            now,
+                        ),
                         stale = engine.isStale(reading, now),
                         actionMessage = message,
                         heartRateHistory = history,

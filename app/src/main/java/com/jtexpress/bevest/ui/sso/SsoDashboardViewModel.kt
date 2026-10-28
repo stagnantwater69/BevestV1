@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jtexpress.bevest.domain.model.Alert
 import com.jtexpress.bevest.domain.model.AlertSeverity
+import com.jtexpress.bevest.domain.model.AlertStatus
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.repository.AlertRepository
 import com.jtexpress.bevest.domain.repository.MonitoringRepository
@@ -38,10 +39,17 @@ data class SsoDashboardState(
     val offlineCount get() = workers.count { it.status == SafetyStatus.OFFLINE }
     val onSiteCount get() = workers.count { it.status != SafetyStatus.OFFLINE }
     /**
-     * The emergency worth a banner: an open EMERGENCY alert whose worker is still in
-     * trouble right now. An alert nobody closed shouldn't keep shouting once the
-     * worker's readings are back to normal — it stays in "Needs attention" instead.
+     * The alert behind a worker's danger — the one an officer needs to open to respond.
+     * Unanswered first, then the most severe, then the newest.
      */
+    fun dangerAlertFor(workerId: String): Alert? = activeAlerts
+        .filter { it.workerId == workerId && it.severity != AlertSeverity.WARNING }
+        .sortedWith(
+            compareBy<Alert>({ it.status != AlertStatus.ACTIVE }, { -it.severity.ordinal }, { -it.createdAt }),
+        )
+        .firstOrNull()
+
+    /** The emergency worth a banner: an open EMERGENCY alert whose worker is in trouble. */
     val topEmergencyAlert: Alert?
         get() {
             val inTrouble = workers
@@ -130,19 +138,20 @@ class SsoDashboardViewModel @Inject constructor(
                         ) { readings, thresholds, alertsOutcome ->
                             val engine = SafetyStatusEngine(thresholds)
                             val now = System.currentTimeMillis()
+                            val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
                             val live = workers.map { w ->
                                 val r = readings[w.workerId]
                                 WorkerLive(
                                     worker = w,
                                     reading = r,
-                                    status = engine.evaluate(r, now),
+                                    status = engine.evaluate(r, alerts, w.workerId, now),
                                     stale = engine.isStale(r, now),
                                 )
                             }.sortedByDescending { it.status.ordinal }
                             SsoDashboardState(
                                 loading = false,
                                 workers = live,
-                                activeAlerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty(),
+                                activeAlerts = alerts,
                             )
                         }
                     }

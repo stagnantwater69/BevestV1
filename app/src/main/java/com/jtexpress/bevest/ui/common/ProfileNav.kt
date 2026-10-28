@@ -4,6 +4,7 @@ import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
 import com.jtexpress.bevest.navigation.Routes
+import com.jtexpress.bevest.ui.profile.AlarmSetupScreen
 import com.jtexpress.bevest.ui.profile.ChangePasswordScreen
 import com.jtexpress.bevest.ui.profile.EditProfileScreen
 import com.jtexpress.bevest.ui.profile.ProfileScreen
@@ -18,9 +19,13 @@ fun NavGraphBuilder.profileDestinations(navController: NavHostController, onSign
         ProfileScreen(
             onEditProfile = { navController.navigate(Routes.EDIT_PROFILE) },
             onChangePassword = { navController.navigate(Routes.CHANGE_PASSWORD) },
+            onAlarmSetup = { navController.navigate(Routes.ALARM_SETUP) },
             onSignOut = onSignOut,
             onBack = { navController.popBackStack() },
         )
+    }
+    composable(Routes.ALARM_SETUP) {
+        AlarmSetupScreen(onBack = { navController.popBackStack() })
     }
     composable(Routes.EDIT_PROFILE) {
         EditProfileScreen(onDone = { navController.popBackStack() })

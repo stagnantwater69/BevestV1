@@ -3,6 +3,7 @@ package com.jtexpress.bevest.ui.sso
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jtexpress.bevest.domain.model.SafetyStatus
+import com.jtexpress.bevest.domain.repository.AlertRepository
 import com.jtexpress.bevest.domain.repository.MonitoringRepository
 import com.jtexpress.bevest.domain.repository.SettingsRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
@@ -36,6 +37,7 @@ class LiveMapViewModel @Inject constructor(
     private val workerRepository: WorkerRepository,
     private val monitoringRepository: MonitoringRepository,
     private val settingsRepository: SettingsRepository,
+    private val alertRepository: AlertRepository,
 ) : ViewModel() {
 
     private val siteId = MutableStateFlow<String?>(null)
@@ -57,14 +59,16 @@ class LiveMapViewModel @Inject constructor(
                     combine(
                         monitoringRepository.observeReadings(workers.map { it.workerId }),
                         settingsRepository.observeThresholds(),
-                    ) { readings, thresholds ->
+                        alertRepository.observeActiveAlerts(site),
+                    ) { readings, thresholds, alertsOutcome ->
                         val engine = SafetyStatusEngine(thresholds)
                         val now = System.currentTimeMillis()
+                        val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
                         LiveMapState(
                             loading = false,
                             markers = workers.map { w ->
                                 val r = readings[w.workerId]
-                                WorkerLive(w, r, engine.evaluate(r, now), engine.isStale(r, now))
+                                WorkerLive(w, r, engine.evaluate(r, alerts, w.workerId, now), engine.isStale(r, now))
                             },
                         )
                     }

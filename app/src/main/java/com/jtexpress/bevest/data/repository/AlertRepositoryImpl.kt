@@ -41,6 +41,18 @@ class AlertRepositoryImpl @Inject constructor(
             .catch { emit(Outcome.Failure(it.toAppError())) }
     }
 
+    override fun observeContractorActiveAlerts(contractorId: String): Flow<Outcome<List<Alert>>> =
+        alerts.whereIn("status", listOf(AlertStatus.ACTIVE.name, AlertStatus.ACKNOWLEDGED.name))
+            // The rules only let a contractor read alerts carrying their contractorId.
+            .whereEqualTo("contractorId", contractorId)
+            .snapshots()
+            .map { qs ->
+                Outcome.Success(
+                    qs.documents.map { it.toAlert() }.sortedByDescending { it.createdAt },
+                ) as Outcome<List<Alert>>
+            }
+            .catch { emit(Outcome.Failure(it.toAppError())) }
+
     override fun observeAlertHistory(siteId: String?, limit: Long): Flow<Outcome<List<Alert>>> {
         var query: Query = alerts.orderBy("createdAt", Query.Direction.DESCENDING).limit(limit)
         if (siteId != null) query = alerts.whereEqualTo("siteId", siteId)

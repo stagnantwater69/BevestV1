@@ -127,7 +127,7 @@ private fun AppRootContent(session: SessionState, viewModel: RootViewModel) {
 
         is SessionState.Active -> when (s.user.role) {
             UserRole.ADMIN -> AdminArea(s.user, viewModel::signOut)
-            UserRole.CONTRACTOR -> ContractorArea(s.user, viewModel::signOut)
+            UserRole.CONTRACTOR -> ContractorArea(s.user, viewModel::signOut, viewModel.deepLinks)
             UserRole.SSO -> SsoArea(s.user, viewModel::signOut, viewModel.deepLinks)
             UserRole.UNKNOWN -> BlockedScreen(
                 title = "No role assigned",

@@ -12,7 +12,10 @@
  *   every 1 min  --schedule-->  escalate
  *     - WARNING longer than warningDuration        -> DANGER (+ buzzer flag)
  *     - DANGER longer than responseTimeout w/o ack -> EMERGENCY -> incident + FCM
- *   incidents/{id}  --onCreate-->  notifyIncident  (high-priority FCM to on-duty SSOs)
+ *   incidents/{id}  --onCreate-->  notifyIncident  (siren push to on-duty SSOs,
+ *                                                   normal push to the contractor)
+ *
+ * The siren is for Site Safety Officers only; contractors and admins never get it.
  */
 
 import { initializeApp } from "firebase-admin/app";
@@ -78,7 +81,28 @@ function isFall(reading: Reading): boolean {
   return Boolean(reading.fallDetected) || reading.motionState === "FALL_DETECTED";
 }
 
-/** High-priority push to every active SSO on a site. */
+/**
+ * High-priority, data-only push. Data-only so the app's messaging service always builds
+ * the notification itself — with the siren, repeating vibration and full-screen alert
+ * when `alarm` is set — even while the app is closed. A `notification` block would
+ * let Android draw a plain notification instead and skip all of that.
+ */
+async function send(
+  tokens: string[],
+  title: string,
+  body: string,
+  data: Record<string, string>,
+  alarm: boolean
+): Promise<void> {
+  if (tokens.length === 0) return;
+  await getMessaging().sendEachForMulticast({
+    tokens,
+    android: { priority: "high" },
+    data: { ...data, title, body, alarm: String(alarm) },
+  });
+}
+
+/** Siren push to every active SSO on a site — the people who can reach the worker. */
 async function pushToSite(
   siteId: string,
   title: string,
@@ -101,13 +125,21 @@ async function pushToSite(
     logger.warn(`No FCM tokens for site ${siteId}`);
     return;
   }
+  await send(tokens, title, body, data, true);
+}
 
-  await getMessaging().sendEachForMulticast({
-    tokens,
-    notification: { title, body },
-    android: { priority: "high", notification: { channelId: "critical" } },
-    data,
-  });
+/** Normal (never siren) push to the contractor who owns the site. */
+async function pushToContractor(
+  contractorId: string,
+  title: string,
+  body: string,
+  data: Record<string, string>
+): Promise<void> {
+  if (!contractorId) return;
+  const snap = await db.doc(`users/${contractorId}`).get();
+  const user = snap.data();
+  if (!user || user.active === false) return;
+  await send((user.fcmTokens as string[] | undefined) ?? [], title, body, data, false);
 }
 
 /**
@@ -140,11 +172,10 @@ async function openFallAlert(
   });
   if (!created) return;
 
-  await pushToSite(ctx.siteId, "⚠ Fall detected", `${await workerName(workerId)} may have fallen. Check on them now.`, {
-    type: "ALERT",
-    alertId: alertRef.id,
-    workerId,
-  });
+  const name = await workerName(workerId);
+  const data = { type: "ALERT", alertId: alertRef.id, workerId };
+  await pushToSite(ctx.siteId, "⚠ Fall detected", `${name} may have fallen. Check on them now.`, data);
+  await pushToContractor(ctx.contractorId, "Fall detected on your site", `${name} may have fallen.`, data);
 }
 
 /**
@@ -216,12 +247,24 @@ export const evaluateReading = onValueWritten(
 
     const t = await thresholds();
     const now = Date.now();
-    const status = instantaneousStatus(reading, t, now);
     const ctx = await workerContext(workerId);
     if (!ctx.exists) return;
 
-    // Reflect the instantaneous status on the worker record (never downgrade an
-    // open EMERGENCY here — only escalate/resolve does that).
+    const windowRef = db.doc(`conditionWindows/${workerId}`);
+    let status = instantaneousStatus(reading, t, now);
+    // The vest reports a fall in one reading and clears it on the next. Hold DANGER
+    // while the window's fall alert is unresolved, so the next normal reading doesn't
+    // close the window (and with it the escalation) before anyone has responded.
+    if (status === "NORMAL" || status === "WARNING" || status === "OFFLINE") {
+      const fallAlertId = (await windowRef.get()).data()?.fallAlertId as string | undefined;
+      if (fallAlertId) {
+        const fallAlert = await db.doc(`alerts/${fallAlertId}`).get();
+        if (fallAlert.exists && fallAlert.data()?.status !== "RESOLVED") status = "DANGER";
+      }
+    }
+
+    // Reflect the status on the worker record (never downgrade an open EMERGENCY
+    // here — only escalate/resolve does that).
     if (ctx.currentStatus !== "EMERGENCY") {
       await db.doc(`workers/${workerId}`).update({
         currentStatus: status,
@@ -229,7 +272,6 @@ export const evaluateReading = onValueWritten(
       });
     }
 
-    const windowRef = db.doc(`conditionWindows/${workerId}`);
     if (status === "WARNING" || status === "DANGER") {
       const existing = await windowRef.get();
       if (!existing.exists) {
@@ -375,15 +417,9 @@ export const notifyIncident = onDocumentCreated("incidents/{incidentId}", async 
   const incident = event.data?.data();
   if (!incident) return;
   const workerId = String(incident.workerId);
+  const body = `${await workerName(workerId)}: ${typeLabel(String(incident.type))}`;
+  const data = { type: "INCIDENT", incidentId: event.params.incidentId, workerId };
 
-  await pushToSite(
-    incident.siteId as string,
-    "⚠ EMERGENCY",
-    `${await workerName(workerId)}: ${typeLabel(String(incident.type))}`,
-    {
-      type: "INCIDENT",
-      incidentId: event.params.incidentId,
-      workerId,
-    }
-  );
+  await pushToSite(incident.siteId as string, "⚠ EMERGENCY", body, data);
+  await pushToContractor(String(incident.contractorId ?? ""), "⚠ Emergency on your site", body, data);
 });
