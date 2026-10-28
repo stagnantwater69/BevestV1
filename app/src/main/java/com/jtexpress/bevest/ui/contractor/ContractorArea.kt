@@ -1,8 +1,14 @@
 package com.jtexpress.bevest.ui.contractor
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.jtexpress.bevest.notifications.DeepLink
+import kotlinx.coroutines.flow.SharedFlow
 import com.jtexpress.bevest.BuildConfig
 import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.navigation.Routes
@@ -23,9 +29,33 @@ private fun NavHostController.openTab(route: String) = navigate(route) {
 }
 
 @Composable
-fun ContractorArea(user: User, onSignOut: () -> Unit) {
+fun ContractorArea(
+    user: User,
+    onSignOut: () -> Unit,
+    deepLinks: SharedFlow<DeepLink>? = null,
+) {
     val contractorId = user.contractorId ?: user.uid
+    val navController = rememberNavController()
+
+    // Danger on any site: a normal notification. The siren is for SSOs only.
+    val alertWatcher: ContractorAlertWatcherHost = hiltViewModel()
+    DisposableEffect(contractorId) {
+        alertWatcher.start(contractorId)
+        onDispose { alertWatcher.stop() }
+    }
+
+    LaunchedEffect(deepLinks) {
+        deepLinks?.collect { link ->
+            when (link.type) {
+                "INCIDENT" -> navController.navigate(Routes.withArg(Routes.SSO_INCIDENT_DETAIL, link.targetId))
+                // Contractors don't handle alerts themselves; show where incidents land.
+                "ALERT" -> navController.navigate(Routes.CONTRACTOR_INCIDENTS)
+            }
+        }
+    }
+
     RoleScaffold(
+        navController = navController,
         tabs = buildList {
             add(BottomTab(Routes.CONTRACTOR_DASHBOARD, "Dashboard", BevestIcons.Dashboard))
             add(BottomTab(Routes.CONTRACTOR_SSOS, "SSO", BevestIcons.Officer))

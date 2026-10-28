@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jtexpress.bevest.domain.model.Alert
 import com.jtexpress.bevest.domain.repository.AlertRepository
+import com.jtexpress.bevest.domain.safety.AlertResponder
 import com.jtexpress.bevest.utils.Outcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,7 @@ data class AlertDetailState(
 class AlertDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val alertRepository: AlertRepository,
+    private val responder: AlertResponder,
 ) : ViewModel() {
 
     private val alertId: String = savedStateHandle.get<String>("alertId").orEmpty()
@@ -47,7 +49,10 @@ class AlertDetailViewModel @Inject constructor(
         local.value = null to true
         viewModelScope.launch {
             local.value = when (val r = alertRepository.acknowledgeAlert(alertId, byUserId)) {
-                is Outcome.Success -> "Alert acknowledged." to false
+                is Outcome.Success -> {
+                    state.value.alert?.workerId?.let { responder.acknowledged(it) }
+                    "Alert acknowledged." to false
+                }
                 is Outcome.Failure -> r.error.message to false
             }
         }
@@ -57,7 +62,10 @@ class AlertDetailViewModel @Inject constructor(
         local.value = null to true
         viewModelScope.launch {
             local.value = when (val r = alertRepository.resolveAlert(alertId, byUserId, notes)) {
-                is Outcome.Success -> "Alert resolved." to false
+                is Outcome.Success -> {
+                    state.value.alert?.workerId?.let { responder.resolved(it) }
+                    "Alert resolved." to false
+                }
                 is Outcome.Failure -> r.error.message to false
             }
         }

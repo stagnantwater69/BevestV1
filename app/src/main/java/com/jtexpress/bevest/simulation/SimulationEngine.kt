@@ -107,6 +107,8 @@ class SimulationEngine @Inject constructor(
     /** Every alert this run has opened per worker — a scenario can raise DANGER then EMERGENCY. */
     private val openAlertIds = mutableMapOf<String, MutableList<String>>()
     private val incidentRaised = mutableSetOf<String>()
+    /** Workers whose alert an officer acknowledged: they report ACKNOWLEDGED and stop escalating. */
+    private val acknowledged = mutableSetOf<String>()
 
     private var gpsCenter = 10.3157 to 123.8854
     private var boundKey: String? = null
@@ -225,6 +227,7 @@ class SimulationEngine @Inject constructor(
         val s = sim[workerId] ?: return
         s.w = s.w.copy(scenario = scenario)
         elapsedTicks[workerId] = 0
+        acknowledged.remove(workerId)
         incidentRaised.remove("$workerId:${scenario.name}")
         if (scenario == Scenario.HEALTHY) {
             resolveOpenAlert(workerId, "Condition cleared — worker recovered")
@@ -240,6 +243,24 @@ class SimulationEngine @Inject constructor(
         log("${s.w.name}: scenario → ${scenario.label}")
         publish()
         if (!state.value.streaming && scenario != Scenario.HEALTHY && scenario != Scenario.OFFLINE) start()
+    }
+
+    /**
+     * An officer acknowledged this worker's alert in the app. A real vest would hear it
+     * and stop escalating, so the simulated one does too.
+     */
+    fun onAlertAcknowledged(workerId: String) {
+        if (workerId !in sim) return
+        acknowledged += workerId
+        log("${sim[workerId]?.w?.name}: alert acknowledged by an officer")
+    }
+
+    /** An officer resolved this worker's alert: the condition is over, so the worker recovers. */
+    fun onAlertResolved(workerId: String) {
+        val s = sim[workerId] ?: return
+        if (s.w.scenario != Scenario.HEALTHY && s.w.scenario != Scenario.OFFLINE) {
+            setScenario(workerId, Scenario.HEALTHY)
+        }
     }
 
     /** Jump a worker straight to a raised incident, skipping the wait. */
@@ -324,13 +345,19 @@ class SimulationEngine @Inject constructor(
                 latitude = round5(s.lat),
                 longitude = round5(s.lng),
                 batteryPercent = battery,
-                safetyResponse = if (phase == SimWorker.Phase.EMERGENCY && response == SafetyResponseState.NONE)
-                    SafetyResponseState.NO_RESPONSE else response,
+                safetyResponse = when {
+                    id in acknowledged -> SafetyResponseState.ACKNOWLEDGED
+                    phase == SimWorker.Phase.EMERGENCY && response == SafetyResponseState.NONE ->
+                        SafetyResponseState.NO_RESPONSE
+                    else -> response
+                },
                 timestamp = System.currentTimeMillis(),
             ),
         )
 
         // --- raise the records the cloud engine would raise ---
+        // Once an officer has acknowledged, nothing new is raised for the same condition.
+        if (id in acknowledged) return
         if (phase == SimWorker.Phase.DANGER && openAlertIds[id].isNullOrEmpty()) {
             raiseAlert(s.w, AlertSeverity.DANGER)
         }
@@ -566,7 +593,7 @@ class SimulationEngine @Inject constructor(
                 }
                 sim.keys.forEach { monitoring.clearReading(it) }
                 sim.values.forEach { it.w = it.w.copy(scenario = Scenario.HEALTHY, phase = SimWorker.Phase.NORMAL) }
-                openAlertIds.clear(); incidentRaised.clear(); elapsedTicks.clear()
+                openAlertIds.clear(); incidentRaised.clear(); elapsedTicks.clear(); acknowledged.clear()
                 publish()
                 log("Reset — removed $deleted simulated records")
                 _state.update { it.copy(busy = false, message = "Cleared all simulated data.") }

@@ -14,6 +14,7 @@ object Routes {
     const val PROFILE = "profile"
     const val EDIT_PROFILE = "profile_edit"
     const val CHANGE_PASSWORD = "profile_password"
+    const val ALARM_SETUP = "profile_alarm_setup"
 
     // Admin
     const val ADMIN_DASHBOARD = "admin_dashboard"
