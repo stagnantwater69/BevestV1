@@ -64,11 +64,14 @@ service cloud.firestore {
                         && request.resource.data.role == resource.data.role
                         && request.resource.data.contractorId == resource.data.contractorId
                         && request.resource.data.email == resource.data.email)
+                    // Self-edits (profile, FCM tokens, a contractor's own subscription).
+                    // get() with a default: web-created contractor docs have no
+                    // contractorId/siteId field, and a missing field would deny the write.
                     || (request.auth.uid == uid
                         && request.resource.data.role == resource.data.role
-                        && request.resource.data.active == resource.data.active
-                        && request.resource.data.contractorId == resource.data.contractorId
-                        && request.resource.data.siteId == resource.data.siteId)
+                        && request.resource.data.get('active', true) == resource.data.get('active', true)
+                        && request.resource.data.get('contractorId', null) == resource.data.get('contractorId', null)
+                        && request.resource.data.get('siteId', null) == resource.data.get('siteId', null))
                     || (isContractor()
                         && resource.data.contractorId == request.auth.uid
                         && request.resource.data.role == resource.data.role

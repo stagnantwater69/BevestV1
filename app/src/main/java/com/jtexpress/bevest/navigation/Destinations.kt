@@ -31,6 +31,7 @@ object Routes {
     const val CONTRACTOR_REPORTS = "contractor_reports"
     const val CONTRACTOR_REPORT_DETAIL = "contractor_report_detail" // /{monthKey}
     const val CONTRACTOR_INCIDENTS = "contractor_incidents"
+    const val CONTRACTOR_SUBSCRIPTION = "contractor_subscription"
 
     // SSO
     const val SSO_DASHBOARD = "sso_dashboard"

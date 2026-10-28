@@ -99,6 +99,7 @@ fun ContractorDashboardScreen(
     onOpenSsos: () -> Unit,
     onOpenReport: (monthKey: String) -> Unit,
     onOpenIncidents: () -> Unit,
+    onOpenSubscription: () -> Unit,
     viewModel: ContractorDashboardViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(user.uid) { viewModel.start(contractorId(user)) }
@@ -121,6 +122,18 @@ fun ContractorDashboardScreen(
                     .padding(horizontal = Spacing.gutter, vertical = Spacing.md),
                 verticalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
+                // Same notice as the web overview: everything still works without a plan,
+                // but vest quota and officer slots come from one.
+                if (user.subscription == null) {
+                    QuickLink(
+                        icon = BevestIcons.Subscription,
+                        title = "No subscription plan",
+                        supporting = "Your dashboard, sites and reports work as normal. Choose a plan " +
+                            "to activate vest quota and Site Safety Officers.",
+                        onClick = onOpenSubscription,
+                    )
+                }
+
                 // ---- Headline figures ----
                 Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
                     StatTile(
