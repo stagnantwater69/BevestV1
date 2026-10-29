@@ -54,6 +54,22 @@ const UserManagement = () => {
         usersData.push({ id: docSnap.id, ...docSnap.data() });
       });
       setUsers(usersData);
+      try {
+        const directory = JSON.parse(localStorage.getItem('bevest_user_directory') || '{}');
+        usersData.forEach((u) => {
+          if (u.email) {
+            directory[u.email.toLowerCase().trim()] = {
+              phone: u.phone && u.phone !== 'Not set' ? u.phone : null,
+              role: u.role,
+              firstName: u.firstName,
+              lastName: u.lastName
+            };
+          }
+        });
+        localStorage.setItem('bevest_user_directory', JSON.stringify(directory));
+      } catch (e) {
+        // ignore cache write errors
+      }
     } catch (err) {
       console.error("Error fetching users:", err);
     }
@@ -121,7 +137,7 @@ const UserManagement = () => {
         lastName: formData.lastName.trim(),
         phone: formatPhoneWithCountryCode(formData.phone),
         email: formData.email.trim(),
-        role: 'CONTRACTOR',
+        role: (formData.role || 'Contractor').toUpperCase() === 'DEVELOPER' ? 'DEVELOPER' : 'CONTRACTOR',
         active: true,
         status: 'Active',
         createdAt: now,
@@ -310,20 +326,15 @@ const UserManagement = () => {
               {/* Read-only assigned role */}
               <div className="form-group-custom">
                 <label className="form-label">ASSIGN ROLE</label>
-                <input 
-                  type="text" 
+                <select 
                   className="form-input" 
-                  value="Contractor" 
-                  disabled 
-                  readOnly
-                  style={{
-                    backgroundColor: '#f1f5f9',
-                    color: '#475569',
-                    cursor: 'not-allowed',
-                    fontWeight: 600,
-                    borderColor: '#cbd5e1'
-                  }}
-                />
+                  value={formData.role || 'Contractor'}
+                  onChange={(e) => setFormData({...formData, role: e.target.value})}
+                  style={{ cursor: 'pointer', backgroundColor: '#ffffff' }}
+                >
+                  <option value="Contractor">Contractor (Site Contractor)</option>
+                  <option value="Developer">Developer (Hardware & Subscriptions)</option>
+                </select>
               </div>
 
               {/* Password Generator */}

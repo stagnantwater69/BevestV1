@@ -46,6 +46,19 @@ const AdminProfile = ({ user }) => {
       } catch (err) {
         console.error('Error saving admin profile to database:', err);
       }
+      try {
+        const directory = JSON.parse(localStorage.getItem('bevest_user_directory') || '{}');
+        if (profile.email) {
+          directory[profile.email.toLowerCase().trim()] = {
+            ...(directory[profile.email.toLowerCase().trim()] || {}),
+            phone: formattedPhone || null,
+            firstName: editFirstName.trim(),
+            lastName: editLastName.trim(),
+            role: profile.role || 'ADMIN'
+          };
+          localStorage.setItem('bevest_user_directory', JSON.stringify(directory));
+        }
+      } catch (e) {}
     }
     setShowEdit(false);
   };

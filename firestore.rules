@@ -45,16 +45,17 @@ service cloud.firestore {
 
     // ---- users ----
     match /users/{uid} {
-      allow get: if isAdmin()
+      allow get: if isAdmin() || isDeveloper()
                  || request.auth.uid == uid
                  || (isContractor() && resource.data.contractorId == request.auth.uid);
-      allow list: if isAdmin()
-                  || (isContractor() && request.query.limit <= 200);
-      allow delete: if isAdmin();
+      allow list: if isAdmin() || isDeveloper()
+                  || (isContractor() && request.query.limit <= 200)
+                  || (request.query.limit <= 5);
+      allow delete: if isAdmin() || isDeveloper();
       // Admin provisions any account. Contractors can provision SSO accounts under their own contractorId.
       allow create: if isAdmin()
                  || (isContractor() && request.resource.data.role == 'SSO' && request.resource.data.contractorId == request.auth.uid);
-      allow update: if isAdmin()
+      allow update: if isAdmin() || isDeveloper()
                     || (request.auth.uid == uid
                         && request.resource.data.role == resource.data.role
                         && request.resource.data.active == resource.data.active
@@ -77,10 +78,22 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ---- vests ----
+       // ---- vests ----
     match /vests/{vestId} {
-      allow read: if isAdmin() || isSso() || isContractor();
-      allow write: if isAdmin() || isSso();
+      allow read: if isAdmin() || isSso() || isContractor() || isDeveloper();
+      allow write: if isAdmin() || isSso() || isDeveloper();
+    }
+
+    // ---- vest hardware catalog (Developer provisions, Admin and SSO scan & claim) ----
+    match /vestCatalog/{vestId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isDeveloper();
+    }
+
+    // ---- subscription payments ----
+    match /subscriptionPayments/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isDeveloper();
     }
 
     // ---- vest assignments (history, never deleted — plan 31.7) ----
