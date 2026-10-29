@@ -1,24 +1,43 @@
-import React, { useState } from 'react';
-import { FiMail, FiPhone, FiEdit2, FiLock, FiChevronRight, FiArrowLeft, FiShield } from 'react-icons/fi';
+import React, { useState, useEffect } from 'react';
+import { FiMail, FiPhone, FiEdit2, FiLock, FiChevronRight, FiArrowLeft, FiShield, FiBriefcase } from 'react-icons/fi';
 import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
 const AdminProfile = ({ user }) => {
   const [showEdit, setShowEdit] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [profile, setProfile] = useState({
-    firstName: 'Web',
-    lastName: 'Admin',
-    email: 'testwebadmin@bevest.com',
-    phone: 'Not set'
+    firstName: user?.profile?.firstName || 'Web',
+    lastName: user?.profile?.lastName || 'Admin',
+    email: user?.email || user?.profile?.email || 'testwebadmin@bevest.com',
+    phone: user?.profile?.phone || 'Not set',
+    company: user?.profile?.company || user?.profile?.companyName || 'Bevest Enterprise'
   });
+
+  useEffect(() => {
+    if (user?.uid) {
+      getDoc(doc(db, 'users', user.uid)).then(snap => {
+        if (snap.exists()) {
+          const d = snap.data();
+          setProfile(prev => ({
+            ...prev,
+            firstName: d.firstName || prev.firstName,
+            lastName: d.lastName || prev.lastName,
+            email: d.email || prev.email,
+            phone: d.phone || prev.phone,
+            company: d.company || d.companyName || prev.company
+          }));
+        }
+      }).catch(err => console.error('Error fetching admin profile:', err));
+    }
+  }, [user]);
 
   const [editFirstName, setEditFirstName] = useState(profile.firstName);
   const [editLastName, setEditLastName] = useState(profile.lastName);
   const [editPhone, setEditPhone] = useState(profile.phone !== 'Not set' ? profile.phone : '');
 
-  const initials = `${profile.firstName[0]}${profile.lastName[0]}`.toUpperCase();
+  const initials = `${(profile.firstName || 'W')[0]}${(profile.lastName || 'A')[0]}`.toUpperCase();
 
   const handleOpenEdit = () => {
     setEditFirstName(profile.firstName);
@@ -54,7 +73,8 @@ const AdminProfile = ({ user }) => {
             phone: formattedPhone || null,
             firstName: editFirstName.trim(),
             lastName: editLastName.trim(),
-            role: profile.role || 'ADMIN'
+            role: profile.role || 'ADMIN',
+            company: profile.company || ''
           };
           localStorage.setItem('bevest_user_directory', JSON.stringify(directory));
         }
@@ -85,6 +105,15 @@ const AdminProfile = ({ user }) => {
         <div className="profile-section">
           <div className="section-title">ACCOUNT</div>
           <div className="profile-list-card">
+            <div className="profile-list-item">
+              <FiBriefcase className="item-icon" />
+              <div className="item-details">
+                <span className="item-label">Company / Organization</span>
+                <span className="item-value" style={{ fontWeight: 600, color: 'var(--text-color, #0f172a)' }}>
+                  {profile.company || 'Bevest Enterprise'}
+                </span>
+              </div>
+            </div>
             <div className="profile-list-item">
               <FiMail className="item-icon" />
               <div className="item-details">

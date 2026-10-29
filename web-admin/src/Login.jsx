@@ -43,7 +43,7 @@ const Login = ({ onLogin }) => {
       let devUid = 'dev-master-account';
 
       try {
-        const cred = await signInWithEmailAndPassword(auth, devEmail, 'BevestDev2026!');
+        const cred = await signInWithEmailAndPassword(auth, devEmail, 'Developer123!');
         devUid = cred.user.uid;
       } catch (authErr) {
         console.warn('Developer direct auth fallback:', authErr.message);
@@ -92,8 +92,24 @@ const Login = ({ onLogin }) => {
       const userDocRef = doc(db, 'users', user.uid);
       const userDocSnap = await getDoc(userDocRef);
 
-      if (userDocSnap.exists()) {
-        const userData = userDocSnap.data();
+      let userData = userDocSnap.exists() ? userDocSnap.data() : null;
+
+      // Auto-fallback for developer accounts
+      if (!userData && (user.email === 'developer@bevest.com' || user.email === 'dev@bevest.com')) {
+        userData = {
+          firstName: 'Bevest',
+          lastName: 'Developer',
+          role: 'DEVELOPER',
+          email: user.email,
+          active: true,
+          status: 'Active'
+        };
+        try {
+          await setDoc(userDocRef, userData, { merge: true });
+        } catch (_) {}
+      }
+
+      if (userData) {
         const role = String(userData.role || '').trim().toUpperCase();
         if (role !== 'ADMIN' && role !== 'CONTRACTOR' && role !== 'DEVELOPER') {
           await auth.signOut();

@@ -1,24 +1,28 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  FiCpu, FiCreditCard, FiTool, FiActivity, FiLogOut, FiPlus, 
-  FiSearch, FiFilter, FiDownload, FiPrinter, FiCheckCircle, 
-  FiAlertCircle, FiClock, FiCalendar, FiDollarSign, FiUsers, 
-  FiRefreshCw, FiEye, FiTrash2, FiShield, FiTag, FiFileText, 
-  FiAlertTriangle, FiCheck, FiX, FiLayers
+  FiCpu, FiCreditCard, FiTool, FiLogOut, FiPlus, 
+  FiSearch, FiDownload, FiPrinter, FiCheckCircle, 
+  FiAlertCircle, FiCalendar, FiDollarSign, FiUsers, 
+  FiRefreshCw, FiEye, FiTrash2, FiShield, FiTag, 
+  FiAlertTriangle, FiCheck, FiX, FiLayers, FiMenu,
+  FiBriefcase, FiUserPlus, FiLock, FiMail, FiPhone
 } from 'react-icons/fi';
 import { 
-  collection, doc, getDocs, setDoc, updateDoc, deleteDoc, 
-  query, where, onSnapshot, getDoc 
+  collection, doc, getDocs, setDoc, updateDoc, 
+  query, where, onSnapshot 
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { auth, secondaryAuth, db } from './firebase';
 import QRCode from 'qrcode';
 import { logActivity } from './activityLogger';
-import { SUBSCRIPTION_PLANS, formatPhp, formatDisplayDate } from './subscriptionPlans';
+import { SUBSCRIPTION_PLANS, formatDisplayDate } from './subscriptionPlans';
+import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
 import logo from './assets/bevest_logo.png';
 import './developer.css';
 
 const DeveloperDashboard = ({ user, onLogout }) => {
-  const [activeTab, setActiveTab] = useState('hardware'); // 'hardware' | 'subscriptions' | 'troubleshoot' | 'activity'
+  const [activeTab, setActiveTab] = useState('hardware'); // 'hardware' | 'admins' | 'subscriptions' | 'troubleshoot'
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
   // Vest Catalog state
   const [catalog, setCatalog] = useState([]);
@@ -45,6 +49,21 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   // QR Viewer Modal
   const [selectedVestQr, setSelectedVestQr] = useState(null);
   const [viewQrDataUrl, setViewQrDataUrl] = useState('');
+
+  // Admin Management state
+  const [admins, setAdmins] = useState([]);
+  const [adminsLoading, setAdminsLoading] = useState(true);
+  const [adminSearch, setAdminSearch] = useState('');
+  const [showAddAdminModal, setShowAddAdminModal] = useState(false);
+  const [adminCreating, setAdminCreating] = useState(false);
+
+  // Admin Form state
+  const [adminCompany, setAdminCompany] = useState('');
+  const [adminFirstName, setAdminFirstName] = useState('');
+  const [adminLastName, setAdminLastName] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPhone, setAdminPhone] = useState('');
+  const [adminPassword, setAdminPassword] = useState(`ADM-2026-${Math.floor(1000 + Math.random() * 9000)}`);
 
   // Subscriptions & Contractors state
   const [contractors, setContractors] = useState([]);
@@ -75,9 +94,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [troubleshootNotes, setTroubleshootNotes] = useState('');
   const [troubleshootSaving, setTroubleshootSaving] = useState(false);
 
-  // Activity logs
-  const [activityLogs, setActivityLogs] = useState([]);
-
   const devEmail = user?.email || 'developer@bevest.com';
   const devName = user?.profile?.firstName 
     ? `${user.profile.firstName} ${user.profile.lastName || ''}`.trim()
@@ -86,6 +102,11 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const showToast = (type, text) => {
     setToastMsg({ type, text });
     setTimeout(() => setToastMsg({ type: '', text: '' }), 5000);
+  };
+
+  const handleSignOut = () => {
+    auth.signOut();
+    if (onLogout) onLogout();
   };
 
   // 1. Generate Live QR Code Preview
@@ -99,7 +120,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     });
 
     QRCode.toDataURL(payload, {
-      width: 280,
+      width: 260,
       margin: 2,
       color: {
         dark: '#0f172a',
@@ -119,13 +140,11 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       const items = [];
       snap.forEach(d => items.push({ id: d.id, ...d.data() }));
       
-      // If empty, seed initial hardware catalog records
       if (items.length === 0) {
         seedInitialCatalog();
       } else {
         items.sort((a, b) => (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0) - (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0));
         setCatalog(items);
-        // Sync to localStorage for offline fallback
         try {
           const map = {};
           items.forEach(v => { map[v.vestId || v.id] = v; });
@@ -220,7 +239,37 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     setCatalog(seeds);
   };
 
-  // 4. Subscribe to Contractors (for Subscriptions & Payments)
+  // 4. Subscribe to Admins (where role == 'ADMIN')
+  useEffect(() => {
+    setAdminsLoading(true);
+    const usersRef = collection(db, 'users');
+    const q = query(usersRef, where('role', '==', 'ADMIN'));
+
+    const unsubscribe = onSnapshot(q, (snap) => {
+      const list = [];
+      snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+      list.sort((a, b) => (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0) - (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0));
+      setAdmins(list);
+      setAdminsLoading(false);
+    }, (err) => {
+      console.warn('Admins fetch error:', err.message);
+      try {
+        const raw = localStorage.getItem('bevest_user_directory');
+        if (raw) {
+          const dict = JSON.parse(raw);
+          const fallbackList = Object.entries(dict)
+            .filter(([_, u]) => (u.role || '').toUpperCase() === 'ADMIN')
+            .map(([em, u]) => ({ id: em, email: em, ...u }));
+          setAdmins(fallbackList);
+        }
+      } catch (_) {}
+      setAdminsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // 5. Subscribe to Contractors (for Subscriptions & Payments)
   useEffect(() => {
     setContractorsLoading(true);
     const usersRef = collection(db, 'users');
@@ -233,7 +282,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       setContractorsLoading(false);
     }, (err) => {
       console.warn('Contractors fetch error:', err.message);
-      // Fallback from local user directory
       try {
         const raw = localStorage.getItem('bevest_user_directory');
         if (raw) {
@@ -250,7 +298,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     return () => unsubscribe();
   }, []);
 
-  // 5. Subscribe to Payment History
+  // 6. Subscribe to Payment History
   useEffect(() => {
     const paymentsRef = collection(db, 'subscriptionPayments');
     const unsubscribe = onSnapshot(paymentsRef, (snap) => {
@@ -264,14 +312,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     return () => unsubscribe();
   }, []);
 
-  // Generate a new random Vest ID
   const handleRegenerateId = () => {
     const num = Math.floor(1000 + Math.random() * 9000);
     setGenVestId(`VEST-2026-${num}`);
     setGenToken(Math.random().toString(16).substring(2, 10).toUpperCase());
   };
 
-  // Upload single vest to database
   const handleUploadSingleVest = async (e) => {
     e.preventDefault();
     const cleanId = genVestId.trim().toUpperCase();
@@ -301,7 +347,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
       await setDoc(doc(db, 'vestCatalog', cleanId), vestRecord);
       
-      // Update local storage cache
       try {
         const local = JSON.parse(localStorage.getItem('bevest_vest_catalog') || '{}');
         local[cleanId] = vestRecord;
@@ -320,7 +365,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
   };
 
-  // Batch generate vests
   const handleBatchGenerate = async () => {
     const count = parseInt(batchCount, 10) || 10;
     setBatchGenerating(true);
@@ -350,7 +394,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         await setDoc(doc(db, 'vestCatalog', currentId), item);
       }
 
-      // Sync local storage
       try {
         const local = JSON.parse(localStorage.getItem('bevest_vest_catalog') || '{}');
         batchItems.forEach(b => { local[b.vestId] = b; });
@@ -368,7 +411,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
   };
 
-  // Open QR Viewer Modal for a catalog item
   const handleOpenQrViewer = (vest) => {
     setSelectedVestQr(vest);
     const payload = JSON.stringify({
@@ -378,7 +420,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       token: vest.hardwareToken || 'N/A'
     });
     QRCode.toDataURL(payload, {
-      width: 320,
+      width: 300,
       margin: 2,
       color: { dark: '#0f172a', light: '#ffffff' }
     })
@@ -386,7 +428,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     .catch(console.error);
   };
 
-  // Print single QR Label
   const handlePrintLabel = (vestId, batch, qrUrl) => {
     const printWin = window.open('', '_blank', 'width=600,height=600');
     if (!printWin) return;
@@ -395,12 +436,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         <head>
           <title>Print Vest Label - ${vestId}</title>
           <style>
-            body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc; }
-            .label-box { border: 2px dashed #0f172a; padding: 24px; text-align: center; border-radius: 12px; background: #fff; width: 300px; }
-            .title { font-size: 18px; font-weight: 800; color: #0f172a; margin-bottom: 6px; }
-            .sub { font-size: 11px; color: #64748b; font-weight: 600; text-transform: uppercase; margin-bottom: 16px; }
-            img { width: 220px; height: 220px; }
-            .id-code { font-size: 22px; font-weight: 800; color: #0f172a; margin-top: 12px; letter-spacing: 0.05em; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc; }
+            .label-box { border: 2px dashed #ea580c; padding: 24px; text-align: center; border-radius: 12px; background: #fff; width: 300px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
+            .title { font-size: 18px; font-weight: 800; color: #0f172a; margin-bottom: 4px; }
+            .sub { font-size: 11px; color: #ea580c; font-weight: 700; text-transform: uppercase; margin-bottom: 14px; letter-spacing: 0.05em; }
+            img { width: 200px; height: 200px; }
+            .id-code { font-size: 20px; font-weight: 800; color: #0f172a; margin-top: 10px; letter-spacing: 0.05em; }
             .batch { font-size: 11px; color: #64748b; font-weight: 700; margin-top: 4px; }
             .security { font-size: 9px; color: #94a3b8; margin-top: 12px; border-top: 1px solid #e2e8f0; padding-top: 8px; }
           </style>
@@ -412,7 +453,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             <img src="${qrUrl}" />
             <div class="id-code">${vestId}</div>
             <div class="batch">${batch} • VERIFIED</div>
-            <div class="security">Scan with Bevest Admin or SSO App to Register</div>
+            <div class="security">Scan with BeVest Admin or SSO App to Register</div>
           </div>
           <script>
             window.onload = function() { window.print(); window.close(); }
@@ -423,7 +464,95 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     printWin.document.close();
   };
 
-  // Extend Subscription for Contractor
+  // DEVELOPER FUNCTION: CREATE ACCOUNT FOR ADMIN
+  const handleCreateAdmin = async (e) => {
+    e.preventDefault();
+    if (!adminCompany.trim() || !adminFirstName.trim() || !adminLastName.trim() || !adminEmail.trim() || !adminPhone.trim() || !adminPassword) {
+      showToast('error', 'Please fill in all required fields including Company Name and Phone.');
+      return;
+    }
+
+    setAdminCreating(true);
+    try {
+      // 1. Create account in Firebase Auth using secondaryAuth instance
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, adminEmail.trim(), adminPassword);
+      const newAdminUid = userCredential.user.uid;
+
+      const now = new Date();
+      const adminDoc = {
+        firstName: adminFirstName.trim(),
+        lastName: adminLastName.trim(),
+        company: adminCompany.trim(),
+        companyName: adminCompany.trim(),
+        phone: formatPhoneWithCountryCode(adminPhone),
+        email: adminEmail.trim(),
+        role: 'ADMIN',
+        active: true,
+        status: 'Active',
+        createdAt: now,
+        createdByDeveloper: devEmail
+      };
+
+      // 2. Save user doc to Firestore users collection
+      await setDoc(doc(db, 'users', newAdminUid), adminDoc);
+
+      // 3. Sign out secondaryAuth instance immediately
+      await secondaryAuth.signOut();
+
+      // 4. Update local user directory cache
+      try {
+        const directory = JSON.parse(localStorage.getItem('bevest_user_directory') || '{}');
+        directory[adminEmail.toLowerCase().trim()] = {
+          phone: formatPhoneWithCountryCode(adminPhone),
+          role: 'ADMIN',
+          firstName: adminFirstName.trim(),
+          lastName: adminLastName.trim(),
+          company: adminCompany.trim(),
+          companyName: adminCompany.trim()
+        };
+        localStorage.setItem('bevest_user_directory', JSON.stringify(directory));
+      } catch (_) {}
+
+      // 5. Log activity
+      await logActivity(`Developer created Admin account for ${adminEmail.trim()} (${adminCompany.trim()})`, devEmail);
+
+      showToast('success', `✓ Admin account for ${adminCompany.trim()} (${adminEmail.trim()}) created successfully!`);
+      setShowAddAdminModal(false);
+      
+      // Reset form fields
+      setAdminCompany('');
+      setAdminFirstName('');
+      setAdminLastName('');
+      setAdminEmail('');
+      setAdminPhone('');
+      setAdminPassword(`ADM-2026-${Math.floor(1000 + Math.random() * 9000)}`);
+    } catch (err) {
+      console.error('Error creating admin account:', err);
+      showToast('error', 'Failed to create Admin account: ' + err.message);
+    } finally {
+      setAdminCreating(false);
+    }
+  };
+
+  // Toggle Admin Active / Disabled status
+  const handleToggleAdminStatus = async (adminAccount) => {
+    const currentActive = adminAccount.active !== false && adminAccount.status !== 'Disabled';
+    const newActive = !currentActive;
+    const newStatus = newActive ? 'Active' : 'Disabled';
+
+    try {
+      await updateDoc(doc(db, 'users', adminAccount.id), {
+        active: newActive,
+        status: newStatus
+      });
+      await logActivity(`Developer ${newActive ? 'activated' : 'disabled'} Admin account: ${adminAccount.email}`, devEmail);
+      showToast('success', `✓ Admin account for ${adminAccount.email} is now ${newStatus}.`);
+    } catch (err) {
+      console.error('Error toggling admin status:', err);
+      showToast('error', 'Failed to update admin: ' + err.message);
+    }
+  };
+
   const handleConfirmExtension = async () => {
     if (!extendingContractor) return;
     setExtendingLoading(true);
@@ -431,7 +560,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       const days = parseInt(extensionDays, 10) || 30;
       const sub = extendingContractor.subscription || {};
       
-      // Calculate new renewal date
       const currentRenew = sub.renewDate?.toDate ? sub.renewDate.toDate() : (sub.renewDate ? new Date(sub.renewDate) : new Date());
       const baseDate = currentRenew > new Date() ? currentRenew : new Date();
       const newRenew = new Date(baseDate.getTime() + days * 24 * 60 * 60 * 1000);
@@ -462,7 +590,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
   };
 
-  // Record & Approve Subscription Payment
   const handleRecordPayment = async (e) => {
     e.preventDefault();
     if (!paymentContractor) {
@@ -476,7 +603,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       const sub = paymentContractor.subscription || {};
       const plan = SUBSCRIPTION_PLANS[sub.planId] || SUBSCRIPTION_PLANS.BUSINESS;
       
-      // Add 1 month or 1 year extension upon payment approval
       const cycle = sub.billingCycle || 'monthly';
       const monthsToAdd = cycle === 'annual' ? 12 : 1;
       const currentRenew = sub.renewDate?.toDate ? sub.renewDate.toDate() : (sub.renewDate ? new Date(sub.renewDate) : new Date());
@@ -501,7 +627,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
       await setDoc(doc(collection(db, 'subscriptionPayments')), paymentDoc);
 
-      // Update contractor subscription status and renewal date
       await updateDoc(doc(db, 'users', paymentContractor.id), {
         'subscription.status': 'Active',
         'subscription.renewDate': newRenew,
@@ -522,7 +647,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
   };
 
-  // Troubleshoot Resolution Fixes
   const handleApplyTroubleshoot = async () => {
     if (!troubleshootTarget) return;
     setTroubleshootSaving(true);
@@ -545,7 +669,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
       if (troubleshootStatus === 'Active' && sub.status === 'Expired') {
         const extDate = new Date();
-        extDate.setDate(extDate.getDate() + 14); // 14 days emergency grace
+        extDate.setDate(extDate.getDate() + 14);
         updates['subscription.renewDate'] = extDate;
       }
 
@@ -565,7 +689,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
   };
 
-  // Metrics Calculations
+  // Metrics
   const activeSubsCount = contractors.filter(c => c.subscription?.status === 'Active').length;
   const totalMrr = contractors.reduce((sum, c) => {
     if (c.subscription?.status === 'Active') {
@@ -576,7 +700,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const registeredVestsCount = catalog.filter(v => v.catalogStatus === 'REGISTERED').length;
   const unregisteredVestsCount = catalog.filter(v => v.catalogStatus === 'UNREGISTERED').length;
 
-  // Filtered Catalog
   const filteredCatalog = catalog.filter(v => {
     const matchesSearch = (v.vestId || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
                           (v.batchNumber || '').toLowerCase().includes(catalogSearch.toLowerCase());
@@ -584,20 +707,28 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     return matchesSearch && matchesFilter;
   });
 
+  const filteredAdmins = admins.filter(a => {
+    const q = adminSearch.toLowerCase();
+    const comp = (a.company || a.companyName || '').toLowerCase();
+    const name = `${a.firstName || ''} ${a.lastName || ''}`.toLowerCase();
+    const em = (a.email || '').toLowerCase();
+    return comp.includes(q) || name.includes(q) || em.includes(q);
+  });
+
   return (
-    <div className="dev-container">
+    <div className="dashboard-container" style={{ position: 'relative' }}>
       {/* Toast Notification */}
       {toastMsg.text && (
         <div style={{
           position: 'fixed',
-          top: '1.5rem',
-          right: '1.5rem',
+          top: '1.25rem',
+          right: '1.25rem',
           zIndex: 9999,
-          background: toastMsg.type === 'error' ? '#ef4444' : '#10b981',
+          background: toastMsg.type === 'error' ? '#ef4444' : '#16a34a',
           color: '#ffffff',
           padding: '0.85rem 1.25rem',
           borderRadius: '8px',
-          boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
+          boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
           display: 'flex',
           alignItems: 'center',
           gap: '0.6rem',
@@ -609,139 +740,172 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         </div>
       )}
 
-      {/* Sidebar */}
-      <div className="dev-sidebar">
-        <div className="dev-brand">
-          <img src={logo} alt="Bevest" />
-          <div className="dev-brand-text">
-            <h1>Bevest</h1>
-            <span className="dev-badge">Developer Portal</span>
+      {/* Mobile Header (Visible on Mobile & Tablet) */}
+      <div className="mobile-header">
+        <div className="mobile-logo-group">
+          <img src={logo} alt="Bevest Logo" />
+          <h2>BeVest Developer</h2>
+        </div>
+        <button 
+          className="burger-btn" 
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          aria-label="Toggle Navigation Menu"
+        >
+          {isMobileMenuOpen ? <FiX /> : <FiMenu />}
+        </button>
+      </div>
+
+      {/* Mobile Backdrop Overlay */}
+      {isMobileMenuOpen && (
+        <div 
+          className="sidebar-backdrop" 
+          onClick={() => setIsMobileMenuOpen(false)} 
+        />
+      )}
+
+      {/* Sidebar (Matching Admin UI Design) */}
+      <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`}>
+        <div className="sidebar-header desktop-only">
+          <img src={logo} alt="Bevest Logo" className="sidebar-logo" />
+          <div className="sidebar-title-group">
+            <h2>BeVest Developer</h2>
+            <span>SYSTEM & HARDWARE</span>
+          </div>
+        </div>
+        
+        <div className="sidebar-user">
+          <div className="avatar" style={{ backgroundColor: '#ffedd5', color: '#ea580c', fontWeight: 700, fontSize: '0.875rem' }}>
+            DV
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span className="username" style={{ lineHeight: 1.2 }}>{devName}</span>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>System Developer</span>
           </div>
         </div>
 
-        <nav className="dev-nav">
-          <button
-            type="button"
-            className={`dev-nav-btn ${activeTab === 'hardware' ? 'active' : ''}`}
-            onClick={() => setActiveTab('hardware')}
+        <nav className="sidebar-nav">
+          <button 
+            className={`nav-item ${activeTab === 'hardware' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('hardware'); setIsMobileMenuOpen(false); }}
           >
-            <FiCpu /> Vest QR & Hardware
+            <FiCpu /> Vest Hardware & QR
           </button>
-          <button
-            type="button"
-            className={`dev-nav-btn ${activeTab === 'subscriptions' ? 'active' : ''}`}
-            onClick={() => setActiveTab('subscriptions')}
+          <button 
+            className={`nav-item ${activeTab === 'admins' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('admins'); setIsMobileMenuOpen(false); }}
           >
-            <FiCreditCard /> Subscriptions & Payments
+            <FiBriefcase /> Admin Accounts
           </button>
-          <button
-            type="button"
-            className={`dev-nav-btn ${activeTab === 'troubleshoot' ? 'active' : ''}`}
-            onClick={() => setActiveTab('troubleshoot')}
+          <button 
+            className={`nav-item ${activeTab === 'subscriptions' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('subscriptions'); setIsMobileMenuOpen(false); }}
+          >
+            <FiCreditCard /> Subscriptions & Billing
+          </button>
+          <button 
+            className={`nav-item ${activeTab === 'troubleshoot' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('troubleshoot'); setIsMobileMenuOpen(false); }}
           >
             <FiTool /> Troubleshoot Center
           </button>
         </nav>
-
-        <div className="dev-user-footer">
-          <div className="dev-user-info">
-            <div className="dev-user-avatar">
-              DEV
-            </div>
-            <div className="dev-user-meta">
-              <div className="dev-user-name">{devName}</div>
-              <div className="dev-user-role">System Developer</div>
-            </div>
-          </div>
-          <button
-            type="button"
-            className="dev-logout-btn"
-            title="Sign Out"
-            onClick={onLogout}
-          >
-            <FiLogOut />
+        
+        <div className="sidebar-footer">
+          <button className="nav-item" onClick={handleSignOut} style={{ color: '#ef4444' }}>
+            <FiLogOut /> Sign Out
           </button>
         </div>
-      </div>
+      </aside>
 
-      {/* Main Content */}
-      <div className="dev-main">
-        {/* Top Header */}
-        <div className="dev-header">
-          <div>
-            <h2>
-              {activeTab === 'hardware' && 'Smart Vest Hardware & QR Generator'}
-              {activeTab === 'subscriptions' && 'Subscription & Payment Management'}
-              {activeTab === 'troubleshoot' && 'Subscription Diagnostics & Troubleshooting'}
-            </h2>
-            <p>
-              {activeTab === 'hardware' && 'Generate official scannable QR codes and upload authentic hardware vests to the Bevest database.'}
-              {activeTab === 'subscriptions' && 'Manage contractor subscription plans, record/verify payments, and extend subscriptions.'}
-              {activeTab === 'troubleshoot' && 'Diagnose subscription issues, grant quota overrides, and resolve billing conflicts.'}
-            </p>
-          </div>
-          <div>
-            {activeTab === 'hardware' && (
-              <button
-                type="button"
-                className="dev-btn-emerald"
-                onClick={() => setShowBatchModal(true)}
-              >
-                <FiLayers /> Batch Generate QR Codes
-              </button>
-            )}
-            {activeTab === 'subscriptions' && (
-              <button
-                type="button"
-                className="dev-btn-emerald"
-                onClick={() => setShowPaymentModal(true)}
-              >
-                <FiDollarSign /> Record & Approve Payment
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="dev-body">
-          {/* Quick Stats Grid */}
-          <div className="dev-stats-grid">
-            <div className="dev-stat-card">
-              <div>
-                <div className="dev-stat-val">{catalog.length}</div>
-                <div className="dev-stat-lbl">Total Hardware Vests</div>
-              </div>
-              <div className="dev-stat-icon purple"><FiCpu /></div>
+      {/* Main Content Area */}
+      <main className="main-content">
+        <div className="dashboard-content">
+          {/* Top Page Header */}
+          <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <h1>
+                {activeTab === 'hardware' && 'Smart Vest Hardware & QR Generator'}
+                {activeTab === 'admins' && 'Admin Account Provisioning & Companies'}
+                {activeTab === 'subscriptions' && 'Subscription & Payment Management'}
+                {activeTab === 'troubleshoot' && 'Subscription Diagnostics & Troubleshooting'}
+              </h1>
+              <p>
+                {activeTab === 'hardware' && 'Generate official scannable QR codes and upload authentic smart vests to the central Bevest database.'}
+                {activeTab === 'admins' && 'Onboard and manage Admin accounts for client companies and project sites.'}
+                {activeTab === 'subscriptions' && 'Manage contractor subscription tiers, verify manual payments, and extend billing cycles.'}
+                {activeTab === 'troubleshoot' && 'Diagnose subscription errors, grant temporary quota boosts, and override account statuses.'}
+              </p>
             </div>
 
-            <div className="dev-stat-card">
-              <div>
-                <div className="dev-stat-val" style={{ color: '#34d399' }}>{unregisteredVestsCount}</div>
-                <div className="dev-stat-lbl">Ready for Admin/SSO Scan</div>
-              </div>
-              <div className="dev-stat-icon emerald"><FiCheckCircle /></div>
-            </div>
-
-            <div className="dev-stat-card">
-              <div>
-                <div className="dev-stat-val">{activeSubsCount}</div>
-                <div className="dev-stat-lbl">Active Subscriptions</div>
-              </div>
-              <div className="dev-stat-icon cyan"><FiUsers /></div>
-            </div>
-
-            <div className="dev-stat-card">
-              <div>
-                <div className="dev-stat-val">₱{totalMrr.toLocaleString()}</div>
-                <div className="dev-stat-lbl">Monthly Recurring Rev</div>
-              </div>
-              <div className="dev-stat-icon amber"><FiDollarSign /></div>
+            <div className="dev-header-actions" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              {activeTab === 'hardware' && (
+                <button
+                  type="button"
+                  className="dev-btn-orange"
+                  onClick={() => setShowBatchModal(true)}
+                >
+                  <FiLayers /> Batch Generate QR Codes
+                </button>
+              )}
+              {activeTab === 'subscriptions' && (
+                <button
+                  type="button"
+                  className="dev-btn-orange"
+                  onClick={() => setShowPaymentModal(true)}
+                >
+                  <FiDollarSign /> Record & Approve Payment
+                </button>
+              )}
             </div>
           </div>
 
-          {/* TAB 1: HARDWARE & QR GENERATOR */}
+          {/* Stats Overview Grid (Matching Admin Design) */}
+          <div className="stats-grid">
+            <div className="dev-stat-card">
+              <div>
+                <div className="dev-stat-title">TOTAL HARDWARE VESTS</div>
+                <div className="dev-stat-value">{catalog.length}</div>
+              </div>
+              <div className="dev-stat-icon-wrapper dev-stat-icon-orange">
+                <FiCpu />
+              </div>
+            </div>
+
+            <div className="dev-stat-card highlight">
+              <div>
+                <div className="dev-stat-title">READY FOR ADMIN/SSO SCAN</div>
+                <div className="dev-stat-value" style={{ color: '#16a34a' }}>{unregisteredVestsCount}</div>
+              </div>
+              <div className="dev-stat-icon-wrapper dev-stat-icon-emerald">
+                <FiCheckCircle />
+              </div>
+            </div>
+
+            <div className="dev-stat-card">
+              <div>
+                <div className="dev-stat-title">ADMIN COMPANIES</div>
+                <div className="dev-stat-value">{admins.length}</div>
+              </div>
+              <div className="dev-stat-icon-wrapper dev-stat-icon-purple">
+                <FiBriefcase />
+              </div>
+            </div>
+
+            <div className="dev-stat-card">
+              <div>
+                <div className="dev-stat-title">ACTIVE SUBSCRIPTIONS</div>
+                <div className="dev-stat-value">{activeSubsCount}</div>
+              </div>
+              <div className="dev-stat-icon-wrapper dev-stat-icon-blue">
+                <FiUsers />
+              </div>
+            </div>
+          </div>
+
+          {/* TAB 1: VEST HARDWARE & QR GENERATOR */}
           {activeTab === 'hardware' && (
             <div>
-              {/* Single Vest Generator Card */}
+              {/* QR Code Generator Card */}
               <div className="dev-card">
                 <div className="dev-card-header">
                   <h3 className="dev-card-title">
@@ -756,7 +920,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   </button>
                 </div>
 
-                <div className="dev-generator-grid">
+                <div className="dev-form-grid">
                   <form onSubmit={handleUploadSingleVest}>
                     <div className="dev-form-row">
                       <div className="dev-form-group">
@@ -807,20 +971,20 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     </div>
 
                     <div className="dev-form-group">
-                      <label className="dev-form-label">SECURITY CHIP TOKEN (AUTO-GENERATED)</label>
+                      <label className="dev-form-label">SECURITY CHIP TOKEN (HARDWARE IDENTIFIER)</label>
                       <input
                         type="text"
                         className="dev-input"
                         value={genToken}
                         readOnly
-                        style={{ color: '#818cf8', fontWeight: 700 }}
+                        style={{ color: '#ea580c', fontWeight: 700, backgroundColor: '#f8fafc' }}
                       />
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem' }}>
+                    <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', flexWrap: 'wrap' }}>
                       <button
                         type="submit"
-                        className="dev-btn-primary"
+                        className="dev-btn-orange"
                         disabled={uploading}
                       >
                         {uploading ? 'Uploading to Database...' : 'Upload & Register to Database'}
@@ -848,35 +1012,33 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   </form>
 
                   {/* Live QR Preview Box */}
-                  <div className="dev-qr-preview-box">
-                    <div className="dev-qr-sticker">
-                      <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#0f172a', letterSpacing: '0.05em', marginBottom: '4px' }}>
-                        BEVEST SMART IOT
-                      </div>
-                      {liveQrDataUrl ? (
-                        <img src={liveQrDataUrl} alt="QR Code" />
-                      ) : (
-                        <div style={{ width: 180, height: 180, background: '#f1f5f9' }} />
-                      )}
-                      <div className="dev-sticker-id">{genVestId}</div>
-                      <div className="dev-sticker-batch">{genBatch} • VERIFIED</div>
+                  <div className="dev-qr-sticker-box">
+                    <div className="dev-sticker-brand">
+                      BEVEST SMART IOT
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                      Ready to be scanned and registered by Admin or SSO
+                    {liveQrDataUrl ? (
+                      <img src={liveQrDataUrl} alt="Vest QR Code" />
+                    ) : (
+                      <div style={{ width: 180, height: 180, backgroundColor: '#f1f5f9', borderRadius: '8px' }} />
+                    )}
+                    <div className="dev-sticker-id">{genVestId}</div>
+                    <div className="dev-sticker-batch">{genBatch} • VERIFIED</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                      Ready for Admin / SSO verification scan
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Hardware Catalog Table */}
+              {/* Central Hardware Catalog Table */}
               <div className="dev-card">
                 <div className="dev-card-header">
                   <h3 className="dev-card-title">
                     <FiLayers /> Central Hardware Database ({filteredCatalog.length} Vests)
                   </h3>
 
-                  <div style={{ display: 'flex', gap: '0.75rem' }}>
-                    <div style={{ position: 'relative', width: '240px' }}>
+                  <div className="dev-search-filter-row" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <div style={{ position: 'relative', minWidth: '220px' }}>
                       <input
                         type="text"
                         className="dev-input"
@@ -890,9 +1052,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       className="dev-select"
                       value={catalogFilter}
                       onChange={(e) => setCatalogFilter(e.target.value)}
-                      style={{ width: '180px' }}
+                      style={{ minWidth: '180px' }}
                     >
-                      <option value="ALL">All Statuses</option>
+                      <option value="ALL">All Hardware Statuses</option>
                       <option value="UNREGISTERED">Ready for Scan</option>
                       <option value="REGISTERED">Registered to Company</option>
                       <option value="MAINTENANCE">Maintenance</option>
@@ -900,15 +1062,15 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   </div>
                 </div>
 
-                <div className="dev-table-container">
+                <div className="dev-table-wrapper">
                   <table className="dev-table">
                     <thead>
                       <tr>
                         <th>Vest ID</th>
                         <th>Model & Firmware</th>
-                        <th>Batch Number</th>
+                        <th>Batch Lot</th>
                         <th>Hardware Status</th>
-                        <th>Registered To</th>
+                        <th>Registered Company</th>
                         <th>Added Date</th>
                         <th style={{ textAlign: 'right' }}>Actions</th>
                       </tr>
@@ -916,35 +1078,35 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     <tbody>
                       {catalogLoading ? (
                         <tr>
-                          <td colSpan={7} style={{ textAlign: 'center', padding: '2rem' }}>
+                          <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
                             Loading hardware catalog...
                           </td>
                         </tr>
                       ) : filteredCatalog.length === 0 ? (
                         <tr>
-                          <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
-                            No hardware vests found matching your search.
+                          <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                            No hardware vests found matching your criteria.
                           </td>
                         </tr>
                       ) : (
                         filteredCatalog.map(v => (
                           <tr key={v.id || v.vestId}>
                             <td>
-                              <strong style={{ color: '#ffffff', letterSpacing: '0.05em' }}>
+                              <strong style={{ color: 'var(--text-main)', letterSpacing: '0.05em' }}>
                                 {v.vestId || v.id}
                               </strong>
                             </td>
                             <td>
-                              <div>{v.model || 'Bevest Smart Vest'}</div>
-                              <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{v.firmwareVersion || 'v1.4.2'}</span>
+                              <div style={{ fontWeight: 500 }}>{v.model || 'Bevest Smart Vest'}</div>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{v.firmwareVersion || 'v1.4.2'}</span>
                             </td>
                             <td>
-                              <span style={{ color: '#cbd5e1', fontWeight: 500 }}>{v.batchNumber || 'N/A'}</span>
+                              <span style={{ fontWeight: 500 }}>{v.batchNumber || 'N/A'}</span>
                             </td>
                             <td>
                               {v.catalogStatus === 'UNREGISTERED' && (
                                 <span className="dev-badge-green">
-                                  <FiCheckCircle /> Available for Scan
+                                  <FiCheckCircle /> Ready for Scan
                                 </span>
                               )}
                               {v.catalogStatus === 'REGISTERED' && (
@@ -962,10 +1124,10 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                               {v.registeredToAdmin ? (
                                 <div>
                                   <div style={{ fontWeight: 600 }}>{v.registeredToAdminName || 'Admin'}</div>
-                                  <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{v.registeredToAdmin}</span>
+                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{v.registeredToAdmin}</span>
                                 </div>
                               ) : (
-                                <span style={{ color: '#64748b', fontStyle: 'italic' }}>Pending Admin/SSO Claim</span>
+                                <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Pending Admin/SSO Claim</span>
                               )}
                             </td>
                             <td>
@@ -978,6 +1140,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                   className="dev-btn-secondary"
                                   onClick={() => handleOpenQrViewer(v)}
                                   title="View QR Code"
+                                  style={{ padding: '0.4rem 0.65rem' }}
                                 >
                                   <FiEye />
                                 </button>
@@ -989,6 +1152,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                       .then(url => handlePrintLabel(v.vestId, v.batchNumber, url));
                                   }}
                                   title="Print Label"
+                                  style={{ padding: '0.4rem 0.65rem' }}
                                 >
                                   <FiPrinter />
                                 </button>
@@ -1004,7 +1168,143 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             </div>
           )}
 
-          {/* TAB 2: SUBSCRIPTIONS & PAYMENTS */}
+          {/* TAB 2: ADMIN MANAGEMENT (NEW FUNCTION FOR DEVELOPER) */}
+          {activeTab === 'admins' && (
+            <div>
+              <div className="dev-card">
+                <div className="dev-card-header">
+                  <div>
+                    <h3 className="dev-card-title">
+                      <FiBriefcase /> Admin Accounts Directory ({admins.length} Companies)
+                    </h3>
+                    <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                      Admin accounts oversee companies and project sites. Developers can onboard new Admin accounts below.
+                    </p>
+                  </div>
+
+                  <div className="dev-search-filter-row" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <div style={{ position: 'relative', minWidth: '260px' }}>
+                      <input
+                        type="text"
+                        className="dev-input"
+                        placeholder="Search Company, Admin, or Email..."
+                        value={adminSearch}
+                        onChange={(e) => setAdminSearch(e.target.value)}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="dev-btn-orange"
+                      onClick={() => setShowAddAdminModal(true)}
+                    >
+                      <FiUserPlus /> Onboard New Admin
+                    </button>
+                  </div>
+                </div>
+
+                <div className="dev-table-wrapper">
+                  <table className="dev-table">
+                    <thead>
+                      <tr>
+                        <th>Company / Organization</th>
+                        <th>Admin Name</th>
+                        <th>Email Address</th>
+                        <th>Phone Number</th>
+                        <th>Account Status</th>
+                        <th>Created Date</th>
+                        <th style={{ textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminsLoading ? (
+                        <tr>
+                          <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                            Loading admin accounts...
+                          </td>
+                        </tr>
+                      ) : filteredAdmins.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                            No Admin accounts found matching your search.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredAdmins.map(a => {
+                          const isActive = a.active !== false && a.status !== 'Disabled';
+                          const company = a.company || a.companyName || 'Bevest Enterprise';
+                          return (
+                            <tr key={a.id}>
+                              <td>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                                  <div style={{ 
+                                    backgroundColor: '#ffedd5', 
+                                    color: '#ea580c', 
+                                    width: '34px', 
+                                    height: '34px', 
+                                    borderRadius: '8px', 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'center',
+                                    fontSize: '1.1rem',
+                                    flexShrink: 0
+                                  }}>
+                                    <FiBriefcase />
+                                  </div>
+                                  <div>
+                                    <strong style={{ color: 'var(--text-main)', fontSize: '0.95rem' }}>
+                                      {company}
+                                    </strong>
+                                    <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>
+                                      System Administrator
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td>
+                                <div style={{ fontWeight: 600 }}>{a.firstName} {a.lastName}</div>
+                              </td>
+                              <td>
+                                <span>{a.email}</span>
+                              </td>
+                              <td>
+                                <span>{a.phone || 'Not set'}</span>
+                              </td>
+                              <td>
+                                {isActive ? (
+                                  <span className="dev-badge-green">
+                                    <FiCheckCircle /> Active
+                                  </span>
+                                ) : (
+                                  <span className="dev-badge-red">
+                                    <FiAlertCircle /> Disabled
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {a.createdAt?.toDate ? formatDisplayDate(a.createdAt.toDate()) : 'Recent'}
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                <button
+                                  type="button"
+                                  className="dev-btn-secondary"
+                                  onClick={() => handleToggleAdminStatus(a)}
+                                  style={{ padding: '0.45rem 0.75rem', fontSize: '0.8rem' }}
+                                >
+                                  {isActive ? 'Disable Account' : 'Activate Account'}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: SUBSCRIPTIONS & PAYMENTS */}
           {activeTab === 'subscriptions' && (
             <div>
               {/* Contractors Subscriptions List */}
@@ -1014,7 +1314,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     <FiCreditCard /> Contractor Subscriptions ({contractors.length} Accounts)
                   </h3>
 
-                  <div style={{ position: 'relative', width: '260px' }}>
+                  <div style={{ position: 'relative', minWidth: '240px' }}>
                     <input
                       type="text"
                       className="dev-input"
@@ -1025,7 +1325,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   </div>
                 </div>
 
-                <div className="dev-table-container">
+                <div className="dev-table-wrapper">
                   <table className="dev-table">
                     <thead>
                       <tr>
@@ -1042,14 +1342,14 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     <tbody>
                       {contractorsLoading ? (
                         <tr>
-                          <td colSpan={8} style={{ textAlign: 'center', padding: '2rem' }}>
+                          <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
                             Loading contractor subscriptions...
                           </td>
                         </tr>
                       ) : contractors.length === 0 ? (
                         <tr>
-                          <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
-                            No contractors registered in the system yet.
+                          <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                            No contractors found in the database.
                           </td>
                         </tr>
                       ) : (
@@ -1074,13 +1374,13 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                 <td>
                                   {hasPlan ? (
                                     <div>
-                                      <span style={{ fontWeight: 600, color: '#f8fafc' }}>{sub.planName || sub.planId}</span>
-                                      <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                                      <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{sub.planName || sub.planId}</span>
+                                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                                         ₱{(sub.monthlyPrice || 0).toLocaleString()}/mo
                                       </div>
                                     </div>
                                   ) : (
-                                    <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No Plan Active</span>
+                                    <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>No Plan Configured</span>
                                   )}
                                 </td>
                                 <td>
@@ -1104,7 +1404,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                   )}
                                 </td>
                                 <td>
-                                  <div style={{ color: isExpired ? '#f87171' : '#f8fafc' }}>
+                                  <div style={{ color: isExpired ? '#b91c1c' : 'var(--text-main)', fontWeight: isExpired ? 600 : 400 }}>
                                     {renewStr}
                                   </div>
                                 </td>
@@ -1115,6 +1415,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                       className="dev-btn-secondary"
                                       onClick={() => setExtendingContractor(c)}
                                       title="Extend Subscription"
+                                      style={{ padding: '0.45rem 0.75rem' }}
                                     >
                                       <FiCalendar /> Extend
                                     </button>
@@ -1127,6 +1428,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                         setShowPaymentModal(true);
                                       }}
                                       title="Record Payment"
+                                      style={{ padding: '0.45rem 0.75rem' }}
                                     >
                                       <FiDollarSign /> Payment
                                     </button>
@@ -1139,6 +1441,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                         setActiveTab('troubleshoot');
                                       }}
                                       title="Troubleshoot"
+                                      style={{ padding: '0.45rem 0.75rem' }}
                                     >
                                       <FiTool />
                                     </button>
@@ -1161,7 +1464,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   </h3>
                 </div>
 
-                <div className="dev-table-container">
+                <div className="dev-table-wrapper">
                   <table className="dev-table">
                     <thead>
                       <tr>
@@ -1178,7 +1481,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     <tbody>
                       {paymentHistory.length === 0 ? (
                         <tr>
-                          <td colSpan={8} style={{ textAlign: 'center', padding: '1.5rem', color: '#94a3b8' }}>
+                          <td colSpan={8} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
                             No payment transactions recorded yet. Click "Record & Approve Payment" to add one.
                           </td>
                         </tr>
@@ -1188,7 +1491,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                             <td><strong>{p.referenceNumber || p.id}</strong></td>
                             <td>{p.contractorEmail}</td>
                             <td>{p.planName}</td>
-                            <td><strong style={{ color: '#34d399' }}>₱{Number(p.amount || 0).toLocaleString()}</strong></td>
+                            <td><strong style={{ color: '#15803d' }}>₱{Number(p.amount || 0).toLocaleString()}</strong></td>
                             <td>{p.paymentMethod}</td>
                             <td>{p.paymentDate?.toDate ? formatDisplayDate(p.paymentDate.toDate()) : 'Recent'}</td>
                             <td>{p.verifiedBy}</td>
@@ -1205,22 +1508,22 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             </div>
           )}
 
-          {/* TAB 3: TROUBLESHOOT CENTER */}
+          {/* TAB 4: TROUBLESHOOT CENTER */}
           {activeTab === 'troubleshoot' && (
             <div>
               {/* Alert Diagnostics Banner */}
-              <div className="dev-card" style={{ borderColor: 'rgba(245, 158, 11, 0.3)', background: 'rgba(30, 41, 59, 0.95)' }}>
-                <div className="dev-card-header" style={{ borderBottomColor: 'rgba(245, 158, 11, 0.2)' }}>
-                  <h3 className="dev-card-title" style={{ color: '#fbbf24' }}>
+              <div className="dev-card" style={{ borderLeft: '4px solid #f59e0b', backgroundColor: '#fffbeb' }}>
+                <div className="dev-card-header" style={{ borderBottomColor: '#fde68a' }}>
+                  <h3 className="dev-card-title" style={{ color: '#b45309' }}>
                     <FiAlertTriangle /> Subscription Health Diagnostics
                   </h3>
                 </div>
-                <p style={{ color: '#cbd5e1', fontSize: '0.875rem', lineHeight: '1.5', margin: '0 0 1rem 0' }}>
+                <p style={{ color: '#92400e', fontSize: '0.875rem', lineHeight: '1.5', margin: '0 0 1.25rem 0' }}>
                   Use this console to diagnose contractor subscription issues, override license statuses, grant emergency quota boosts, or fix billing sync conflicts.
                 </p>
 
                 <div className="dev-form-group">
-                  <label className="dev-form-label">SELECT CONTRACTOR TO INSPECT & TROUBLESHOOT</label>
+                  <label className="dev-form-label" style={{ color: '#78350f' }}>SELECT CONTRACTOR TO INSPECT & TROUBLESHOOT</label>
                   <select
                     className="dev-select"
                     value={troubleshootTarget?.id || ''}
@@ -1231,6 +1534,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                         setTroubleshootStatus(found.subscription?.status || 'Active');
                       }
                     }}
+                    style={{ backgroundColor: '#ffffff' }}
                   >
                     <option value="">-- Choose a contractor account --</option>
                     {contractors.map(c => (
@@ -1248,34 +1552,34 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     <h3 className="dev-card-title">
                       <FiTool /> Troubleshooting Console: {troubleshootTarget.firstName} {troubleshootTarget.lastName}
                     </h3>
-                    <span className="dev-badge">Account ID: {troubleshootTarget.id}</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>UID: {troubleshootTarget.id}</span>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
-                    <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                      <div className="dev-stat-lbl">Assigned Plan</div>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc', marginTop: '4px' }}>
+                    <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                      <div className="dev-stat-title">Assigned Plan</div>
+                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)', marginTop: '4px' }}>
                         {troubleshootTarget.subscription?.planName || 'No Active Plan'}
                       </div>
                     </div>
 
-                    <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                      <div className="dev-stat-lbl">Current Vest Quota</div>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc', marginTop: '4px' }}>
+                    <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                      <div className="dev-stat-title">Current Vest Quota</div>
+                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)', marginTop: '4px' }}>
                         {troubleshootTarget.subscription?.vestLimit || 50} Vests
                       </div>
                     </div>
 
-                    <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                      <div className="dev-stat-lbl">SSO Quota</div>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc', marginTop: '4px' }}>
+                    <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                      <div className="dev-stat-title">SSO Quota</div>
+                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)', marginTop: '4px' }}>
                         {troubleshootTarget.subscription?.ssoLimit || 10} SSOs
                       </div>
                     </div>
 
-                    <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                      <div className="dev-stat-lbl">Subscription Expiry</div>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc', marginTop: '4px' }}>
+                    <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                      <div className="dev-stat-title">Subscription Expiry</div>
+                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)', marginTop: '4px' }}>
                         {troubleshootTarget.subscription?.renewDate 
                           ? formatDisplayDate(troubleshootTarget.subscription.renewDate.toDate ? troubleshootTarget.subscription.renewDate.toDate() : troubleshootTarget.subscription.renewDate)
                           : 'Not Scheduled'}
@@ -1324,10 +1628,10 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     />
                   </div>
 
-                  <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+                  <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem', flexWrap: 'wrap' }}>
                     <button
                       type="button"
-                      className="dev-btn-primary"
+                      className="dev-btn-orange"
                       onClick={handleApplyTroubleshoot}
                       disabled={troubleshootSaving}
                     >
@@ -1347,7 +1651,145 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             </div>
           )}
         </div>
-      </div>
+      </main>
+
+      {/* MODAL: ONBOARD NEW ADMIN (NEW FUNCTION FOR DEVELOPER) */}
+      {showAddAdminModal && (
+        <div className="dev-modal-overlay">
+          <div className="dev-modal-card">
+            <div className="dev-modal-header">
+              <h3>Onboard New Admin Account</h3>
+              <button
+                type="button"
+                className="dev-modal-close"
+                onClick={() => setShowAddAdminModal(false)}
+              >
+                <FiX />
+              </button>
+            </div>
+
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1.25rem', lineHeight: '1.4' }}>
+              Create an administrative account for a company or client organization. Admins have oversight to manage contractor accounts, site safety officers, and monitor active workers.
+            </p>
+
+            <form onSubmit={handleCreateAdmin}>
+              {/* WHICH COMPANY IS THE ADMIN (EXPLICIT USER REQUIREMENT) */}
+              <div className="dev-form-group">
+                <label className="dev-form-label">WHICH COMPANY IS THE ADMIN? (COMPANY / CLIENT NAME) *</label>
+                <input
+                  type="text"
+                  className="dev-input"
+                  placeholder="e.g. BuildCorp Infrastructure, J&T Express Philippines, Apex Builders"
+                  value={adminCompany}
+                  onChange={(e) => setAdminCompany(e.target.value)}
+                  required
+                  autoFocus
+                />
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                  Specify the organization or client enterprise this Admin oversees.
+                </div>
+              </div>
+
+              <div className="dev-form-row">
+                <div className="dev-form-group">
+                  <label className="dev-form-label">FIRST NAME *</label>
+                  <input
+                    type="text"
+                    className="dev-input"
+                    placeholder="First name"
+                    value={adminFirstName}
+                    onChange={(e) => setAdminFirstName(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="dev-form-group">
+                  <label className="dev-form-label">LAST NAME *</label>
+                  <input
+                    type="text"
+                    className="dev-input"
+                    placeholder="Last name"
+                    value={adminLastName}
+                    onChange={(e) => setAdminLastName(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="dev-form-group">
+                <label className="dev-form-label">ADMIN EMAIL ADDRESS *</label>
+                <input
+                  type="email"
+                  className="dev-input"
+                  placeholder="admin@company.com"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="dev-form-group">
+                <label className="dev-form-label">PHONE NUMBER *</label>
+                <PhoneInput
+                  value={adminPhone}
+                  onChange={(p) => setAdminPhone(p)}
+                  required
+                />
+              </div>
+
+              <div className="dev-form-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
+                  <label className="dev-form-label" style={{ margin: 0 }}>TEMPORARY PASSWORD *</label>
+                  <button
+                    type="button"
+                    className="dev-btn-secondary"
+                    style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem' }}
+                    onClick={() => setAdminPassword(`ADM-2026-${Math.floor(1000 + Math.random() * 9000)}`)}
+                  >
+                    <FiRefreshCw /> Auto-Generate
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  className="dev-input"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="dev-form-group">
+                <label className="dev-form-label">ASSIGNED ROLE</label>
+                <input
+                  type="text"
+                  className="dev-input"
+                  value="ADMIN (System Safety Oversight)"
+                  readOnly
+                  disabled
+                  style={{ backgroundColor: '#f8fafc', color: '#ea580c', fontWeight: 600 }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="dev-btn-secondary"
+                  onClick={() => setShowAddAdminModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="dev-btn-orange"
+                  disabled={adminCreating}
+                >
+                  {adminCreating ? 'Creating Admin Account...' : 'Create Admin Account'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* EXTEND SUBSCRIPTION MODAL */}
       {extendingContractor && (
@@ -1364,7 +1806,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               </button>
             </div>
 
-            <div style={{ marginBottom: '1.25rem', color: '#cbd5e1', fontSize: '0.875rem' }}>
+            <div style={{ marginBottom: '1.25rem', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
               Extending subscription for <strong>{extendingContractor.firstName} {extendingContractor.lastName}</strong> ({extendingContractor.email}).
             </div>
 
@@ -1394,7 +1836,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               />
             </div>
 
-            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="dev-btn-secondary"
@@ -1404,7 +1846,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               </button>
               <button
                 type="button"
-                className="dev-btn-emerald"
+                className="dev-btn-orange"
                 onClick={handleConfirmExtension}
                 disabled={extendingLoading}
               >
@@ -1505,7 +1947,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 />
               </div>
 
-              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   className="dev-btn-secondary"
@@ -1515,7 +1957,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 </button>
                 <button
                   type="submit"
-                  className="dev-btn-emerald"
+                  className="dev-btn-orange"
                   disabled={paymentLoading}
                 >
                   {paymentLoading ? 'Verifying...' : 'Approve Payment & Activate'}
@@ -1541,7 +1983,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               </button>
             </div>
 
-            <p style={{ color: '#cbd5e1', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
               Generate multiple sequential smart vest records, register them to the central hardware database, and prepare scannable QR labels.
             </p>
 
@@ -1581,7 +2023,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               />
             </div>
 
-            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="dev-btn-secondary"
@@ -1591,7 +2033,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               </button>
               <button
                 type="button"
-                className="dev-btn-emerald"
+                className="dev-btn-orange"
                 onClick={handleBatchGenerate}
                 disabled={batchGenerating}
               >
@@ -1617,32 +2059,32 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               </button>
             </div>
 
-            <div style={{ background: '#ffffff', padding: '1.25rem', borderRadius: '12px', display: 'inline-block', margin: '0 auto 1.25rem auto' }}>
+            <div style={{ background: '#ffffff', padding: '1.25rem', borderRadius: '12px', border: '2px dashed var(--border-color)', display: 'inline-block', margin: '0 auto 1.25rem auto' }}>
               {viewQrDataUrl && <img src={viewQrDataUrl} alt="QR" style={{ width: '220px', height: '220px', display: 'block' }} />}
               <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '1.1rem', marginTop: '8px' }}>
                 {selectedVestQr.vestId}
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 700 }}>
+              <div style={{ fontSize: '0.75rem', color: '#ea580c', fontWeight: 700 }}>
                 {selectedVestQr.batchNumber} • BEVEST SMART IOT
               </div>
             </div>
 
-            <div style={{ textAlign: 'left', background: '#0f172a', padding: '0.85rem 1rem', borderRadius: '8px', marginBottom: '1.25rem', fontSize: '0.8125rem' }}>
+            <div style={{ textAlign: 'left', background: '#f8fafc', border: '1px solid var(--border-color)', padding: '0.85rem 1rem', borderRadius: '8px', marginBottom: '1.25rem', fontSize: '0.8125rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span style={{ color: '#94a3b8' }}>Status:</span>
+                <span style={{ color: 'var(--text-muted)' }}>Status:</span>
                 <span style={{ fontWeight: 600 }}>{selectedVestQr.catalogStatus}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span style={{ color: '#94a3b8' }}>Model:</span>
+                <span style={{ color: 'var(--text-muted)' }}>Model:</span>
                 <span>{selectedVestQr.model || 'Bevest Smart Vest v2'}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#94a3b8' }}>Security Token:</span>
-                <span style={{ fontFamily: 'monospace', color: '#818cf8' }}>{selectedVestQr.hardwareToken || 'N/A'}</span>
+                <span style={{ color: 'var(--text-muted)' }}>Security Token:</span>
+                <span style={{ fontFamily: 'monospace', color: '#ea580c', fontWeight: 700 }}>{selectedVestQr.hardwareToken || 'N/A'}</span>
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="dev-btn-secondary"
@@ -1654,7 +2096,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 <a
                   href={viewQrDataUrl}
                   download={`${selectedVestQr.vestId}-QR.png`}
-                  className="dev-btn-primary"
+                  className="dev-btn-orange"
                 >
                   <FiDownload /> Download
                 </a>
@@ -1668,4 +2110,3 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 };
 
 export default DeveloperDashboard;
-
