@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   FiArrowRight, FiArrowLeft, FiMail, FiPhone, FiCheckCircle, 
-  FiAlertCircle, FiLock, FiCpu 
+  FiAlertCircle, FiLock, FiEye, FiEyeOff 
 } from 'react-icons/fi';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
@@ -13,6 +13,7 @@ import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
 const Login = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -35,49 +36,7 @@ const Login = ({ onLogin }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
 
 
-  const handleDeveloperQuickLogin = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const devEmail = 'developer@bevest.com';
-      let devUid = 'dev-master-account';
 
-      try {
-        const cred = await signInWithEmailAndPassword(auth, devEmail, 'Developer123!');
-        devUid = cred.user.uid;
-      } catch (authErr) {
-        console.warn('Developer direct auth fallback:', authErr.message);
-      }
-
-      const devProfile = {
-        firstName: 'Bevest',
-        lastName: 'Developer',
-        role: 'DEVELOPER',
-        email: devEmail,
-        active: true,
-        status: 'Active'
-      };
-
-      try {
-        await setDoc(doc(db, 'users', devUid), devProfile, { merge: true });
-      } catch (_) {}
-
-      logActivity(`Developer signed in: ${devEmail}`, devEmail);
-      if (onLogin) {
-        onLogin({
-          uid: devUid,
-          email: devEmail,
-          role: 'DEVELOPER',
-          profile: devProfile
-        });
-      }
-    } catch (err) {
-      console.error('Developer login failed:', err);
-      setError('Failed to sign in as Developer: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -113,7 +72,7 @@ const Login = ({ onLogin }) => {
         const role = String(userData.role || '').trim().toUpperCase();
         if (role !== 'ADMIN' && role !== 'CONTRACTOR' && role !== 'DEVELOPER') {
           await auth.signOut();
-          setError('Unauthorized Access: Admin, Contractor, or Developer privileges required.');
+          setError('Access Denied');
         } else if (userData.active === false || userData.status === 'Disabled') {
           await auth.signOut();
           setError('This account has been disabled. Please contact your administrator.');
@@ -393,13 +352,16 @@ const Login = ({ onLogin }) => {
 
   return (
     <div className="login-container">
-      <div className="logo-section">
-        <img src={logo} alt="Bevest Logo" />
-        <h1>Bevest</h1>
-        <p>Real time site monitoring</p>
-      </div>
-
-      <div className="login-card">
+      <div className="login-card mobile-style-card">
+        {/* Mobile Header: Logo + Motto Band */}
+        <div className="mobile-header-section">
+          <img src={logo} alt="BeVest — Monitor, Protect, Save Lives" className="mobile-logo-image" />
+          <div className="mobile-motto-wrapper">
+            <div className="mobile-motto-line" />
+            <span className="mobile-motto-text">MONITOR · PROTECT · SAVE LIVES</span>
+            <div className="mobile-motto-line" />
+          </div>
+        </div>
         {isForgotMode ? (
           <div>
             <button
@@ -766,77 +728,64 @@ const Login = ({ onLogin }) => {
               </div>
             )}
 
-
-            <div className="divider">
-              PERSONNEL
-            </div>
-
-            <div style={{ marginTop: '1.25rem', textAlign: 'center' }}>
-              <button
-                type="button"
-                className="dev-login-shortcut-btn"
-                onClick={handleDeveloperQuickLogin}
-              >
-                <FiCpu /> Sign In as Developer (Demo Access)
-              </button>
-            </div>
-
           </div>
         ) : (
           <div>
-            {error && <div className="error-message">{error}</div>}
+            {error && <div className="error-message" style={{ marginBottom: '1.25rem' }}>{error}</div>}
 
-            <form onSubmit={handleLogin}>
-              <div className="form-group">
-                <div className="form-header">
-                  <label className="form-label">EMAIL/USERNAME</label>
-                </div>
-                <div className="input-wrapper">
-                  <input
-                    type="email"
-                    className="form-input"
-                    placeholder="name@company.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
-                </div>
+            <form onSubmit={handleLogin} className="mobile-login-form">
+              {/* Email Input */}
+              <div className="mobile-input-box">
+                <FiMail className="mobile-input-icon" />
+                <input
+                  type="email"
+                  className="mobile-input-field"
+                  placeholder="Email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoComplete="email"
+                />
               </div>
 
-              <div className="form-group">
-                <div className="form-header">
-                  <label className="form-label">PASSWORD</label>
-                </div>
-                <div className="input-wrapper">
-                  <input
-                    type="password"
-                    className="form-input"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="forgot-password-row">
-                  <button
-                    type="button"
-                    className="forgot-link"
-                    onClick={handleOpenForgot}
-                  >
-                    Forgot Password?
-                  </button>
-                </div>
+              {/* Password Input with Visibility Toggle */}
+              <div className="mobile-input-box">
+                <FiLock className="mobile-input-icon" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  className="mobile-input-field"
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  className="mobile-eye-btn"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <FiEyeOff /> : <FiEye />}
+                </button>
               </div>
 
-              <button type="submit" className="submit-btn" disabled={loading}>
-                {loading ? 'Signing In...' : 'Sign In'}
-                {!loading && <FiArrowRight />}
+              {/* Mobile Full-Width Sign in Button */}
+              <button type="submit" className="mobile-submit-btn" disabled={loading}>
+                {loading ? 'Signing in...' : 'Sign in'}
               </button>
-            </form>
 
-            <div className="divider">
-              PERSONNEL
-            </div>
+              {/* Centered Forgot Password Link */}
+              <div className="mobile-forgot-container">
+                <button
+                  type="button"
+                  className="mobile-forgot-link"
+                  onClick={handleOpenForgot}
+                >
+                  Forgot password?
+                </button>
+              </div>
+            </form>
           </div>
         )}
       </div>

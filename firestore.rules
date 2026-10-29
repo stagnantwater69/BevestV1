@@ -11,16 +11,20 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function hasUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
     function userDoc() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
     function role() {
-      return isSignedIn() ? userDoc().role : 'NONE';
+      return hasUserDoc() ? userDoc().role : 'NONE';
     }
 
     function isActive() {
-      return isSignedIn() && userDoc().active == true;
+      return hasUserDoc() && userDoc().active == true;
     }
 
     function isAdmin() {
@@ -33,6 +37,16 @@ service cloud.firestore {
 
     function isSso() {
       return isActive() && role() == 'SSO';
+    }
+
+    function isDeveloper() {
+      return isSignedIn() && (
+        (request.auth.token.email != null && (
+          request.auth.token.email == 'developer@bevest.com' ||
+          request.auth.token.email == 'dev@bevest.com'
+        ))
+        || (hasUserDoc() && (userDoc().role == 'DEVELOPER' || userDoc().role == 'ADMIN'))
+      );
     }
 
     function myContractorId() {
@@ -52,8 +66,9 @@ service cloud.firestore {
                   || (isContractor() && request.query.limit <= 200)
                   || (request.query.limit <= 5);
       allow delete: if isAdmin() || isDeveloper();
-      // Admin provisions any account. Contractors can provision SSO accounts under their own contractorId.
-      allow create: if isAdmin()
+      // Admin and Developer provision accounts. Contractors can provision SSO accounts under their own contractorId. Users can initialize their own doc.
+      allow create: if isAdmin() || isDeveloper()
+                 || request.auth.uid == uid
                  || (isContractor() && request.resource.data.role == 'SSO' && request.resource.data.contractorId == request.auth.uid);
       allow update: if isAdmin() || isDeveloper()
                     || (request.auth.uid == uid
@@ -78,16 +93,10 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-       // ---- vests ----
+    // ---- vests ----
     match /vests/{vestId} {
-      allow read: if isAdmin() || isSso() || isContractor() || isDeveloper();
-      allow write: if isAdmin() || isSso() || isDeveloper();
-    }
-
-    // ---- vest hardware catalog (Developer provisions, Admin and SSO scan & claim) ----
-    match /vestCatalog/{vestId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin() || isDeveloper();
+      allow write: if isAdmin() || isSso() || isDeveloper();
     }
 
     // ---- subscription payments ----
@@ -143,7 +152,7 @@ service cloud.firestore {
 
     // ---- activity log ----
     match /activityLog/{id} {
-      allow read: if isAdmin();
+      allow read: if isAdmin() || isDeveloper();
       allow create: if isSignedIn();
       allow update, delete: if false;
     }

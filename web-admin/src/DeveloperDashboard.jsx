@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  FiCpu, FiCreditCard, FiTool, FiLogOut, FiPlus, 
+  FiCpu, FiCreditCard, FiActivity, FiTool, FiLogOut, FiPlus, 
   FiSearch, FiDownload, FiPrinter, FiCheckCircle, 
-  FiAlertCircle, FiCalendar, FiDollarSign, FiUsers, 
+  FiAlertCircle, FiDollarSign, FiUsers, 
   FiRefreshCw, FiEye, FiTrash2, FiShield, FiTag, 
   FiAlertTriangle, FiCheck, FiX, FiLayers, FiMenu,
   FiBriefcase, FiUserPlus, FiLock, FiMail, FiPhone
@@ -11,7 +11,7 @@ import {
   collection, doc, getDocs, setDoc, updateDoc, 
   query, where, onSnapshot 
 } from 'firebase/firestore';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, secondaryAuth, db } from './firebase';
 import QRCode from 'qrcode';
 import { logActivity } from './activityLogger';
@@ -35,6 +35,8 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [genModel, setGenModel] = useState('Bevest Smart IoT Vest v2.1');
   const [genBatch, setGenBatch] = useState('BATCH-2026-Q4');
   const [genFirmware, setGenFirmware] = useState('v1.4.2');
+  const [genStatus, setGenStatus] = useState('AVAILABLE');
+  const [batchStatus, setBatchStatus] = useState('AVAILABLE');
   const [genToken, setGenToken] = useState(() => Math.random().toString(16).substring(2, 10).toUpperCase());
   const [liveQrDataUrl, setLiveQrDataUrl] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -69,12 +71,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [contractors, setContractors] = useState([]);
   const [contractorsLoading, setContractorsLoading] = useState(true);
   const [contractorSearch, setContractorSearch] = useState('');
-  
-  // Extend Subscription Modal
-  const [extendingContractor, setExtendingContractor] = useState(null);
-  const [extensionDays, setExtensionDays] = useState(30);
-  const [extensionNotes, setExtensionNotes] = useState('');
-  const [extendingLoading, setExtendingLoading] = useState(false);
 
   // Payment Recording Modal
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -131,36 +127,19 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     .catch(err => console.error('Error generating preview QR:', err));
   }, [genVestId, genBatch, genToken]);
 
-  // 2. Subscribe to Central Hardware Catalog (vestCatalog)
+  // 2. Subscribe to Vests collection (direct hardware repository)
   useEffect(() => {
     setCatalogLoading(true);
-    const catalogRef = collection(db, 'vestCatalog');
+    const vestsRef = collection(db, 'vests');
     
-    const unsubscribe = onSnapshot(catalogRef, (snap) => {
+    const unsubscribe = onSnapshot(vestsRef, (snap) => {
       const items = [];
       snap.forEach(d => items.push({ id: d.id, ...d.data() }));
-      
-      if (items.length === 0) {
-        seedInitialCatalog();
-      } else {
-        items.sort((a, b) => (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0) - (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0));
-        setCatalog(items);
-        try {
-          const map = {};
-          items.forEach(v => { map[v.vestId || v.id] = v; });
-          localStorage.setItem('bevest_vest_catalog', JSON.stringify(map));
-        } catch (_) {}
-      }
+      items.sort((a, b) => (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0) - (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0));
+      setCatalog(items);
       setCatalogLoading(false);
     }, (err) => {
-      console.warn('Fallback loading catalog from local storage:', err.message);
-      try {
-        const raw = localStorage.getItem('bevest_vest_catalog');
-        if (raw) {
-          const map = JSON.parse(raw);
-          setCatalog(Object.values(map));
-        }
-      } catch (_) {}
+      console.warn('Error fetching vests:', err.message);
       setCatalogLoading(false);
     });
 
@@ -232,7 +211,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       item.createdByEmail = devEmail;
       localMap[item.vestId] = item;
       try {
-        await setDoc(doc(db, 'vestCatalog', item.vestId), item, { merge: true });
+        await setDoc(doc(db, 'vests', item.vestId), { ...item, status: 'AVAILABLE' }, { merge: true });
       } catch (_) {}
     }
     localStorage.setItem('bevest_vest_catalog', JSON.stringify(localMap));
@@ -331,34 +310,29 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       const now = new Date();
       const vestRecord = {
         vestId: cleanId,
-        model: genModel.trim(),
-        batchNumber: genBatch.trim(),
-        firmwareVersion: genFirmware.trim(),
+        id: cleanId,
+        status: genStatus || 'AVAILABLE',
+        model: genModel.trim() || 'Bevest Smart Vest v2',
+        batchNumber: genBatch.trim() || 'BATCH-2026-A1',
+        firmwareVersion: genFirmware.trim() || 'v2.4.0',
         hardwareToken: genToken,
-        catalogStatus: 'UNREGISTERED',
         verified: true,
-        mfgDate: now,
+        battery: 100,
+        online: false,
+        assignedWorkerId: null,
+        inCompanyDirectory: false,
         createdAt: now,
-        createdByEmail: devEmail,
-        registeredToAdmin: null,
-        registeredToContractorId: null,
-        registeredAt: null
+        createdByEmail: devEmail
       };
 
-      await setDoc(doc(db, 'vestCatalog', cleanId), vestRecord);
-      
-      try {
-        const local = JSON.parse(localStorage.getItem('bevest_vest_catalog') || '{}');
-        local[cleanId] = vestRecord;
-        localStorage.setItem('bevest_vest_catalog', JSON.stringify(local));
-      } catch (_) {}
+      await setDoc(doc(db, 'vests', cleanId), vestRecord, { merge: true });
 
-      await logActivity(`Developer generated & uploaded vest: ${cleanId} (Batch: ${genBatch})`, devEmail);
-      showToast('success', `✓ Vest ${cleanId} uploaded to Developer Hardware Database! Ready for Admin/SSO scan.`);
+      await logActivity(`Developer created smart vest ${cleanId} (Status: ${genStatus || 'AVAILABLE'})`, devEmail);
+      showToast('success', `✓ Vest ${cleanId} saved to vests collection with status "${genStatus || 'AVAILABLE'}"!`);
       
       handleRegenerateId();
     } catch (err) {
-      console.error('Error uploading vest to catalog:', err);
+      console.error('Error uploading vest to vests collection:', err);
       showToast('error', 'Failed to upload vest: ' + err.message);
     } finally {
       setUploading(false);
@@ -370,38 +344,31 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     setBatchGenerating(true);
     try {
       const startNum = Math.floor(1000 + Math.random() * 8000);
-      const batchItems = [];
       const now = new Date();
 
       for (let i = 0; i < count; i++) {
         const currentId = `${batchPrefix}${startNum + i}`;
         const item = {
           vestId: currentId,
-          model: genModel.trim(),
-          batchNumber: genBatch.trim(),
-          firmwareVersion: genFirmware.trim(),
+          id: currentId,
+          status: batchStatus || 'AVAILABLE',
+          model: genModel.trim() || 'Bevest Smart Vest v2',
+          batchNumber: genBatch.trim() || 'BATCH-2026-A1',
+          firmwareVersion: genFirmware.trim() || 'v2.4.0',
           hardwareToken: Math.random().toString(16).substring(2, 10).toUpperCase(),
-          catalogStatus: 'UNREGISTERED',
           verified: true,
-          mfgDate: now,
+          battery: 100,
+          online: false,
+          assignedWorkerId: null,
+          inCompanyDirectory: false,
           createdAt: now,
-          createdByEmail: devEmail,
-          registeredToAdmin: null,
-          registeredToContractorId: null,
-          registeredAt: null
+          createdByEmail: devEmail
         };
-        batchItems.push(item);
-        await setDoc(doc(db, 'vestCatalog', currentId), item);
+        await setDoc(doc(db, 'vests', currentId), item, { merge: true });
       }
 
-      try {
-        const local = JSON.parse(localStorage.getItem('bevest_vest_catalog') || '{}');
-        batchItems.forEach(b => { local[b.vestId] = b; });
-        localStorage.setItem('bevest_vest_catalog', JSON.stringify(local));
-      } catch (_) {}
-
-      await logActivity(`Developer batch generated ${count} vests (${batchPrefix}${startNum}..${batchPrefix}${startNum + count - 1})`, devEmail);
-      showToast('success', `✓ Successfully generated and uploaded batch of ${count} vests!`);
+      await logActivity(`Developer batch generated ${count} vests to vests collection (Status: ${batchStatus || 'AVAILABLE'})`, devEmail);
+      showToast('success', `✓ Successfully generated and saved ${count} vests to vests collection!`);
       setShowBatchModal(false);
     } catch (err) {
       console.error('Batch generation error:', err);
@@ -417,6 +384,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       vestId: vest.vestId || vest.id,
       verified: true,
       batch: vest.batchNumber || 'N/A',
+      status: vest.status || 'AVAILABLE',
       token: vest.hardwareToken || 'N/A'
     });
     QRCode.toDataURL(payload, {
@@ -474,9 +442,19 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
     setAdminCreating(true);
     try {
-      // 1. Create account in Firebase Auth using secondaryAuth instance
-      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, adminEmail.trim(), adminPassword);
-      const newAdminUid = userCredential.user.uid;
+      let newAdminUid = null;
+      try {
+        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, adminEmail.trim(), adminPassword);
+        newAdminUid = userCredential.user.uid;
+      } catch (authErr) {
+        if (authErr.code === 'auth/email-already-in-use') {
+          // If already in Firebase Auth, sign in to secondaryAuth to obtain the UID
+          const signedIn = await signInWithEmailAndPassword(secondaryAuth, adminEmail.trim(), adminPassword);
+          newAdminUid = signedIn.user.uid;
+        } else {
+          throw authErr;
+        }
+      }
 
       const now = new Date();
       const adminDoc = {
@@ -493,13 +471,10 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         createdByDeveloper: devEmail
       };
 
-      // 2. Save user doc to Firestore users collection
-      await setDoc(doc(db, 'users', newAdminUid), adminDoc);
+      // Save user document in Firestore users collection
+      await setDoc(doc(db, 'users', newAdminUid), adminDoc, { merge: true });
 
-      // 3. Sign out secondaryAuth instance immediately
-      await secondaryAuth.signOut();
-
-      // 4. Update local user directory cache
+      // Update local user directory cache
       try {
         const directory = JSON.parse(localStorage.getItem('bevest_user_directory') || '{}');
         directory[adminEmail.toLowerCase().trim()] = {
@@ -513,10 +488,10 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         localStorage.setItem('bevest_user_directory', JSON.stringify(directory));
       } catch (_) {}
 
-      // 5. Log activity
-      await logActivity(`Developer created Admin account for ${adminEmail.trim()} (${adminCompany.trim()})`, devEmail);
+      // Log activity
+      await logActivity(`Developer registered Admin account for ${adminEmail.trim()} (${adminCompany.trim()})`, devEmail);
 
-      showToast('success', `✓ Admin account for ${adminCompany.trim()} (${adminEmail.trim()}) created successfully!`);
+      showToast('success', `✓ Admin account for ${adminCompany.trim()} (${adminEmail.trim()}) registered in users collection!`);
       setShowAddAdminModal(false);
       
       // Reset form fields
@@ -530,6 +505,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       console.error('Error creating admin account:', err);
       showToast('error', 'Failed to create Admin account: ' + err.message);
     } finally {
+      try {
+        await secondaryAuth.signOut();
+      } catch (_) {}
       setAdminCreating(false);
     }
   };
@@ -553,42 +531,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
   };
 
-  const handleConfirmExtension = async () => {
-    if (!extendingContractor) return;
-    setExtendingLoading(true);
-    try {
-      const days = parseInt(extensionDays, 10) || 30;
-      const sub = extendingContractor.subscription || {};
-      
-      const currentRenew = sub.renewDate?.toDate ? sub.renewDate.toDate() : (sub.renewDate ? new Date(sub.renewDate) : new Date());
-      const baseDate = currentRenew > new Date() ? currentRenew : new Date();
-      const newRenew = new Date(baseDate.getTime() + days * 24 * 60 * 60 * 1000);
-
-      const updatedSubscription = {
-        ...sub,
-        status: 'Active',
-        renewDate: newRenew,
-        lastExtendedAt: new Date(),
-        lastExtendedBy: devEmail,
-        lastExtensionDays: days,
-        extensionNotes: extensionNotes.trim()
-      };
-
-      await updateDoc(doc(db, 'users', extendingContractor.id), {
-        subscription: updatedSubscription
-      });
-
-      await logActivity(`Developer extended subscription for ${extendingContractor.email} by +${days} days (New expiry: ${formatDisplayDate(newRenew)})`, devEmail);
-      showToast('success', `✓ Extended subscription for ${extendingContractor.email} by +${days} days!`);
-      setExtendingContractor(null);
-      setExtensionNotes('');
-    } catch (err) {
-      console.error('Error extending subscription:', err);
-      showToast('error', 'Failed to extend subscription: ' + err.message);
-    } finally {
-      setExtendingLoading(false);
-    }
-  };
 
   const handleRecordPayment = async (e) => {
     e.preventDefault();
@@ -697,13 +639,13 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
     return sum;
   }, 0);
-  const registeredVestsCount = catalog.filter(v => v.catalogStatus === 'REGISTERED').length;
-  const unregisteredVestsCount = catalog.filter(v => v.catalogStatus === 'UNREGISTERED').length;
+  const registeredVestsCount = catalog.filter(v => v.status === 'ASSIGNED' || v.status === 'ACTIVE' || v.inCompanyDirectory === true).length;
+  const unregisteredVestsCount = catalog.filter(v => (v.status || 'AVAILABLE') === 'AVAILABLE' || v.catalogStatus === 'UNREGISTERED').length;
 
   const filteredCatalog = catalog.filter(v => {
-    const matchesSearch = (v.vestId || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
+    const matchesSearch = (v.vestId || v.id || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
                           (v.batchNumber || '').toLowerCase().includes(catalogSearch.toLowerCase());
-    const matchesFilter = catalogFilter === 'ALL' || v.catalogStatus === catalogFilter;
+    const matchesFilter = catalogFilter === 'ALL' || (v.status || 'AVAILABLE') === catalogFilter;
     return matchesSearch && matchesFilter;
   });
 
@@ -832,7 +774,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               <p>
                 {activeTab === 'hardware' && 'Generate official scannable QR codes and upload authentic smart vests to the central Bevest database.'}
                 {activeTab === 'admins' && 'Onboard and manage Admin accounts for client companies and project sites.'}
-                {activeTab === 'subscriptions' && 'Manage contractor subscription tiers, verify manual payments, and extend billing cycles.'}
+                {activeTab === 'subscriptions' && 'Manage contractor subscription tiers, verify manual payments, and monitor subscription expiration dates.'}
                 {activeTab === 'troubleshoot' && 'Diagnose subscription errors, grant temporary quota boosts, and override account statuses.'}
               </p>
             </div>
@@ -853,7 +795,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   className="dev-btn-orange"
                   onClick={() => setShowPaymentModal(true)}
                 >
-                  <FiDollarSign /> Record & Approve Payment
+                  Record & Approve Payment
                 </button>
               )}
             </div>
@@ -981,6 +923,21 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       />
                     </div>
 
+                    <div className="dev-form-group">
+                      <label className="dev-form-label">STATUS *</label>
+                      <select
+                        className="dev-select"
+                        value={genStatus}
+                        onChange={(e) => setGenStatus(e.target.value)}
+                        required
+                      >
+                        <option value="AVAILABLE">AVAILABLE (Ready for Assignment)</option>
+                        <option value="ACTIVE">ACTIVE (In Use)</option>
+                        <option value="OFFLINE">OFFLINE (Storage / Disconnected)</option>
+                        <option value="MAINTENANCE">MAINTENANCE (Inspection Required)</option>
+                      </select>
+                    </div>
+
                     <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', flexWrap: 'wrap' }}>
                       <button
                         type="submit"
@@ -1054,10 +1011,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       onChange={(e) => setCatalogFilter(e.target.value)}
                       style={{ minWidth: '180px' }}
                     >
-                      <option value="ALL">All Hardware Statuses</option>
-                      <option value="UNREGISTERED">Ready for Scan</option>
-                      <option value="REGISTERED">Registered to Company</option>
-                      <option value="MAINTENANCE">Maintenance</option>
+                      <option value="ALL">All Statuses</option>
+                      <option value="AVAILABLE">AVAILABLE</option>
+                      <option value="ACTIVE">ACTIVE</option>
+                      <option value="ASSIGNED">ASSIGNED</option>
+                      <option value="OFFLINE">OFFLINE</option>
+                      <option value="MAINTENANCE">MAINTENANCE</option>
                     </select>
                   </div>
                 </div>
@@ -1069,7 +1028,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                         <th>Vest ID</th>
                         <th>Model & Firmware</th>
                         <th>Batch Lot</th>
-                        <th>Hardware Status</th>
+                        <th>Status</th>
                         <th>Registered Company</th>
                         <th>Added Date</th>
                         <th style={{ textAlign: 'right' }}>Actions</th>
@@ -1104,19 +1063,29 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                               <span style={{ fontWeight: 500 }}>{v.batchNumber || 'N/A'}</span>
                             </td>
                             <td>
-                              {v.catalogStatus === 'UNREGISTERED' && (
+                              {(v.status === 'AVAILABLE' || (!v.status && v.catalogStatus === 'UNREGISTERED')) && (
                                 <span className="dev-badge-green">
-                                  <FiCheckCircle /> Ready for Scan
+                                  <FiCheckCircle /> AVAILABLE
                                 </span>
                               )}
-                              {v.catalogStatus === 'REGISTERED' && (
+                              {v.status === 'ACTIVE' && (
                                 <span className="dev-badge-blue">
-                                  <FiShield /> Claimed & Registered
+                                  <FiActivity /> ACTIVE
                                 </span>
                               )}
-                              {v.catalogStatus === 'MAINTENANCE' && (
+                              {v.status === 'ASSIGNED' && (
+                                <span className="dev-badge-blue">
+                                  <FiUsers /> ASSIGNED
+                                </span>
+                              )}
+                              {v.status === 'OFFLINE' && (
+                                <span className="dev-badge-gray">
+                                  OFFLINE
+                                </span>
+                              )}
+                              {v.status === 'MAINTENANCE' && (
                                 <span className="dev-badge-amber">
-                                  <FiTool /> Maintenance
+                                  <FiTool /> MAINTENANCE
                                 </span>
                               )}
                             </td>
@@ -1413,15 +1382,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                     <button
                                       type="button"
                                       className="dev-btn-secondary"
-                                      onClick={() => setExtendingContractor(c)}
-                                      title="Extend Subscription"
-                                      style={{ padding: '0.45rem 0.75rem' }}
-                                    >
-                                      <FiCalendar /> Extend
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="dev-btn-secondary"
                                       onClick={() => {
                                         setPaymentContractor(c);
                                         setPaymentAmount(c.subscription?.monthlyPrice || 200000);
@@ -1430,7 +1390,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                       title="Record Payment"
                                       style={{ padding: '0.45rem 0.75rem' }}
                                     >
-                                      <FiDollarSign /> Payment
+                                      <FiCreditCard /> Payment
                                     </button>
                                     <button
                                       type="button"
@@ -1791,72 +1751,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         </div>
       )}
 
-      {/* EXTEND SUBSCRIPTION MODAL */}
-      {extendingContractor && (
-        <div className="dev-modal-overlay">
-          <div className="dev-modal-card">
-            <div className="dev-modal-header">
-              <h3>Extend Contractor Subscription</h3>
-              <button
-                type="button"
-                className="dev-modal-close"
-                onClick={() => setExtendingContractor(null)}
-              >
-                <FiX />
-              </button>
-            </div>
-
-            <div style={{ marginBottom: '1.25rem', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-              Extending subscription for <strong>{extendingContractor.firstName} {extendingContractor.lastName}</strong> ({extendingContractor.email}).
-            </div>
-
-            <div className="dev-form-group">
-              <label className="dev-form-label">EXTENSION DURATION</label>
-              <select
-                className="dev-select"
-                value={extensionDays}
-                onChange={(e) => setExtensionDays(Number(e.target.value))}
-              >
-                <option value={30}>+30 Days (1 Month Extension)</option>
-                <option value={60}>+60 Days (2 Months Extension)</option>
-                <option value={90}>+90 Days (Quarterly Extension)</option>
-                <option value={180}>+180 Days (Half-Year Extension)</option>
-                <option value={365}>+365 Days (1 Full Year Extension)</option>
-              </select>
-            </div>
-
-            <div className="dev-form-group">
-              <label className="dev-form-label">EXTENSION REASON / DEVELOPER NOTES</label>
-              <input
-                type="text"
-                className="dev-input"
-                placeholder="e.g. Wire transfer in progress / Sales contract renewal"
-                value={extensionNotes}
-                onChange={(e) => setExtensionNotes(e.target.value)}
-              />
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="dev-btn-secondary"
-                onClick={() => setExtendingContractor(null)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="dev-btn-orange"
-                onClick={handleConfirmExtension}
-                disabled={extendingLoading}
-              >
-                {extendingLoading ? 'Extending...' : 'Confirm & Extend Subscription'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* RECORD PAYMENT MODAL */}
       {showPaymentModal && (
         <div className="dev-modal-overlay">
@@ -1919,7 +1813,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     <option value="Bank Wire (BPI)">Bank Wire (BPI)</option>
                     <option value="GCash">GCash</option>
                     <option value="Maya">Maya</option>
-                    <option value="Corporate Cheque">Corporate Cheque</option>
                     <option value="Direct Invoice">Direct Invoice</option>
                   </select>
                 </div>
@@ -2023,6 +1916,21 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               />
             </div>
 
+            <div className="dev-form-group">
+              <label className="dev-form-label">INITIAL VEST STATUS *</label>
+              <select
+                className="dev-select"
+                value={batchStatus}
+                onChange={(e) => setBatchStatus(e.target.value)}
+                required
+              >
+                <option value="AVAILABLE">AVAILABLE (Ready for Assignment)</option>
+                <option value="ACTIVE">ACTIVE (In Use)</option>
+                <option value="OFFLINE">OFFLINE (Storage / Disconnected)</option>
+                <option value="MAINTENANCE">MAINTENANCE (Inspection Required)</option>
+              </select>
+            </div>
+
             <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               <button
                 type="button"
@@ -2072,7 +1980,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             <div style={{ textAlign: 'left', background: '#f8fafc', border: '1px solid var(--border-color)', padding: '0.85rem 1rem', borderRadius: '8px', marginBottom: '1.25rem', fontSize: '0.8125rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Status:</span>
-                <span style={{ fontWeight: 600 }}>{selectedVestQr.catalogStatus}</span>
+                <span style={{ fontWeight: 600 }}>{selectedVestQr.status || 'AVAILABLE'}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Model:</span>
