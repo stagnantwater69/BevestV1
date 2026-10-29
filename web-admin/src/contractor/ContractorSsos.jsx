@@ -8,6 +8,7 @@ import { secondaryAuth, db } from '../firebase';
 import { useContractorSsos, useContractorSites, siteLabel, STATUS_COLOR, initialsOf } from './contractorData';
 import { PageHeader, SearchBox, Badge, EmptyState, ErrorState, Skeleton } from './ui';
 import { logActivity } from '../activityLogger';
+import PhoneInput, { formatPhoneWithCountryCode } from '../PhoneInput';
 
 /**
  * Site Safety Officers directory for the contractor.
@@ -237,7 +238,7 @@ export const AddSso = ({ contractorId, onDone }) => {
         firstName: formData.firstName.trim(),
         lastName: formData.lastName.trim(),
         email: formData.email.trim(),
-        phone: formData.phone.trim(),
+        phone: formatPhoneWithCountryCode(formData.phone),
         role: 'SSO',
         contractorId: contractorId,
         siteId: formData.siteId.trim() || null,
@@ -324,12 +325,9 @@ export const AddSso = ({ contractorId, onDone }) => {
               </div>
               <div className="form-group-custom">
                 <label className="form-label">Phone number</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="+1 (555) 000-0000"
+                <PhoneInput
                   value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  onChange={(phone) => setFormData({ ...formData, phone })}
                 />
               </div>
             </div>

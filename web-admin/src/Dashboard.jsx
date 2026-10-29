@@ -342,7 +342,7 @@ const Dashboard = ({ user, onLogout }) => {
         )}
 
         {activeTab === 'Profile' && (
-          <AdminProfile />
+          <AdminProfile user={user} />
         )}
       </main>
 

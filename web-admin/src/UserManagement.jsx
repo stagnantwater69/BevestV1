@@ -9,6 +9,7 @@ import { doc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore'
 import { secondaryAuth, db } from './firebase';
 import { getContractorSubscription } from './subscriptionPlans';
 import { logActivity } from './activityLogger';
+import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
 
 const UserManagement = () => {
   const [view, setView] = useState('list'); // 'list' | 'add'
@@ -100,8 +101,8 @@ const UserManagement = () => {
 
   // 1. Create Contractor Account without Subscription Plan (Contractor chooses plan on their own portal)
   const handleCreateUser = async () => {
-    if (!formData.firstName.trim() || !formData.lastName.trim() || !formData.email.trim() || !formData.password) {
-      setErrorMsg("Please fill in all required fields and generate a password.");
+    if (!formData.firstName.trim() || !formData.lastName.trim() || !formData.email.trim() || !formData.phone.trim() || !formData.password) {
+      setErrorMsg("Please fill in all required fields (including phone number) and generate a password.");
       return;
     }
     
@@ -118,7 +119,7 @@ const UserManagement = () => {
       await setDoc(doc(db, "users", newUser.uid), {
         firstName: formData.firstName.trim(),
         lastName: formData.lastName.trim(),
-        phone: formData.phone.trim(),
+        phone: formatPhoneWithCountryCode(formData.phone),
         email: formData.email.trim(),
         role: 'CONTRACTOR',
         active: true,
@@ -175,7 +176,7 @@ const UserManagement = () => {
       await updateDoc(userDocRef, {
         firstName: editFirstName.trim(),
         lastName: editLastName.trim(),
-        phone: editPhone.trim(),
+        phone: formatPhoneWithCountryCode(editPhone),
         email: editEmail.trim()
       });
 
@@ -274,13 +275,11 @@ const UserManagement = () => {
               </div>
 
               <div className="form-group-custom">
-                <label className="form-label">PHONE NUMBER</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="+63 (900) 000-0000"
+                <label className="form-label">PHONE NUMBER *</label>
+                <PhoneInput 
                   value={formData.phone}
-                  onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                  onChange={(phone) => setFormData({ ...formData, phone })}
+                  required
                 />
               </div>
 
@@ -665,13 +664,9 @@ const UserManagement = () => {
 
               <div>
                 <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>PHONE NUMBER</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
+                <PhoneInput 
                   value={editPhone} 
-                  onChange={(e) => setEditPhone(e.target.value)}
-                  style={{ width: '100%' }}
-                  placeholder="+63 (900) 000-0000"
+                  onChange={(phone) => setEditPhone(phone)}
                 />
               </div>
 

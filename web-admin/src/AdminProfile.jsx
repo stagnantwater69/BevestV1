@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { FiMail, FiPhone, FiEdit2, FiLock, FiChevronRight, FiArrowLeft, FiShield } from 'react-icons/fi';
+import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from './firebase';
 
-const AdminProfile = () => {
+const AdminProfile = ({ user }) => {
   const [showEdit, setShowEdit] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [profile, setProfile] = useState({
@@ -11,10 +14,39 @@ const AdminProfile = () => {
     phone: 'Not set'
   });
 
+  const [editFirstName, setEditFirstName] = useState(profile.firstName);
+  const [editLastName, setEditLastName] = useState(profile.lastName);
+  const [editPhone, setEditPhone] = useState(profile.phone !== 'Not set' ? profile.phone : '');
+
   const initials = `${profile.firstName[0]}${profile.lastName[0]}`.toUpperCase();
 
-  const handleSaveProfile = (e) => {
+  const handleOpenEdit = () => {
+    setEditFirstName(profile.firstName);
+    setEditLastName(profile.lastName);
+    setEditPhone(profile.phone !== 'Not set' ? profile.phone : '');
+    setShowEdit(true);
+  };
+
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
+    const formattedPhone = formatPhoneWithCountryCode(editPhone);
+    setProfile(prev => ({
+      ...prev,
+      firstName: editFirstName.trim(),
+      lastName: editLastName.trim(),
+      phone: formattedPhone || 'Not set'
+    }));
+    if (user?.uid) {
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          firstName: editFirstName.trim(),
+          lastName: editLastName.trim(),
+          phone: formattedPhone
+        });
+      } catch (err) {
+        console.error('Error saving admin profile to database:', err);
+      }
+    }
     setShowEdit(false);
   };
 
@@ -61,7 +93,7 @@ const AdminProfile = () => {
         <div className="profile-section">
           <div className="section-title">SETTINGS</div>
           <div className="profile-list-card">
-            <div className="profile-list-item clickable" onClick={() => setShowEdit(true)}>
+            <div className="profile-list-item clickable" onClick={handleOpenEdit}>
               <div className="item-icon-bg"><FiEdit2 /></div>
               <div className="item-details">
                 <span className="item-value">Edit profile</span>
@@ -94,19 +126,34 @@ const AdminProfile = () => {
               <form onSubmit={handleSaveProfile} className="profile-form">
                 
                 <div className="floating-input-group">
-                  <input type="text" defaultValue={profile.firstName} required placeholder=" " />
+                  <input
+                    type="text"
+                    value={editFirstName}
+                    onChange={(e) => setEditFirstName(e.target.value)}
+                    required
+                    placeholder=" "
+                  />
                   <label>First name *</label>
                 </div>
                 
                 <div className="floating-input-group">
-                  <input type="text" defaultValue={profile.lastName} required placeholder=" " />
+                  <input
+                    type="text"
+                    value={editLastName}
+                    onChange={(e) => setEditLastName(e.target.value)}
+                    required
+                    placeholder=" "
+                  />
                   <label>Last name *</label>
                 </div>
                 
-                <div className="floating-input-group">
-                  <input type="text" defaultValue={profile.phone !== 'Not set' ? profile.phone : ''} placeholder=" " />
-                  <label>Phone number</label>
-                </div>
+                <PhoneInput
+                  variant="floating"
+                  label="Phone number"
+                  value={editPhone}
+                  onChange={(phone) => setEditPhone(phone)}
+                  placeholder="900 000 0000"
+                />
                 
                 <button type="submit" className="btn-orange">Save changes</button>
               </form>
