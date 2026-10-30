@@ -62,7 +62,17 @@ class PairVestViewModel @Inject constructor(
     fun onVestIdInput(v: String) = _state.update { it.copy(vestIdInput = v, vestIdError = null, error = null) }
 
     fun onScanned(value: String) {
-        _state.update { it.copy(vestIdInput = value.trim()) }
+        val raw = value.trim()
+        val parsedId = try {
+            if (raw.startsWith("{") && raw.contains("\"vestId\"")) {
+                org.json.JSONObject(raw).optString("vestId", raw)
+            } else {
+                raw
+            }
+        } catch (_: Exception) {
+            raw
+        }
+        _state.update { it.copy(vestIdInput = parsedId.trim()) }
         identifyVest()
     }
 

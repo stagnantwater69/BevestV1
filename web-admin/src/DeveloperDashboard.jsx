@@ -32,6 +32,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   
   // QR Generator Form state
   const [genVestId, setGenVestId] = useState(`VEST-2026-${Math.floor(1000 + Math.random() * 9000)}`);
+  const [genSerialNumber, setGenSerialNumber] = useState(() => `ESP32-SN-${Math.floor(100000 + Math.random() * 900000)}`);
   const [genModel, setGenModel] = useState('Bevest Smart IoT Vest v2.1');
   const [genBatch, setGenBatch] = useState('BATCH-2026-Q4');
   const [genFirmware, setGenFirmware] = useState('v1.4.2');
@@ -46,6 +47,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [batchCount, setBatchCount] = useState(10);
   const [batchPrefix, setBatchPrefix] = useState('VEST-2026-');
+  const [batchSerialPrefix, setBatchSerialPrefix] = useState('ESP32-SN-');
   const [batchGenerating, setBatchGenerating] = useState(false);
 
   // QR Viewer Modal
@@ -109,6 +111,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   useEffect(() => {
     const payload = JSON.stringify({
       vestId: genVestId.trim(),
+      serialNumber: genSerialNumber.trim(),
       verified: true,
       batch: genBatch.trim(),
       mfg: new Date().toISOString().split('T')[0],
@@ -125,7 +128,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     })
     .then(url => setLiveQrDataUrl(url))
     .catch(err => console.error('Error generating preview QR:', err));
-  }, [genVestId, genBatch, genToken]);
+  }, [genVestId, genSerialNumber, genBatch, genToken]);
 
   // 2. Subscribe to Vests collection (direct hardware repository)
   useEffect(() => {
@@ -294,14 +297,20 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const handleRegenerateId = () => {
     const num = Math.floor(1000 + Math.random() * 9000);
     setGenVestId(`VEST-2026-${num}`);
+    setGenSerialNumber(`ESP32-SN-${Math.floor(100000 + Math.random() * 900000)}`);
     setGenToken(Math.random().toString(16).substring(2, 10).toUpperCase());
   };
 
   const handleUploadSingleVest = async (e) => {
     e.preventDefault();
     const cleanId = genVestId.trim().toUpperCase();
+    const cleanSerial = genSerialNumber.trim().toUpperCase();
     if (!cleanId) {
       showToast('error', 'Please provide a valid Vest ID.');
+      return;
+    }
+    if (!cleanSerial) {
+      showToast('error', 'Please provide a valid ESP32 Serial Number.');
       return;
     }
 
@@ -311,6 +320,8 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       const vestRecord = {
         vestId: cleanId,
         id: cleanId,
+        serialNumber: cleanSerial,
+        esp32Serial: cleanSerial,
         status: genStatus || 'AVAILABLE',
         model: genModel.trim() || 'Bevest Smart Vest v2',
         batchNumber: genBatch.trim() || 'BATCH-2026-A1',
@@ -327,8 +338,8 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
       await setDoc(doc(db, 'vests', cleanId), vestRecord, { merge: true });
 
-      await logActivity(`Smart vest ${cleanId} registered to inventory (Status: ${genStatus || 'AVAILABLE'})`, devEmail);
-      showToast('success', `✓ Vest ${cleanId} saved to vests collection with status "${genStatus || 'AVAILABLE'}"!`);
+      await logActivity(`Smart vest ${cleanId} linked to ESP32 ${cleanSerial} registered to inventory (Status: ${genStatus || 'AVAILABLE'})`, devEmail);
+      showToast('success', `✓ Vest ${cleanId} (ESP32: ${cleanSerial}) saved to vests collection with status "${genStatus || 'AVAILABLE'}"!`);
       
       handleRegenerateId();
     } catch (err) {
@@ -344,13 +355,17 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     setBatchGenerating(true);
     try {
       const startNum = Math.floor(1000 + Math.random() * 8000);
+      const startSerial = Math.floor(100000 + Math.random() * 800000);
       const now = new Date();
 
       for (let i = 0; i < count; i++) {
         const currentId = `${batchPrefix}${startNum + i}`;
+        const currentSerial = `${batchSerialPrefix}${startSerial + i}`;
         const item = {
           vestId: currentId,
           id: currentId,
+          serialNumber: currentSerial,
+          esp32Serial: currentSerial,
           status: batchStatus || 'AVAILABLE',
           model: genModel.trim() || 'Bevest Smart Vest v2',
           batchNumber: genBatch.trim() || 'BATCH-2026-A1',
@@ -367,8 +382,8 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         await setDoc(doc(db, 'vests', currentId), item, { merge: true });
       }
 
-      await logActivity(`Batch registered ${count} smart vests to inventory (Status: ${batchStatus || 'AVAILABLE'})`, devEmail);
-      showToast('success', `✓ Successfully generated and saved ${count} vests to vests collection!`);
+      await logActivity(`Batch registered ${count} smart vests with ESP32 serial numbers to inventory (Status: ${batchStatus || 'AVAILABLE'})`, devEmail);
+      showToast('success', `✓ Successfully generated and saved ${count} vests with ESP32 serial numbers to vests collection!`);
       setShowBatchModal(false);
     } catch (err) {
       console.error('Batch generation error:', err);
@@ -382,6 +397,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     setSelectedVestQr(vest);
     const payload = JSON.stringify({
       vestId: vest.vestId || vest.id,
+      serialNumber: vest.serialNumber || vest.esp32Serial || 'N/A',
       verified: true,
       batch: vest.batchNumber || 'N/A',
       status: vest.status || 'AVAILABLE',
@@ -396,7 +412,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     .catch(console.error);
   };
 
-  const handlePrintLabel = (vestId, batch, qrUrl) => {
+  const handlePrintLabel = (vestId, batch, qrUrl, serialNumber) => {
     const printWin = window.open('', '_blank', 'width=600,height=600');
     if (!printWin) return;
     printWin.document.write(`
@@ -410,6 +426,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             .sub { font-size: 11px; color: #ea580c; font-weight: 700; text-transform: uppercase; margin-bottom: 14px; letter-spacing: 0.05em; }
             img { width: 200px; height: 200px; }
             .id-code { font-size: 20px; font-weight: 800; color: #0f172a; margin-top: 10px; letter-spacing: 0.05em; }
+            .serial { font-size: 13px; font-weight: 700; color: #ea580c; font-family: monospace; margin-top: 4px; }
             .batch { font-size: 11px; color: #64748b; font-weight: 700; margin-top: 4px; }
             .security { font-size: 9px; color: #94a3b8; margin-top: 12px; border-top: 1px solid #e2e8f0; padding-top: 8px; }
           </style>
@@ -420,6 +437,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             <div class="sub">Authentic Hardware QR</div>
             <img src="${qrUrl}" />
             <div class="id-code">${vestId}</div>
+            <div class="serial">ESP32 S/N: ${serialNumber || 'N/A'}</div>
             <div class="batch">${batch} • VERIFIED</div>
             <div class="security">Scan with BeVest Admin or SSO App to Register</div>
           </div>
@@ -644,7 +662,8 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
   const filteredCatalog = catalog.filter(v => {
     const matchesSearch = (v.vestId || v.id || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
-                          (v.batchNumber || '').toLowerCase().includes(catalogSearch.toLowerCase());
+                          (v.batchNumber || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
+                          (v.serialNumber || v.esp32Serial || '').toLowerCase().includes(catalogSearch.toLowerCase());
     const matchesFilter = catalogFilter === 'ALL' || (v.status || 'AVAILABLE') === catalogFilter;
     return matchesSearch && matchesFilter;
   });
@@ -872,10 +891,40 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                           className="dev-input"
                           value={genVestId}
                           onChange={(e) => setGenVestId(e.target.value.toUpperCase())}
+                          placeholder="e.g. VEST-2026-1001"
                           required
                         />
                       </div>
 
+                      <div className="dev-form-group">
+                        <label className="dev-form-label">ESP32 SERIAL NUMBER *</label>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <input
+                            type="text"
+                            className="dev-input"
+                            value={genSerialNumber}
+                            onChange={(e) => setGenSerialNumber(e.target.value.toUpperCase())}
+                            placeholder="e.g. ESP32-SN-849120"
+                            required
+                            style={{ flex: 1 }}
+                          />
+                          <button
+                            type="button"
+                            className="dev-btn-secondary"
+                            onClick={() => setGenSerialNumber(`ESP32-SN-${Math.floor(100000 + Math.random() * 900000)}`)}
+                            title="Auto-generate Serial Number"
+                            style={{ padding: '0 0.75rem', whiteSpace: 'nowrap', fontSize: '0.8rem' }}
+                          >
+                            <FiRefreshCw /> Auto
+                          </button>
+                        </div>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+                          Serial number of the physical ESP32 microcontroller linked to this QR code
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="dev-form-row">
                       <div className="dev-form-group">
                         <label className="dev-form-label">HARDWARE BATCH *</label>
                         <input
@@ -886,9 +935,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                           required
                         />
                       </div>
-                    </div>
 
-                    <div className="dev-form-row">
                       <div className="dev-form-group">
                         <label className="dev-form-label">MODEL SPECIFICATION</label>
                         <input
@@ -899,7 +946,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                           required
                         />
                       </div>
+                    </div>
 
+                    <div className="dev-form-row">
                       <div className="dev-form-group">
                         <label className="dev-form-label">FIRMWARE VERSION</label>
                         <input
@@ -909,6 +958,21 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                           onChange={(e) => setGenFirmware(e.target.value)}
                           required
                         />
+                      </div>
+
+                      <div className="dev-form-group">
+                        <label className="dev-form-label">STATUS *</label>
+                        <select
+                          className="dev-select"
+                          value={genStatus}
+                          onChange={(e) => setGenStatus(e.target.value)}
+                          required
+                        >
+                          <option value="AVAILABLE">AVAILABLE (Ready for Assignment)</option>
+                          <option value="ACTIVE">ACTIVE (In Use)</option>
+                          <option value="OFFLINE">OFFLINE (Storage / Disconnected)</option>
+                          <option value="MAINTENANCE">MAINTENANCE (Inspection Required)</option>
+                        </select>
                       </div>
                     </div>
 
@@ -921,21 +985,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                         readOnly
                         style={{ color: '#ea580c', fontWeight: 700, backgroundColor: '#f8fafc' }}
                       />
-                    </div>
-
-                    <div className="dev-form-group">
-                      <label className="dev-form-label">STATUS *</label>
-                      <select
-                        className="dev-select"
-                        value={genStatus}
-                        onChange={(e) => setGenStatus(e.target.value)}
-                        required
-                      >
-                        <option value="AVAILABLE">AVAILABLE (Ready for Assignment)</option>
-                        <option value="ACTIVE">ACTIVE (In Use)</option>
-                        <option value="OFFLINE">OFFLINE (Storage / Disconnected)</option>
-                        <option value="MAINTENANCE">MAINTENANCE (Inspection Required)</option>
-                      </select>
                     </div>
 
                     <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', flexWrap: 'wrap' }}>
@@ -951,7 +1000,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       <button
                         type="button"
                         className="dev-btn-secondary"
-                        onClick={() => handlePrintLabel(genVestId, genBatch, liveQrDataUrl)}
+                        onClick={() => handlePrintLabel(genVestId, genBatch, liveQrDataUrl, genSerialNumber)}
                       >
                         <FiPrinter /> Print Label
                       </button>
@@ -979,6 +1028,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       <div style={{ width: 180, height: 180, backgroundColor: '#f1f5f9', borderRadius: '8px' }} />
                     )}
                     <div className="dev-sticker-id">{genVestId}</div>
+                    <div className="dev-sticker-serial">ESP32 S/N: {genSerialNumber}</div>
                     <div className="dev-sticker-batch">{genBatch} • VERIFIED</div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
                       Ready for Admin / SSO verification scan
@@ -999,7 +1049,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       <input
                         type="text"
                         className="dev-input"
-                        placeholder="Search Vest ID or Batch..."
+                        placeholder="Search Vest ID, Serial No., or Batch..."
                         value={catalogSearch}
                         onChange={(e) => setCatalogSearch(e.target.value)}
                       />
@@ -1026,6 +1076,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     <thead>
                       <tr>
                         <th>Vest ID</th>
+                        <th>ESP32 Serial</th>
                         <th>Model & Firmware</th>
                         <th>Batch Lot</th>
                         <th>Status</th>
@@ -1037,13 +1088,13 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     <tbody>
                       {catalogLoading ? (
                         <tr>
-                          <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                          <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
                             Loading hardware catalog...
                           </td>
                         </tr>
                       ) : filteredCatalog.length === 0 ? (
                         <tr>
-                          <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                          <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
                             No hardware vests found matching your criteria.
                           </td>
                         </tr>
@@ -1054,6 +1105,11 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                               <strong style={{ color: 'var(--text-main)', letterSpacing: '0.05em' }}>
                                 {v.vestId || v.id}
                               </strong>
+                            </td>
+                            <td>
+                              <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#ea580c', background: '#fff7ed', padding: '2px 8px', borderRadius: '4px', border: '1px solid #ffedd5', fontSize: '0.8rem', display: 'inline-block' }}>
+                                {v.serialNumber || v.esp32Serial || 'Unassigned'}
+                              </span>
                             </td>
                             <td>
                               <div style={{ fontWeight: 500 }}>{v.model || 'Bevest Smart Vest'}</div>
@@ -1117,8 +1173,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                   type="button"
                                   className="dev-btn-secondary"
                                   onClick={() => {
-                                    QRCode.toDataURL(JSON.stringify({ vestId: v.vestId, verified: true }), { width: 300 })
-                                      .then(url => handlePrintLabel(v.vestId, v.batchNumber, url));
+                                    QRCode.toDataURL(JSON.stringify({
+                                      vestId: v.vestId,
+                                      serialNumber: v.serialNumber || v.esp32Serial || 'N/A',
+                                      verified: true
+                                    }), { width: 300 })
+                                      .then(url => handlePrintLabel(v.vestId, v.batchNumber, url, v.serialNumber || v.esp32Serial));
                                   }}
                                   title="Print Label"
                                   style={{ padding: '0.4rem 0.65rem' }}
@@ -1907,6 +1967,20 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             </div>
 
             <div className="dev-form-group">
+              <label className="dev-form-label">ESP32 SERIAL PREFIX</label>
+              <input
+                type="text"
+                className="dev-input"
+                value={batchSerialPrefix}
+                onChange={(e) => setBatchSerialPrefix(e.target.value.toUpperCase())}
+                placeholder="e.g. ESP32-SN-"
+              />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+                Each vest in this batch will be assigned a sequential ESP32 serial number
+              </span>
+            </div>
+
+            <div className="dev-form-group">
               <label className="dev-form-label">BATCH LOT NUMBER</label>
               <input
                 type="text"
@@ -1972,7 +2046,10 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '1.1rem', marginTop: '8px' }}>
                 {selectedVestQr.vestId}
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#ea580c', fontWeight: 700 }}>
+              <div style={{ fontSize: '0.8rem', color: '#ea580c', fontWeight: 700, fontFamily: 'monospace' }}>
+                ESP32 S/N: {selectedVestQr.serialNumber || selectedVestQr.esp32Serial || 'Unassigned'}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600, marginTop: '2px' }}>
                 {selectedVestQr.batchNumber} • BEVEST SMART IOT
               </div>
             </div>
@@ -1981,6 +2058,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Status:</span>
                 <span style={{ fontWeight: 600 }}>{selectedVestQr.status || 'AVAILABLE'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <span style={{ color: 'var(--text-muted)' }}>ESP32 Serial Number:</span>
+                <span style={{ fontFamily: 'monospace', color: '#ea580c', fontWeight: 700 }}>
+                  {selectedVestQr.serialNumber || selectedVestQr.esp32Serial || 'Unassigned'}
+                </span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Model:</span>
@@ -1996,7 +2079,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               <button
                 type="button"
                 className="dev-btn-secondary"
-                onClick={() => handlePrintLabel(selectedVestQr.vestId, selectedVestQr.batchNumber, viewQrDataUrl)}
+                onClick={() => handlePrintLabel(selectedVestQr.vestId, selectedVestQr.batchNumber, viewQrDataUrl, selectedVestQr.serialNumber || selectedVestQr.esp32Serial)}
               >
                 <FiPrinter /> Print Label
               </button>

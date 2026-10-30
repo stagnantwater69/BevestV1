@@ -613,6 +613,11 @@ const SystemManagement = ({ user }) => {
                                 <FiEye style={{ fontSize: '0.9rem' }} />
                               </button>
                             </div>
+                            {(vest.serialNumber || vest.esp32Serial) && (
+                              <div style={{ fontSize: '0.75rem', color: '#ea580c', fontWeight: 700, fontFamily: 'monospace' }}>
+                                ESP32: {vest.serialNumber || vest.esp32Serial}
+                              </div>
+                            )}
                             <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
                               Battery: {vest.battery != null ? `${vest.battery}%` : '100%'}
                             </span>
@@ -861,6 +866,11 @@ const SystemManagement = ({ user }) => {
               <div style={{ marginTop: '0.75rem', fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', letterSpacing: '0.05em' }}>
                 {showQrViewerModal.id || showQrViewerModal.vestId}
               </div>
+              {(showQrViewerModal.serialNumber || showQrViewerModal.esp32Serial) && (
+                <div style={{ fontSize: '0.85rem', color: '#ea580c', fontWeight: 700, fontFamily: 'monospace', marginTop: '0.2rem' }}>
+                  ESP32 S/N: {showQrViewerModal.serialNumber || showQrViewerModal.esp32Serial}
+                </div>
+              )}
               <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.15rem' }}>
                 Scan with BeVest Mobile App to Pair
               </div>
@@ -896,6 +906,7 @@ const SystemManagement = ({ user }) => {
                             <div class="logo">BEVEST SAFETY HARDWARE</div>
                             <img src="${qrCodeDataUrl}" />
                             <div class="id">${showQrViewerModal.id}</div>
+                            ${(showQrViewerModal.serialNumber || showQrViewerModal.esp32Serial) ? `<div style="font-size:12px; font-weight:700; color:#ea580c; font-family:monospace; margin-top:2px; margin-bottom:4px;">ESP32 S/N: ${showQrViewerModal.serialNumber || showQrViewerModal.esp32Serial}</div>` : ''}
                             <div class="sub">Scan with BeVest Mobile to Pair</div>
                           </div>
                           <script>window.onload = function() { window.print(); window.close(); }</script>

@@ -187,6 +187,15 @@
   letter-spacing: 0.05em;
 }
 
+.dev-sticker-serial {
+  font-size: 0.75rem;
+  color: #ea580c;
+  font-weight: 700;
+  font-family: monospace;
+  margin-top: 0.25rem;
+  letter-spacing: 0.05em;
+}
+
 .dev-sticker-batch {
   font-size: 0.7rem;
   color: var(--text-muted, #64748b);
