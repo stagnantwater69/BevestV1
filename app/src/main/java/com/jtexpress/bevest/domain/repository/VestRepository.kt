@@ -15,6 +15,20 @@ interface VestRepository {
 
     suspend fun registerVest(vestId: String): Outcome<Unit>
 
+    /**
+     * Claims a vest into the company directory after BLE + QR validation.
+     */
+    suspend fun claimVest(
+        vestId: String,
+        serialNumber: String,
+        macAddress: String,
+        claimedByUid: String,
+        claimedByName: String,
+        claimedByEmail: String,
+        companyId: String?,
+        siteId: String?,
+    ): Outcome<Unit>
+
     suspend fun setStatus(vestId: String, status: VestStatus): Outcome<Unit>
 
     /**

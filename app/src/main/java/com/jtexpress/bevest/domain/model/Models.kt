@@ -41,6 +41,11 @@ data class Vest(
     val batteryPercent: Int? = null,
     val online: Boolean = false,
     val lastSeen: Long? = null,
+    val inCompanyDirectory: Boolean = false,
+    val companyId: String? = null,
+    val siteId: String? = null,
+    val macAddress: String? = null,
+    val serialNumber: String? = null,
 )
 
 data class SensorReading(

@@ -1,5 +1,16 @@
 package com.jtexpress.bevest.ui.sso
 
+import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -21,6 +32,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Bluetooth
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Wifi
+import com.jtexpress.bevest.data.ble.DiscoveredBleVest
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -38,6 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -119,8 +137,8 @@ fun VestListScreen(
             // understood glyph, and this is the screen's primary action.
             ExtendedFloatingActionButton(
                 onClick = onPairVest,
-                icon = { Icon(BevestIcons.Scan, contentDescription = null) },
-                text = { Text("Pair vest") },
+                icon = { Icon(BevestIcons.Add, contentDescription = null) },
+                text = { Text("Add Vest") },
             )
         },
     ) { padding ->
@@ -134,7 +152,7 @@ fun VestListScreen(
                 message = "Pair a vest with a worker to start monitoring. You'll need " +
                     "the vest's QR code or its printed ID.",
                 icon = BevestIcons.Vests,
-                actionLabel = "Pair a vest",
+                actionLabel = "Add Vest",
                 onAction = onPairVest,
                 modifier = Modifier.padding(padding),
             )
@@ -479,11 +497,15 @@ fun VestDetailScreen(
 // ------------------------------------------------------------------- pair
 
 /**
- * Pairing a vest to a worker, in three steps.
- *
- * The step indicator is the reflective band, segmented — the same device that separates
- * sections elsewhere, here doing duty as progress. It replaces the old "Step 2 of 3"
- * text label, which told the user where they were but not how far they had to go.
+ * Reconstructed Add & Pair Vest Flow:
+ * 1. Request runtime Bluetooth Scan, Connect & Location permissions
+ * 2. Look for BLE signals nearby from Bevest smart vests
+ * 3. Connect over Bluetooth Low Energy GATT
+ * 4. Scan the physical QR code on the vest
+ * 5. Triple validation (Hardware MAC match + Database validation)
+ * 6. Wi-Fi setup & transmission over BLE
+ * 7. Assign worker (optional)
+ * 8. Instant Admin visibility in System Management
  */
 @Composable
 fun PairVestScreen(
@@ -491,29 +513,84 @@ fun PairVestScreen(
     onDone: () -> Unit,
     viewModel: PairVestViewModel = hiltViewModel(),
 ) {
-    LaunchedEffect(user.siteId) { viewModel.bind(user.siteId) }
+    val context = LocalContext.current
+    LaunchedEffect(user) { viewModel.bind(user) }
     val state = viewModel.state.collectAsStateWithLifecycle().value
 
-    LaunchedEffect(state.step) { if (state.step == PairStep.DONE) onDone() }
+    val requiredBlePermissions = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+            )
+        } else {
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+            )
+        }
+    }
 
-    val stepTitle = when (state.step) {
-        PairStep.IDENTIFY -> "Identify the vest"
-        PairStep.SELECT_WORKER -> "Choose a worker"
-        PairStep.CONNECTION_TEST -> "Test the connection"
-        PairStep.DONE -> "Paired"
+    var hasBlePermissions by remember {
+        mutableStateOf(
+            requiredBlePermissions.all {
+                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+            }
+        )
+    }
+
+    val blePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { permissionsMap ->
+            val allGranted = permissionsMap.values.all { it }
+            hasBlePermissions = allGranted
+            if (allGranted) {
+                viewModel.startBleScan()
+            }
+        }
+    )
+
+    LaunchedEffect(hasBlePermissions) {
+        if (!hasBlePermissions) {
+            blePermissionLauncher.launch(requiredBlePermissions)
+        } else {
+            viewModel.startBleScan()
+        }
+    }
+
+    val stepIndex = when (state.step) {
+        PairStep.LOOK_FOR_BLE -> 0
+        PairStep.BLE_CONNECTED -> 1
+        PairStep.SCAN_QR -> 2
+        PairStep.PROVISION_WIFI -> 3
+        PairStep.SELECT_WORKER -> 4
+        PairStep.CONNECTION_TEST -> 4
+        PairStep.DONE -> 4
+    }
+
+    val (stepTitle, stepSubtitle) = when (state.step) {
+        PairStep.LOOK_FOR_BLE -> "Search for BLE Signals" to "Looking for nearby Bevest smart vests..."
+        PairStep.BLE_CONNECTED -> "Vest Connected via Bluetooth" to (state.connectedBle?.name ?: "Connected")
+        PairStep.SCAN_QR -> "Scan Hardware QR Code" to "Authenticate hardware identity"
+        PairStep.PROVISION_WIFI -> "Site Wi-Fi Setup (Optional)" to "Configure wireless telemetry stream"
+        PairStep.SELECT_WORKER -> "Assign Worker (Optional)" to "Assign vest to a site worker"
+        PairStep.CONNECTION_TEST -> "Sensor Verification" to "Confirm sensor reporting"
+        PairStep.DONE -> "Registration Complete" to "Active in Company Directory"
     }
 
     BevestScaffold(
-        title = "Pair vest",
-        subtitle = "Step ${state.step.ordinal + 1} of 3",
-        onBack = if (state.step == PairStep.IDENTIFY) onDone else viewModel::back,
+        title = "Add & Pair Vest",
+        subtitle = "Step ${stepIndex + 1} of 5 · $stepSubtitle",
+        onBack = if (state.step == PairStep.LOOK_FOR_BLE || state.step == PairStep.DONE) onDone else viewModel::back,
     ) { padding ->
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            StepProgress(current = state.step.ordinal, total = 3)
+            StepProgress(current = stepIndex, total = 5)
 
             Column(
                 Modifier
@@ -523,15 +600,380 @@ fun PairVestScreen(
                     .animateContentSize(),
                 verticalArrangement = Arrangement.spacedBy(Spacing.lg),
             ) {
-                Text(stepTitle, style = MaterialTheme.typography.headlineSmall)
+                Text(stepTitle, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
 
                 when (state.step) {
-                    PairStep.IDENTIFY -> {
+                    // ── 1. Search for nearby BLE Signals ────────────────────────
+                    PairStep.LOOK_FOR_BLE -> {
+                        if (!hasBlePermissions) {
+                            Surface(
+                                shape = BevestShapes.card,
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(
+                                    Modifier.padding(Spacing.lg),
+                                    verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Bluetooth,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                        Text(
+                                            "Bluetooth & Location Permissions Required",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.error,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Text(
+                                        "Android requires Bluetooth Scan, Connect, and Location permissions to discover and pair with nearby BeVest smart vests.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    PrimaryButton(
+                                        text = "Allow Required Permissions",
+                                        onClick = { blePermissionLauncher.launch(requiredBlePermissions) }
+                                    )
+                                }
+                            }
+                        }
+
+                        if (!viewModel.isBluetoothEnabled) {
+                            Surface(
+                                shape = BevestShapes.card,
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(
+                                    Modifier.padding(Spacing.lg),
+                                    verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                                ) {
+                                    Text(
+                                        "Bluetooth is Turned Off",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        "Please enable Bluetooth on your phone so the app can detect your smart vest.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    SecondaryButton(
+                                        text = "Open Bluetooth Settings",
+                                        onClick = {
+                                            try {
+                                                context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                                            } catch (_: Exception) {}
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        if (!viewModel.isLocationEnabled) {
+                            Surface(
+                                shape = BevestShapes.card,
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(
+                                    Modifier.padding(Spacing.lg),
+                                    verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                                ) {
+                                    Text(
+                                        "Device Location is Turned Off",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        "Android requires Location Services to be active in phone quick settings to detect nearby BLE signals.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    SecondaryButton(
+                                        text = "Open Location Settings",
+                                        onClick = {
+                                            try {
+                                                context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                                            } catch (_: Exception) {}
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
                         Text(
-                            "Scan the QR code printed on the vest, or type its ID below.",
+                            "Hold your phone near the Bevest smart vest with power turned ON. The app will scan for nearby BLE advertisement signals.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+
+                        // ── Scanner Status Banner ──
+                        Surface(
+                            shape = BevestShapes.card,
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(Spacing.lg),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(44.dp)
+                                        .clip(BevestShapes.round)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Bluetooth,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(IconSize.medium)
+                                    )
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        if (state.scanningBle) "Scanning for Bevest signals…" else "Scan paused",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        state.bleStatusMsg ?: "Listening for BEVEST-* BLE beacons",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        // ── Discovered Vests List ──
+                        if (state.discoveredBles.isEmpty()) {
+                            Surface(
+                                shape = BevestShapes.card,
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(Spacing.xl),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+                                ) {
+                                    Text(
+                                        "No vests found yet nearby",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        "Ensure your ESP32 Bevest is powered ON and in pairing mode (onboard LED blinking).",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            }
+                        } else {
+                            Text(
+                                "Discovered Smart Vests (${state.discoveredBles.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+
+                            state.discoveredBles.forEach { vest ->
+                                val deviceDisplayName = vest.name.ifBlank { "BEVEST-${vest.cleanMac.ifBlank { "SMART-VEST" }}" }
+                                val signalColor = if (vest.rssi >= -70) LocalStatusPalette.current.normal else LocalStatusPalette.current.warning
+                                val signalText = if (vest.rssi >= -65) "Strong" else "Nearby"
+
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(BevestShapes.card)
+                                        .clickable { viewModel.connectToBleVest(vest) },
+                                    shape = BevestShapes.card,
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                                    shadowElevation = Elevation.card,
+                                ) {
+                                    Column(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(Spacing.lg),
+                                        verticalArrangement = Arrangement.spacedBy(Spacing.md)
+                                    ) {
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.weight(1f),
+                                                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(
+                                                    Modifier
+                                                        .size(46.dp)
+                                                        .clip(BevestShapes.inner)
+                                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Bluetooth,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(IconSize.medium)
+                                                    )
+                                                }
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = deviceDisplayName,
+                                                        style = MaterialTheme.typography.titleMedium,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = "MAC: ${vest.address}",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+
+                                            StatusBadge(
+                                                text = "$signalText (${vest.rssi} dBm)",
+                                                color = signalColor,
+                                                icon = BevestIcons.Signal
+                                            )
+                                        }
+
+                                        PrimaryButton(
+                                            text = "Connect to $deviceDisplayName",
+                                            onClick = { viewModel.connectToBleVest(vest) },
+                                            icon = Icons.Outlined.Bluetooth
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        SecondaryButton(
+                            text = if (state.scanningBle) "Scanning…" else "Rescan for Signals",
+                            onClick = {
+                                if (!hasBlePermissions) {
+                                    blePermissionLauncher.launch(requiredBlePermissions)
+                                } else {
+                                    viewModel.startBleScan()
+                                }
+                            },
+                            icon = BevestIcons.Refresh
+                        )
+                    }
+
+                    // ── 2. Bluetooth Connected ──────────────────────────────────
+                    PairStep.BLE_CONNECTED -> {
+                        val deviceName = state.connectedBle?.name?.takeIf { it.isNotBlank() }
+                            ?: "BEVEST-${state.connectedBle?.cleanMac ?: "SMART-VEST"}"
+                        val deviceMac = state.connectedBle?.address ?: "N/A"
+
+                        Surface(
+                            shape = BevestShapes.card,
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.5.dp, LocalStatusPalette.current.normal.copy(alpha = 0.5f)),
+                            shadowElevation = Elevation.card,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(Spacing.xl),
+                                verticalArrangement = Arrangement.spacedBy(Spacing.md),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(64.dp)
+                                        .clip(BevestShapes.round)
+                                        .background(LocalStatusPalette.current.normal.copy(alpha = 0.12f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.CheckCircle,
+                                        contentDescription = null,
+                                        tint = LocalStatusPalette.current.normal,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                }
+                                Text(
+                                    "Connected to $deviceName!",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                Text(
+                                    "Bluetooth Low Energy GATT connection established.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+
+                                Surface(
+                                    shape = BevestShapes.pill,
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                ) {
+                                    Text(
+                                        text = "Hardware MAC: $deviceMac",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs)
+                                    )
+                                }
+
+                                Spacer(Modifier.height(Spacing.xs))
+                                Text(
+                                    "Next: Scan the physical QR code on the vest to verify hardware authenticity and add it to your company directory.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+
+                        PrimaryButton(
+                            text = "Proceed to Scan QR Code",
+                            onClick = viewModel::proceedToQrScan,
+                            icon = BevestIcons.Scan
+                        )
+                    }
+
+                    // ── 3. Scan Physical QR Code ────────────────────────────────
+                    PairStep.SCAN_QR -> {
+                        Text(
+                            "Point your camera at the QR code printed on the physical vest. The system validates the Vest ID, Serial Number and MAC Address against both the Bluetooth connection and the Bevest database.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
                         Surface(
                             shape = BevestShapes.card,
                             color = MaterialTheme.colorScheme.surface,
@@ -540,79 +982,137 @@ fun PairVestScreen(
                         ) {
                             QrScanner(onResult = viewModel::onScanned)
                         }
+
                         FormField(
                             value = state.vestIdInput,
                             onValueChange = viewModel::onVestIdInput,
-                            label = "Vest ID",
+                            label = "Vest ID (Manual fallback)",
                             error = state.vestIdError,
                             helper = "Printed under the QR code",
                             keyboardType = KeyboardType.Ascii,
                             imeAction = ImeAction.Go,
-                            onImeAction = viewModel::identifyVest,
+                            onImeAction = viewModel::manualValidateAndClaim,
                         )
+
                         PrimaryButton(
-                            text = "Continue",
-                            onClick = viewModel::identifyVest,
+                            text = "Verify & Claim Vest",
+                            onClick = viewModel::manualValidateAndClaim,
                             loading = state.checking,
-                            loadingText = "Checking…",
+                            loadingText = "Validating hardware…",
                         )
                     }
 
-                    PairStep.SELECT_WORKER -> {
+                    // ── 4. Wi-Fi Provisioning ───────────────────────────────────
+                    PairStep.PROVISION_WIFI -> {
+                        state.successMessage?.let { SuccessNote(it) }
+
                         Text(
-                            "Assign vest ${state.identifiedVestId} to:",
+                            "Configure the construction site Wi-Fi connection so the vest can transmit live telemetry to the Bevest Cloud.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        if (state.unassignedWorkers.isEmpty()) {
-                            EmptyState(
-                                title = "Everyone already has a vest",
-                                message = "Every active worker on this site is paired. " +
-                                    "Unassign a vest first, or register a new worker.",
-                                icon = BevestIcons.NoWorkers,
-                                modifier = Modifier.heightIn(min = 240.dp),
+
+                        FormField(
+                            value = state.wifiSsid,
+                            onValueChange = viewModel::onWifiSsidInput,
+                            label = "Site Wi-Fi Network Name (SSID)",
+                            helper = "e.g. Site-Office-WiFi",
+                            keyboardType = KeyboardType.Text,
+                        )
+
+                        FormField(
+                            value = state.wifiPass,
+                            onValueChange = viewModel::onWifiPassInput,
+                            label = "Wi-Fi Password",
+                            keyboardType = KeyboardType.Password,
+                        )
+
+                        if (state.wifiProvisionSuccess) {
+                            SuccessNote("✓ Wi-Fi credentials sent! Vest confirmed connection.")
+                            PrimaryButton(
+                                text = "Continue to Worker Assignment",
+                                onClick = viewModel::skipWifiAndProceed
                             )
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                                SecondaryButton(
+                                    text = "Skip Wi-Fi Setup",
+                                    onClick = viewModel::skipWifiAndProceed,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                PrimaryButton(
+                                    text = "Send Wi-Fi",
+                                    onClick = viewModel::sendWifiCredentials,
+                                    loading = state.provisioningWifi,
+                                    loadingText = "Transmitting…",
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
-                        state.unassignedWorkers.forEach { w ->
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = ComponentHeight.control)
-                                    .clip(BevestShapes.card)
-                                    .clickable { viewModel.selectWorker(w.workerId) },
-                                shape = BevestShapes.card,
-                                color = MaterialTheme.colorScheme.surface,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            ) {
-                                Row(
-                                    Modifier.padding(Spacing.lg),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                    }
+
+                    // ── 5. Select Worker ────────────────────────────────────────
+                    PairStep.SELECT_WORKER -> {
+                        Text(
+                            "Assign vest ${state.identifiedVestId ?: state.vestIdInput} to a worker now, or keep it available in the company directory:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+                        SecondaryButton(
+                            text = "Save as Available (No Worker Assigned)",
+                            onClick = viewModel::finishWithoutWorker,
+                            icon = BevestIcons.Vests,
+                        )
+
+                        if (state.unassignedWorkers.isNotEmpty()) {
+                            Text(
+                                "Or assign immediately to an active worker:",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            state.unassignedWorkers.forEach { w ->
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = ComponentHeight.control)
+                                        .clip(BevestShapes.card)
+                                        .clickable { viewModel.selectWorker(w.workerId) },
+                                    shape = BevestShapes.card,
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                 ) {
-                                    com.jtexpress.bevest.ui.common.WorkerAvatar(
-                                        name = w.fullName.ifBlank { w.workerId },
-                                        photoUrl = w.photoUrl,
-                                        size = 40.dp,
-                                    )
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            w.fullName.ifBlank { w.workerId },
-                                            style = MaterialTheme.typography.titleSmall,
+                                    Row(
+                                        Modifier.padding(Spacing.lg),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                                    ) {
+                                        com.jtexpress.bevest.ui.common.WorkerAvatar(
+                                            name = w.fullName.ifBlank { w.workerId },
+                                            photoUrl = w.photoUrl,
+                                            size = 40.dp,
                                         )
-                                        Text(
-                                            w.workerId,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                w.fullName.ifBlank { w.workerId },
+                                                style = MaterialTheme.typography.titleSmall,
+                                            )
+                                            Text(
+                                                w.workerId,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
                     }
 
+                    // ── 6. Sensor Connection Test ───────────────────────────────
                     PairStep.CONNECTION_TEST -> {
                         Text(
-                            "Reading from the vest to confirm every sensor is reporting.",
+                            "Reading telemetry from vest ${state.identifiedVestId ?: ""} to verify sensor reporting.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -642,24 +1142,53 @@ fun PairVestScreen(
                                 icon = BevestIcons.Refresh,
                             )
                             PrimaryButton(
-                                text = "Confirm pairing",
-                                onClick = { viewModel.confirmPairing(user.uid) },
+                                text = "Confirm & Finish Pairing",
+                                onClick = viewModel::confirmWorkerPairing,
                                 enabled = state.checks.allPass,
                                 loading = state.submitting,
-                                loadingText = "Pairing…",
+                                loadingText = "Saving…",
                             )
-                            if (!state.checks.allPass) {
-                                Text(
-                                    "Every sensor has to report before a vest can be paired — " +
-                                        "monitoring depends on all of them.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
                         }
                     }
 
-                    PairStep.DONE -> SuccessNote("Vest paired.")
+                    // ── 7. Done / Success Screen ────────────────────────────────
+                    PairStep.DONE -> {
+                        Surface(
+                            shape = BevestShapes.card,
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                Modifier.padding(Spacing.xl),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(Spacing.md)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CheckCircle,
+                                    contentDescription = null,
+                                    tint = LocalStatusPalette.current.normal,
+                                    modifier = Modifier.size(64.dp)
+                                )
+                                Text(
+                                    "✓ Vest Added to Company Directory!",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    "Smart Vest ${state.identifiedVestId ?: state.vestIdInput} is now active. Your company Administrator can now immediately see and manage this vest under System Management.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+
+                        PrimaryButton(
+                            text = "Back to Vest Directory",
+                            onClick = onDone
+                        )
+                    }
                 }
 
                 state.error?.let { ErrorNote(it) }
@@ -668,6 +1197,7 @@ fun PairVestScreen(
         }
     }
 }
+
 
 /** Segmented reflective band as a progress indicator. */
 @Composable

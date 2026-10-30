@@ -8,7 +8,7 @@ import {
   FiBriefcase, FiUserPlus, FiLock, FiMail, FiPhone
 } from 'react-icons/fi';
 import { 
-  collection, doc, getDocs, setDoc, updateDoc, 
+  collection, doc, getDocs, setDoc, updateDoc, deleteDoc,
   query, where, onSnapshot 
 } from 'firebase/firestore';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
@@ -418,6 +418,21 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       showToast('error', 'Batch generation failed: ' + err.message);
     } finally {
       setBatchGenerating(false);
+    }
+  };
+
+  const handleDeleteVest = async (vestId) => {
+    if (!vestId) return;
+    const ok = window.confirm(`Permanently delete Vest "${vestId}" from the Bevest hardware database?\n\nThis will remove the QR, MAC address, and Serial Number registration. This action cannot be undone.`);
+    if (!ok) return;
+
+    try {
+      await deleteDoc(doc(db, 'vests', vestId));
+      await logActivity(`Deleted smart vest ${vestId} from central hardware database`, devEmail);
+      showToast('success', `✓ Vest ${vestId} permanently removed from database.`);
+    } catch (err) {
+      console.error('Error deleting vest:', err);
+      showToast('error', 'Failed to delete vest: ' + err.message);
     }
   };
 
@@ -1260,6 +1275,15 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                   style={{ padding: '0.4rem 0.65rem' }}
                                 >
                                   <FiPrinter />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="dev-btn-secondary"
+                                  onClick={() => handleDeleteVest(v.vestId || v.id)}
+                                  title="Delete Vest from Database"
+                                  style={{ padding: '0.4rem 0.65rem', color: '#dc2626', borderColor: '#fca5a5' }}
+                                >
+                                  <FiTrash2 />
                                 </button>
                               </div>
                             </td>
@@ -2176,6 +2200,18 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   <FiDownload /> Download
                 </a>
               )}
+              <button
+                type="button"
+                className="dev-btn-secondary"
+                onClick={() => {
+                  const targetId = selectedVestQr.vestId || selectedVestQr.id;
+                  setSelectedVestQr(null);
+                  handleDeleteVest(targetId);
+                }}
+                style={{ color: '#dc2626', borderColor: '#fca5a5' }}
+              >
+                <FiTrash2 /> Delete
+              </button>
             </div>
           </div>
         </div>

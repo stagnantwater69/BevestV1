@@ -65,14 +65,26 @@ const SystemManagement = ({ user }) => {
     fetchWorkers();
   }, []);
 
-  // 2. Subscribe to Vests in real-time
+  // 2. Subscribe to Vests in real-time (Only Company Directory claimed vests)
   useEffect(() => {
     setLoading(true);
     const q = collection(db, 'vests');
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const vestList = [];
+      const currentAdminComp = (user?.companyId || user?.profile?.company || user?.profile?.companyName || '').trim().toLowerCase();
+
       snapshot.forEach((docSnap) => {
-        vestList.push({ id: docSnap.id, ...docSnap.data() });
+        const data = docSnap.data();
+        // RULE 1: Unclaimed developer inventory must NEVER appear in System Management.
+        // Only vests that have been paired/scanned and added to the company directory are shown.
+        if (!data.inCompanyDirectory) return;
+
+        // RULE 2: If the current admin belongs to a specific company, scope to this company
+        if (currentAdminComp && data.companyId) {
+          if (data.companyId.trim().toLowerCase() !== currentAdminComp) return;
+        }
+
+        vestList.push({ id: docSnap.id, ...data });
       });
       // Sort newest first by addedAt or vestId
       vestList.sort((a, b) => {
@@ -88,7 +100,7 @@ const SystemManagement = ({ user }) => {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   // Generate QR code Data URL whenever QR Viewer Modal opens
   useEffect(() => {
@@ -185,12 +197,16 @@ const SystemManagement = ({ user }) => {
 
       // 2. Claim / Register vest in 'vests' collection
       const now = new Date();
+      const currentCompany = user?.companyId || user?.profile?.company || user?.profile?.companyName || null;
       await updateDoc(doc(db, 'vests', vestId), {
         status: vestRecord.status || 'AVAILABLE',
         inCompanyDirectory: true,
+        companyId: currentCompany,
+        siteId: user?.siteId || null,
         addedByAdminId: user?.uid || 'admin',
         addedByAdminEmail: currentAdminEmail,
         addedByAdminName: currentAdminName,
+        registeredToAdmin: currentAdminEmail,
         registeredAt: now,
         addedAt: now
       });
@@ -357,22 +373,33 @@ const SystemManagement = ({ user }) => {
     }
   };
 
-  // Delete Vest from Company Directory
+  // Remove Vest from Company Directory (safely detaches without destroying the hardware record)
   const handleDeleteVest = async (vest) => {
-    const confirm = window.confirm(`Permanently remove Vest ${vest.id} from the company directory? This action cannot be undone.`);
+    const confirm = window.confirm(`Remove Vest ${vest.id} from your company directory?\n\nThe vest will be detached from your company and returned to unassigned inventory. It can be re-paired anytime.`);
     if (!confirm) return;
 
     try {
-      await deleteDoc(doc(db, 'vests', vest.id));
+      await updateDoc(doc(db, 'vests', vest.id), {
+        inCompanyDirectory: false,
+        companyId: null,
+        siteId: null,
+        addedByAdminId: null,
+        addedByAdminEmail: null,
+        addedByAdminName: null,
+        addedBySsoUid: null,
+        status: 'AVAILABLE',
+        assignedWorkerId: null,
+        removedFromDirectoryAt: new Date()
+      });
       if (vest.assignedWorkerId) {
         await updateDoc(doc(db, 'workers', vest.assignedWorkerId), {
           assignedVestId: null
         });
       }
       logActivity(`Removed vest: ${vest.id} from directory`, currentAdminEmail);
-      alert(`Vest ${vest.id} removed from company directory.`);
+      alert(`Vest ${vest.id} has been removed from your company directory.`);
     } catch (err) {
-      console.error('Error deleting vest:', err);
+      console.error('Error removing vest:', err);
       alert('Could not remove vest: ' + err.message);
     }
   };

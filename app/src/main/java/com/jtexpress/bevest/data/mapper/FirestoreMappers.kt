@@ -60,6 +60,11 @@ fun DocumentSnapshot.toVest(): Vest = Vest(
     batteryPercent = int("battery"),
     online = bool("online"),
     lastSeen = millis("lastSeen"),
+    inCompanyDirectory = bool("inCompanyDirectory"),
+    companyId = strOrNull("companyId"),
+    siteId = strOrNull("siteId"),
+    macAddress = strOrNull("macAddress"),
+    serialNumber = strOrNull("serialNumber") ?: strOrNull("esp32Serial"),
 )
 
 fun DocumentSnapshot.toAlert(): Alert = Alert(
