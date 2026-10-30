@@ -40,9 +40,16 @@ const Dashboard = ({ user, onLogout }) => {
           const logs = [];
           snapshot.forEach((doc) => {
             const d = doc.data();
+            const actionText = d.message || d.action || 'Activity recorded';
+            if (
+              actionText.toLowerCase().includes('developer') ||
+              (d.actorId && d.actorId.toLowerCase().includes('developer'))
+            ) {
+              return;
+            }
             logs.push({
               id: doc.id,
-              action: d.message || d.action || 'Activity recorded',
+              action: actionText,
               actorId: d.actorId || 'System',
               createdAt: d.createdAt || d.timestamp,
               time: formatTimeAgo(d.createdAt || d.timestamp)
@@ -56,15 +63,22 @@ const Dashboard = ({ user, onLogout }) => {
           const fallbackUnsub = onSnapshot(collection(db, 'activityLog'), (snapshot) => {
             const logs = [];
             snapshot.forEach((doc) => {
-              const d = doc.data();
-              logs.push({
-                id: doc.id,
-                action: d.message || d.action || 'Activity recorded',
-                actorId: d.actorId || 'System',
-                createdAt: d.createdAt || d.timestamp,
-                time: formatTimeAgo(d.createdAt || d.timestamp)
-              });
+            const d = doc.data();
+            const actionText = d.message || d.action || 'Activity recorded';
+            if (
+              actionText.toLowerCase().includes('developer') ||
+              (d.actorId && d.actorId.toLowerCase().includes('developer'))
+            ) {
+              return;
+            }
+            logs.push({
+              id: doc.id,
+              action: actionText,
+              actorId: d.actorId || 'System',
+              createdAt: d.createdAt || d.timestamp,
+              time: formatTimeAgo(d.createdAt || d.timestamp)
             });
+          });
             logs.sort((a, b) => {
               const timeA = typeof a.createdAt === 'number' ? a.createdAt : (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0);
               const timeB = typeof b.createdAt === 'number' ? b.createdAt : (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0);

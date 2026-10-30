@@ -51,7 +51,9 @@ const UserManagement = () => {
       const querySnapshot = await getDocs(collection(db, "users"));
       const usersData = [];
       querySnapshot.forEach((docSnap) => {
-        usersData.push({ id: docSnap.id, ...docSnap.data() });
+        const uData = docSnap.data();
+        if ((uData.role || '').toUpperCase() === 'DEVELOPER') return;
+        usersData.push({ id: docSnap.id, ...uData });
       });
       setUsers(usersData);
       try {
@@ -137,7 +139,7 @@ const UserManagement = () => {
         lastName: formData.lastName.trim(),
         phone: formatPhoneWithCountryCode(formData.phone),
         email: formData.email.trim(),
-        role: (formData.role || 'Contractor').toUpperCase() === 'DEVELOPER' ? 'DEVELOPER' : 'CONTRACTOR',
+        role: 'CONTRACTOR',
         active: true,
         status: 'Active',
         createdAt: now,
@@ -326,15 +328,14 @@ const UserManagement = () => {
               {/* Read-only assigned role */}
               <div className="form-group-custom">
                 <label className="form-label">ASSIGN ROLE</label>
-                <select 
+                <input 
+                  type="text" 
                   className="form-input" 
-                  value={formData.role || 'Contractor'}
-                  onChange={(e) => setFormData({...formData, role: e.target.value})}
-                  style={{ cursor: 'pointer', backgroundColor: '#ffffff' }}
-                >
-                  <option value="Contractor">Contractor (Site Contractor)</option>
-                  <option value="Developer">Developer (Hardware & Subscriptions)</option>
-                </select>
+                  value="Contractor (Site Contractor)" 
+                  readOnly 
+                  disabled 
+                  style={{ backgroundColor: '#f8fafc', color: '#64748b', cursor: 'not-allowed' }}
+                />
               </div>
 
               {/* Password Generator */}

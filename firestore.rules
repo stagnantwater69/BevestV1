@@ -65,12 +65,14 @@ service cloud.firestore {
       allow list: if isAdmin() || isDeveloper()
                   || (isContractor() && request.query.limit <= 200)
                   || (request.query.limit <= 5);
-      allow delete: if isAdmin() || isDeveloper();
-      // Admin and Developer provision accounts. Contractors can provision SSO accounts under their own contractorId. Users can initialize their own doc.
-      allow create: if isAdmin() || isDeveloper()
+      allow delete: if isDeveloper() || (isAdmin() && resource.data.role != 'DEVELOPER');
+      // Developer provisions accounts. Admins can ONLY create accounts for Contractors. Contractors can provision SSO accounts under their own contractorId. Users can initialize their own doc.
+      allow create: if isDeveloper()
+                 || (isAdmin() && request.resource.data.role == 'CONTRACTOR')
                  || (isSignedIn() && request.auth.uid == uid)
                  || (isContractor() && request.resource.data.role == 'SSO' && request.resource.data.contractorId == request.auth.uid);
-      allow update: if isAdmin() || isDeveloper()
+      allow update: if isDeveloper()
+                    || (isAdmin() && request.resource.data.role != 'DEVELOPER' && resource.data.role != 'DEVELOPER')
                     || (isSignedIn() && request.auth.uid == uid
                         && request.resource.data.role == resource.data.role
                         && request.resource.data.active == resource.data.active

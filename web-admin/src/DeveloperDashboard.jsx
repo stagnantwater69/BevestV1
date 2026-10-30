@@ -327,7 +327,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
       await setDoc(doc(db, 'vests', cleanId), vestRecord, { merge: true });
 
-      await logActivity(`Developer created smart vest ${cleanId} (Status: ${genStatus || 'AVAILABLE'})`, devEmail);
+      await logActivity(`Smart vest ${cleanId} registered to inventory (Status: ${genStatus || 'AVAILABLE'})`, devEmail);
       showToast('success', `✓ Vest ${cleanId} saved to vests collection with status "${genStatus || 'AVAILABLE'}"!`);
       
       handleRegenerateId();
@@ -367,7 +367,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         await setDoc(doc(db, 'vests', currentId), item, { merge: true });
       }
 
-      await logActivity(`Developer batch generated ${count} vests to vests collection (Status: ${batchStatus || 'AVAILABLE'})`, devEmail);
+      await logActivity(`Batch registered ${count} smart vests to inventory (Status: ${batchStatus || 'AVAILABLE'})`, devEmail);
       showToast('success', `✓ Successfully generated and saved ${count} vests to vests collection!`);
       setShowBatchModal(false);
     } catch (err) {
@@ -489,7 +489,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       } catch (_) {}
 
       // Log activity
-      await logActivity(`Developer registered Admin account for ${adminEmail.trim()} (${adminCompany.trim()})`, devEmail);
+      await logActivity(`Provisioned Admin account for ${adminEmail.trim()} (${adminCompany.trim()})`, devEmail);
 
       showToast('success', `✓ Admin account for ${adminCompany.trim()} (${adminEmail.trim()}) registered in users collection!`);
       setShowAddAdminModal(false);
@@ -523,7 +523,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         active: newActive,
         status: newStatus
       });
-      await logActivity(`Developer ${newActive ? 'activated' : 'disabled'} Admin account: ${adminAccount.email}`, devEmail);
+      await logActivity(`Status updated for Admin account: ${adminAccount.email}`, devEmail);
       showToast('success', `✓ Admin account for ${adminAccount.email} is now ${newStatus}.`);
     } catch (err) {
       console.error('Error toggling admin status:', err);
@@ -577,7 +577,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         'subscription.lastPaymentAmount': Number(paymentAmount)
       });
 
-      await logActivity(`Developer verified ₱${Number(paymentAmount).toLocaleString()} payment from ${paymentContractor.email} (Ref: ${paymentRef})`, devEmail);
+      await logActivity(`Verified ₱${Number(paymentAmount).toLocaleString()} payment from ${paymentContractor.email} (Ref: ${paymentRef})`, devEmail);
       showToast('success', `✓ Payment verified and subscription activated for ${paymentContractor.email}!`);
       setShowPaymentModal(false);
       setPaymentNotes('');
@@ -617,7 +617,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
       await updateDoc(doc(db, 'users', troubleshootTarget.id), updates);
 
-      await logActivity(`Developer adjusted subscription parameters for ${troubleshootTarget.email} (Status: ${troubleshootStatus})`, devEmail);
+      await logActivity(`Adjusted subscription parameters for ${troubleshootTarget.email} (Status: ${troubleshootStatus})`, devEmail);
       showToast('success', `✓ Successfully updated subscription parameters for ${troubleshootTarget.email}`);
       setTroubleshootTarget(null);
       setTroubleshootVestBoost(0);

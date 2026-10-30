@@ -112,7 +112,9 @@ const Login = ({ onLogin }) => {
         } else {
           // Success: route to the role-specific web experience
           console.log(`${role} logged in successfully!`);
-          logActivity(`${role === 'DEVELOPER' ? 'Developer' : (role === 'ADMIN' ? 'Admin' : 'Contractor')} signed in: ${user.email}`, user.email);
+          if (role !== 'DEVELOPER') {
+            logActivity(`${role === 'ADMIN' ? 'Admin' : 'Contractor'} signed in: ${user.email}`, user.email);
+          }
 
           // Update local directory cache for password recovery lookup
           try {
