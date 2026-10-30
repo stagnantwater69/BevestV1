@@ -31,8 +31,17 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [catalogFilter, setCatalogFilter] = useState('ALL'); // 'ALL' | 'UNREGISTERED' | 'REGISTERED' | 'MAINTENANCE'
   
   // QR Generator Form state
+  const generateRandomMac = () => {
+    const h = () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0').toUpperCase();
+    return `24:6F:28:${h()}:${h()}:${h()}`;
+  };
+
   const [genVestId, setGenVestId] = useState(`VEST-2026-${Math.floor(1000 + Math.random() * 9000)}`);
-  const [genSerialNumber, setGenSerialNumber] = useState(() => `ESP32-SN-${Math.floor(100000 + Math.random() * 900000)}`);
+  const [genMacAddress, setGenMacAddress] = useState(() => {
+    const h = () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0').toUpperCase();
+    return `24:6F:28:${h()}:${h()}:${h()}`;
+  });
+  const [genSerialNumber, setGenSerialNumber] = useState(() => `BV-SN-${Math.floor(100000 + Math.random() * 900000)}`);
   const [genModel, setGenModel] = useState('Bevest Smart IoT Vest v2.1');
   const [genBatch, setGenBatch] = useState('BATCH-2026-Q4');
   const [genFirmware, setGenFirmware] = useState('v1.4.2');
@@ -109,8 +118,11 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
   // 1. Generate Live QR Code Preview
   useEffect(() => {
+    const cleanMac = genMacAddress.replace(/[^a-fA-F0-9]/g, '').toUpperCase();
     const payload = JSON.stringify({
       vestId: genVestId.trim(),
+      mac: cleanMac,
+      macAddress: genMacAddress.trim().toUpperCase(),
       serialNumber: genSerialNumber.trim(),
       verified: true,
       batch: genBatch.trim(),
@@ -128,7 +140,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     })
     .then(url => setLiveQrDataUrl(url))
     .catch(err => console.error('Error generating preview QR:', err));
-  }, [genVestId, genSerialNumber, genBatch, genToken]);
+  }, [genVestId, genMacAddress, genSerialNumber, genBatch, genToken]);
 
   // 2. Subscribe to Vests collection (direct hardware repository)
   useEffect(() => {
@@ -296,8 +308,11 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
   const handleRegenerateId = () => {
     const num = Math.floor(1000 + Math.random() * 9000);
+    const newMac = generateRandomMac();
+    const clean = newMac.replace(/[^A-F0-9]/g, '');
     setGenVestId(`VEST-2026-${num}`);
-    setGenSerialNumber(`ESP32-SN-${Math.floor(100000 + Math.random() * 900000)}`);
+    setGenMacAddress(newMac);
+    setGenSerialNumber(`BV-SN-${clean}`);
     setGenToken(Math.random().toString(16).substring(2, 10).toUpperCase());
   };
 
@@ -305,12 +320,19 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     e.preventDefault();
     const cleanId = genVestId.trim().toUpperCase();
     const cleanSerial = genSerialNumber.trim().toUpperCase();
+    const rawMac = genMacAddress.trim().toUpperCase();
+    const cleanMac = rawMac.replace(/[^A-F0-9]/g, '');
+
     if (!cleanId) {
       showToast('error', 'Please provide a valid Vest ID.');
       return;
     }
+    if (!rawMac || cleanMac.length !== 12) {
+      showToast('error', 'Please provide a valid 12-character MAC Address (e.g. 24:6F:28:B4:9C:12).');
+      return;
+    }
     if (!cleanSerial) {
-      showToast('error', 'Please provide a valid ESP32 Serial Number.');
+      showToast('error', 'Please provide a valid Serial Number.');
       return;
     }
 
@@ -320,6 +342,8 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       const vestRecord = {
         vestId: cleanId,
         id: cleanId,
+        macAddress: rawMac,
+        cleanMac: cleanMac,
         serialNumber: cleanSerial,
         esp32Serial: cleanSerial,
         status: genStatus || 'AVAILABLE',
@@ -338,8 +362,8 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
       await setDoc(doc(db, 'vests', cleanId), vestRecord, { merge: true });
 
-      await logActivity(`Smart vest ${cleanId} linked to ESP32 ${cleanSerial} registered to inventory (Status: ${genStatus || 'AVAILABLE'})`, devEmail);
-      showToast('success', `✓ Vest ${cleanId} (ESP32: ${cleanSerial}) saved to vests collection with status "${genStatus || 'AVAILABLE'}"!`);
+      await logActivity(`Smart vest ${cleanId} (MAC: ${rawMac}, S/N: ${cleanSerial}) registered to inventory (Status: ${genStatus || 'AVAILABLE'})`, devEmail);
+      showToast('success', `✓ Vest ${cleanId} [MAC: ${rawMac}] saved to database!`);
       
       handleRegenerateId();
     } catch (err) {
@@ -355,15 +379,19 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     setBatchGenerating(true);
     try {
       const startNum = Math.floor(1000 + Math.random() * 8000);
-      const startSerial = Math.floor(100000 + Math.random() * 800000);
       const now = new Date();
 
       for (let i = 0; i < count; i++) {
         const currentId = `${batchPrefix}${startNum + i}`;
-        const currentSerial = `${batchSerialPrefix}${startSerial + i}`;
+        const itemMac = generateRandomMac();
+        const itemCleanMac = itemMac.replace(/[^A-F0-9]/g, '');
+        const currentSerial = `${batchSerialPrefix}${itemCleanMac}`;
+
         const item = {
           vestId: currentId,
           id: currentId,
+          macAddress: itemMac,
+          cleanMac: itemCleanMac,
           serialNumber: currentSerial,
           esp32Serial: currentSerial,
           status: batchStatus || 'AVAILABLE',
@@ -382,8 +410,8 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         await setDoc(doc(db, 'vests', currentId), item, { merge: true });
       }
 
-      await logActivity(`Batch registered ${count} smart vests with ESP32 serial numbers to inventory (Status: ${batchStatus || 'AVAILABLE'})`, devEmail);
-      showToast('success', `✓ Successfully generated and saved ${count} vests with ESP32 serial numbers to vests collection!`);
+      await logActivity(`Batch registered ${count} smart vests with MAC addresses to inventory (Status: ${batchStatus || 'AVAILABLE'})`, devEmail);
+      showToast('success', `✓ Successfully generated and saved ${count} vests with MAC addresses to database!`);
       setShowBatchModal(false);
     } catch (err) {
       console.error('Batch generation error:', err);
@@ -395,8 +423,11 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
   const handleOpenQrViewer = (vest) => {
     setSelectedVestQr(vest);
+    const cleanMac = (vest.cleanMac || (vest.macAddress ? vest.macAddress.replace(/[^A-F0-9]/g, '') : '')).toUpperCase();
     const payload = JSON.stringify({
       vestId: vest.vestId || vest.id,
+      mac: cleanMac,
+      macAddress: vest.macAddress || 'N/A',
       serialNumber: vest.serialNumber || vest.esp32Serial || 'N/A',
       verified: true,
       batch: vest.batchNumber || 'N/A',
@@ -412,7 +443,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     .catch(console.error);
   };
 
-  const handlePrintLabel = (vestId, batch, qrUrl, serialNumber) => {
+  const handlePrintLabel = (vestId, batch, qrUrl, serialNumber, macAddress) => {
     const printWin = window.open('', '_blank', 'width=600,height=600');
     if (!printWin) return;
     printWin.document.write(`
@@ -427,6 +458,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             img { width: 200px; height: 200px; }
             .id-code { font-size: 20px; font-weight: 800; color: #0f172a; margin-top: 10px; letter-spacing: 0.05em; }
             .serial { font-size: 13px; font-weight: 700; color: #ea580c; font-family: monospace; margin-top: 4px; }
+            .mac { font-size: 11px; color: #64748b; font-family: monospace; margin-top: 2px; }
             .batch { font-size: 11px; color: #64748b; font-weight: 700; margin-top: 4px; }
             .security { font-size: 9px; color: #94a3b8; margin-top: 12px; border-top: 1px solid #e2e8f0; padding-top: 8px; }
           </style>
@@ -437,7 +469,8 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             <div class="sub">Authentic Hardware QR</div>
             <img src="${qrUrl}" />
             <div class="id-code">${vestId}</div>
-            <div class="serial">ESP32 S/N: ${serialNumber || 'N/A'}</div>
+            <div class="serial">S/N: ${serialNumber || 'N/A'}</div>
+            ${macAddress ? `<div class="mac">MAC: ${macAddress}</div>` : ''}
             <div class="batch">${batch} • VERIFIED</div>
             <div class="security">Scan with BeVest Admin or SSO App to Register</div>
           </div>
@@ -661,9 +694,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const unregisteredVestsCount = catalog.filter(v => (v.status || 'AVAILABLE') === 'AVAILABLE' || v.catalogStatus === 'UNREGISTERED').length;
 
   const filteredCatalog = catalog.filter(v => {
+    const q = catalogSearch.toLowerCase().replace(/[^a-z0-9]/g, '');
     const matchesSearch = (v.vestId || v.id || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
                           (v.batchNumber || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
-                          (v.serialNumber || v.esp32Serial || '').toLowerCase().includes(catalogSearch.toLowerCase());
+                          (v.serialNumber || v.esp32Serial || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
+                          (v.macAddress || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
+                          (v.cleanMac || '').toLowerCase().includes(q);
     const matchesFilter = catalogFilter === 'ALL' || (v.status || 'AVAILABLE') === catalogFilter;
     return matchesSearch && matchesFilter;
   });
@@ -897,34 +933,76 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       </div>
 
                       <div className="dev-form-group">
-                        <label className="dev-form-label">ESP32 SERIAL NUMBER *</label>
+                        <label className="dev-form-label">ESP32 HARDWARE MAC ADDRESS *</label>
                         <div style={{ display: 'flex', gap: '0.5rem' }}>
                           <input
                             type="text"
                             className="dev-input"
-                            value={genSerialNumber}
-                            onChange={(e) => setGenSerialNumber(e.target.value.toUpperCase())}
-                            placeholder="e.g. ESP32-SN-849120"
+                            value={genMacAddress}
+                            onChange={(e) => {
+                              const val = e.target.value.toUpperCase();
+                              setGenMacAddress(val);
+                              const clean = val.replace(/[^A-F0-9]/g, '');
+                              if (clean.length === 12) {
+                                setGenSerialNumber(`BV-SN-${clean}`);
+                              }
+                            }}
+                            placeholder="e.g. 24:6F:28:B4:9C:12"
                             required
-                            style={{ flex: 1 }}
+                            style={{ flex: 1, fontFamily: 'monospace' }}
                           />
                           <button
                             type="button"
                             className="dev-btn-secondary"
-                            onClick={() => setGenSerialNumber(`ESP32-SN-${Math.floor(100000 + Math.random() * 900000)}`)}
-                            title="Auto-generate Serial Number"
+                            onClick={() => {
+                              const newMac = generateRandomMac();
+                              const clean = newMac.replace(/[^A-F0-9]/g, '');
+                              setGenMacAddress(newMac);
+                              setGenSerialNumber(`BV-SN-${clean}`);
+                            }}
+                            title="Generate Random MAC"
                             style={{ padding: '0 0.75rem', whiteSpace: 'nowrap', fontSize: '0.8rem' }}
                           >
                             <FiRefreshCw /> Auto
                           </button>
                         </div>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
-                          Serial number of the physical ESP32 microcontroller linked to this QR code
+                          Permanent physical IEEE MAC burned into ESP32 eFuse silicon
                         </span>
                       </div>
                     </div>
 
                     <div className="dev-form-row">
+                      <div className="dev-form-group">
+                        <label className="dev-form-label">BEVEST SERIAL NUMBER *</label>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <input
+                            type="text"
+                            className="dev-input"
+                            value={genSerialNumber}
+                            onChange={(e) => setGenSerialNumber(e.target.value.toUpperCase())}
+                            placeholder="e.g. BV-SN-246F28B49C12"
+                            required
+                            style={{ flex: 1, fontFamily: 'monospace' }}
+                          />
+                          <button
+                            type="button"
+                            className="dev-btn-secondary"
+                            onClick={() => {
+                              const clean = genMacAddress.replace(/[^A-F0-9]/g, '').toUpperCase();
+                              setGenSerialNumber(`BV-SN-${clean || Math.floor(100000 + Math.random() * 900000)}`);
+                            }}
+                            title="Derive from MAC"
+                            style={{ padding: '0 0.75rem', whiteSpace: 'nowrap', fontSize: '0.8rem' }}
+                          >
+                            From MAC
+                          </button>
+                        </div>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+                          Unique commercial Bevest serial number assigned to this vest
+                        </span>
+                      </div>
+
                       <div className="dev-form-group">
                         <label className="dev-form-label">HARDWARE BATCH *</label>
                         <input
@@ -935,7 +1013,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                           required
                         />
                       </div>
+                    </div>
 
+                    <div className="dev-form-row">
                       <div className="dev-form-group">
                         <label className="dev-form-label">MODEL SPECIFICATION</label>
                         <input
@@ -946,9 +1026,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                           required
                         />
                       </div>
-                    </div>
 
-                    <div className="dev-form-row">
                       <div className="dev-form-group">
                         <label className="dev-form-label">FIRMWARE VERSION</label>
                         <input
@@ -958,21 +1036,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                           onChange={(e) => setGenFirmware(e.target.value)}
                           required
                         />
-                      </div>
-
-                      <div className="dev-form-group">
-                        <label className="dev-form-label">STATUS *</label>
-                        <select
-                          className="dev-select"
-                          value={genStatus}
-                          onChange={(e) => setGenStatus(e.target.value)}
-                          required
-                        >
-                          <option value="AVAILABLE">AVAILABLE (Ready for Assignment)</option>
-                          <option value="ACTIVE">ACTIVE (In Use)</option>
-                          <option value="OFFLINE">OFFLINE (Storage / Disconnected)</option>
-                          <option value="MAINTENANCE">MAINTENANCE (Inspection Required)</option>
-                        </select>
                       </div>
                     </div>
 
@@ -1000,7 +1063,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       <button
                         type="button"
                         className="dev-btn-secondary"
-                        onClick={() => handlePrintLabel(genVestId, genBatch, liveQrDataUrl, genSerialNumber)}
+                        onClick={() => handlePrintLabel(genVestId, genBatch, liveQrDataUrl, genSerialNumber, genMacAddress)}
                       >
                         <FiPrinter /> Print Label
                       </button>
@@ -1028,7 +1091,10 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       <div style={{ width: 180, height: 180, backgroundColor: '#f1f5f9', borderRadius: '8px' }} />
                     )}
                     <div className="dev-sticker-id">{genVestId}</div>
-                    <div className="dev-sticker-serial">ESP32 S/N: {genSerialNumber}</div>
+                    <div className="dev-sticker-serial">S/N: {genSerialNumber}</div>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
+                      MAC: {genMacAddress}
+                    </div>
                     <div className="dev-sticker-batch">{genBatch} • VERIFIED</div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
                       Ready for Admin / SSO verification scan
@@ -1107,9 +1173,16 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                               </strong>
                             </td>
                             <td>
-                              <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#ea580c', background: '#fff7ed', padding: '2px 8px', borderRadius: '4px', border: '1px solid #ffedd5', fontSize: '0.8rem', display: 'inline-block' }}>
-                                {v.serialNumber || v.esp32Serial || 'Unassigned'}
-                              </span>
+                              <div>
+                                <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#ea580c', background: '#fff7ed', padding: '2px 8px', borderRadius: '4px', border: '1px solid #ffedd5', fontSize: '0.8rem', display: 'inline-block' }}>
+                                  {v.serialNumber || v.esp32Serial || 'Unassigned'}
+                                </span>
+                                {v.macAddress && (
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '2px' }}>
+                                    MAC: {v.macAddress}
+                                  </div>
+                                )}
+                              </div>
                             </td>
                             <td>
                               <div style={{ fontWeight: 500 }}>{v.model || 'Bevest Smart Vest'}</div>
@@ -1173,12 +1246,15 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                   type="button"
                                   className="dev-btn-secondary"
                                   onClick={() => {
+                                    const cMac = v.cleanMac || (v.macAddress ? v.macAddress.replace(/[^A-F0-9]/g, '') : '');
                                     QRCode.toDataURL(JSON.stringify({
                                       vestId: v.vestId,
+                                      mac: cMac,
+                                      macAddress: v.macAddress || 'N/A',
                                       serialNumber: v.serialNumber || v.esp32Serial || 'N/A',
                                       verified: true
                                     }), { width: 300 })
-                                      .then(url => handlePrintLabel(v.vestId, v.batchNumber, url, v.serialNumber || v.esp32Serial));
+                                      .then(url => handlePrintLabel(v.vestId, v.batchNumber, url, v.serialNumber || v.esp32Serial, v.macAddress));
                                   }}
                                   title="Print Label"
                                   style={{ padding: '0.4rem 0.65rem' }}
@@ -2060,11 +2136,19 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 <span style={{ fontWeight: 600 }}>{selectedVestQr.status || 'AVAILABLE'}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>ESP32 Serial Number:</span>
+                <span style={{ color: 'var(--text-muted)' }}>Serial Number:</span>
                 <span style={{ fontFamily: 'monospace', color: '#ea580c', fontWeight: 700 }}>
                   {selectedVestQr.serialNumber || selectedVestQr.esp32Serial || 'Unassigned'}
                 </span>
               </div>
+              {selectedVestQr.macAddress && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>ESP32 MAC:</span>
+                  <span style={{ fontFamily: 'monospace', color: '#0f172a', fontWeight: 600 }}>
+                    {selectedVestQr.macAddress}
+                  </span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Model:</span>
                 <span>{selectedVestQr.model || 'Bevest Smart Vest v2'}</span>
@@ -2079,7 +2163,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               <button
                 type="button"
                 className="dev-btn-secondary"
-                onClick={() => handlePrintLabel(selectedVestQr.vestId, selectedVestQr.batchNumber, viewQrDataUrl, selectedVestQr.serialNumber || selectedVestQr.esp32Serial)}
+                onClick={() => handlePrintLabel(selectedVestQr.vestId, selectedVestQr.batchNumber, viewQrDataUrl, selectedVestQr.serialNumber || selectedVestQr.esp32Serial, selectedVestQr.macAddress)}
               >
                 <FiPrinter /> Print Label
               </button>
