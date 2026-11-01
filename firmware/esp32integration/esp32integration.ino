@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 //  BeVest — Connected Firmware with In-App BLE WiFi Provisioning
 //  ESP32 + GPS NEO-6M + MPU6050 + MAX30102 + DS18B20 + SOS + Buzzer
 //  Streams directly to Firebase Realtime Database for BeVest App
@@ -184,7 +184,8 @@ class ServerCallbacks: public BLEServerCallbacks {
     bleDeviceConnected = false;
     Serial.println("[BLE] 📱 Mobile app disconnected.");
     if (inProvisioningMode) {
-      pServer->getAdvertising()->start();
+      delay(100);
+      BLEDevice::startAdvertising();
       Serial.println("[BLE] Re-advertising for connection...");
     }
   }

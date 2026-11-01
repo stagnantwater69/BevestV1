@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 //  BeVest — Standalone BLE WiFi Provisioning & Pairing Firmware
 //  Target: Any Standard ESP32 Dev Board (No external sensors or wiring required)
 //
@@ -92,7 +92,8 @@ class BleServerCallbacks: public BLEServerCallbacks {
     bleClientConnected = false;
     Serial.println("[BLE] Mobile App disconnected.");
     if (inPairingMode && pServer) {
-      pServer->getAdvertising()->start();
+      delay(100);
+      BLEDevice::startAdvertising();
       Serial.println("[BLE] Re-advertising for BeVest App...");
     }
   }

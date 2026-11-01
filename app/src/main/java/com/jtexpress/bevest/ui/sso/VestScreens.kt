@@ -1,4 +1,4 @@
-package com.jtexpress.bevest.ui.sso
+﻿package com.jtexpress.bevest.ui.sso
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
@@ -43,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -515,6 +516,11 @@ fun PairVestScreen(
 ) {
     val context = LocalContext.current
     LaunchedEffect(user) { viewModel.bind(user) }
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.disconnectIfNotFinished()
+        }
+    }
     val state = viewModel.state.collectAsStateWithLifecycle().value
 
     val requiredBlePermissions = remember {
@@ -571,8 +577,8 @@ fun PairVestScreen(
     }
 
     val (stepTitle, stepSubtitle) = when (state.step) {
-        PairStep.LOOK_FOR_BLE -> "Search for BLE Signals" to "Looking for nearby Bevest smart vests..."
-        PairStep.BLE_CONNECTED -> "Vest Connected via Bluetooth" to (state.connectedBle?.name ?: "Connected")
+        PairStep.LOOK_FOR_BLE -> "Search for Vest" to "Looking for nearby Bevest smart vests..."
+        PairStep.BLE_CONNECTED -> "Vest Connected" to (state.connectedBle?.name ?: "Connected")
         PairStep.SCAN_QR -> "Scan Hardware QR Code" to "Authenticate hardware identity"
         PairStep.PROVISION_WIFI -> "Site Wi-Fi Setup (Optional)" to "Configure wireless telemetry stream"
         PairStep.SELECT_WORKER -> "Assign Worker (Optional)" to "Assign vest to a site worker"
@@ -583,7 +589,14 @@ fun PairVestScreen(
     BevestScaffold(
         title = "Add & Pair Vest",
         subtitle = "Step ${stepIndex + 1} of 5 · $stepSubtitle",
-        onBack = if (state.step == PairStep.LOOK_FOR_BLE || state.step == PairStep.DONE) onDone else viewModel::back,
+                onBack = if (state.step == PairStep.LOOK_FOR_BLE || state.step == PairStep.DONE) {
+            {
+                viewModel.disconnectIfNotFinished()
+                onDone()
+            }
+        } else {
+            viewModel::back
+        },
     ) { padding ->
         Column(
             Modifier
@@ -603,7 +616,7 @@ fun PairVestScreen(
                 Text(stepTitle, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
 
                 when (state.step) {
-                    // ── 1. Search for nearby BLE Signals ────────────────────────
+                    // ── 1. Search for Vest ──────────────────────────────────────
                     PairStep.LOOK_FOR_BLE -> {
                         if (!hasBlePermissions) {
                             Surface(
@@ -695,7 +708,7 @@ fun PairVestScreen(
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     Text(
-                                        "Android requires Location Services to be active in phone quick settings to detect nearby BLE signals.",
+                                        "Android requires Location Services to be active in phone quick settings to detect nearby vest signals.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -712,7 +725,7 @@ fun PairVestScreen(
                         }
 
                         Text(
-                            "Hold your phone near the Bevest smart vest with power turned ON. The app will scan for nearby BLE advertisement signals.",
+                            "Hold your phone near the Bevest smart vest with power turned ON. The app will scan for nearby Vest signals.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -747,12 +760,12 @@ fun PairVestScreen(
                                 }
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        if (state.scanningBle) "Scanning for Bevest signals…" else "Scan paused",
+                                        if (state.scanningBle) "Searching for nearby vests…" else "Search paused",
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     Text(
-                                        state.bleStatusMsg ?: "Listening for BEVEST-* BLE beacons",
+                                        state.bleStatusMsg ?: "Listening for Bevest vest signals",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -782,7 +795,7 @@ fun PairVestScreen(
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        "Ensure your ESP32 Bevest is powered ON and in pairing mode (onboard LED blinking).",
+                                        "Ensure your Bevest smart vest is powered ON and in pairing mode (onboard LED blinking).",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -799,8 +812,6 @@ fun PairVestScreen(
 
                             state.discoveredBles.forEach { vest ->
                                 val deviceDisplayName = vest.name.ifBlank { "BEVEST-${vest.cleanMac.ifBlank { "SMART-VEST" }}" }
-                                val signalColor = if (vest.rssi >= -70) LocalStatusPalette.current.normal else LocalStatusPalette.current.warning
-                                val signalText = if (vest.rssi >= -65) "Strong" else "Nearby"
 
                                 Surface(
                                     modifier = Modifier
@@ -819,51 +830,39 @@ fun PairVestScreen(
                                         verticalArrangement = Arrangement.spacedBy(Spacing.md)
                                     ) {
                                         Row(
-                                            Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Row(
-                                                modifier = Modifier.weight(1f),
-                                                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-                                                verticalAlignment = Alignment.CenterVertically
+                                            Box(
+                                                Modifier
+                                                    .size(46.dp)
+                                                    .clip(BevestShapes.inner)
+                                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                                                contentAlignment = Alignment.Center
                                             ) {
-                                                Box(
-                                                    Modifier
-                                                        .size(46.dp)
-                                                        .clip(BevestShapes.inner)
-                                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Outlined.Bluetooth,
-                                                        contentDescription = null,
-                                                        tint = MaterialTheme.colorScheme.primary,
-                                                        modifier = Modifier.size(IconSize.medium)
-                                                    )
-                                                }
-                                                Column(Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = deviceDisplayName,
-                                                        style = MaterialTheme.typography.titleMedium,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = MaterialTheme.colorScheme.onSurface,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                    Text(
-                                                        text = "MAC: ${vest.address}",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
+                                                Icon(
+                                                    imageVector = Icons.Outlined.Bluetooth,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(IconSize.medium)
+                                                )
                                             }
-
-                                            StatusBadge(
-                                                text = "$signalText (${vest.rssi} dBm)",
-                                                color = signalColor,
-                                                icon = BevestIcons.Signal
-                                            )
+                                            Column(Modifier.weight(1f)) {
+                                                Text(
+                                                    text = deviceDisplayName,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = "MAC: ${vest.address}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
                                         }
 
                                         PrimaryButton(
@@ -877,7 +876,7 @@ fun PairVestScreen(
                         }
 
                         SecondaryButton(
-                            text = if (state.scanningBle) "Scanning…" else "Rescan for Signals",
+                            text = if (state.scanningBle) "Finding Vest…" else "Find Vest",
                             onClick = {
                                 if (!hasBlePermissions) {
                                     blePermissionLauncher.launch(requiredBlePermissions)
@@ -930,7 +929,7 @@ fun PairVestScreen(
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                 )
                                 Text(
-                                    "Bluetooth Low Energy GATT connection established.",
+                                    "Connection Established",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -963,6 +962,11 @@ fun PairVestScreen(
                             text = "Proceed to Scan QR Code",
                             onClick = viewModel::proceedToQrScan,
                             icon = BevestIcons.Scan
+                        )
+                        SecondaryButton(
+                            text = "Disconnect & Choose Another Vest",
+                            onClick = viewModel::disconnectAndRescan,
+                            icon = BevestIcons.Refresh
                         )
                     }
 
@@ -999,6 +1003,11 @@ fun PairVestScreen(
                             onClick = viewModel::manualValidateAndClaim,
                             loading = state.checking,
                             loadingText = "Validating hardware…",
+                        )
+                        SecondaryButton(
+                            text = "Cancel & Choose Another Vest",
+                            onClick = viewModel::disconnectAndRescan,
+                            icon = BevestIcons.Refresh
                         )
                     }
 

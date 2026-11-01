@@ -1,4 +1,4 @@
-package com.jtexpress.bevest.data.ble
+﻿package com.jtexpress.bevest.data.ble
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -162,6 +162,9 @@ class BleProvisioner @Inject constructor(
 
     @SuppressLint("MissingPermission")
     fun startScan() {
+        if (activeGatt != null) {
+            disconnect()
+        }
         if (!hasPermissions()) {
             _state.update {
                 it.copy(
@@ -189,7 +192,7 @@ class BleProvisioner @Inject constructor(
                 it.copy(
                     scanning = false,
                     connectionState = BleConnectionState.FAILED,
-                    statusMessage = "Location is turned OFF. Please turn on Location in quick settings to scan for BLE vests."
+                    statusMessage = "Location is turned OFF. Please turn on Location in quick settings to scan for vests."
                 )
             }
             return
@@ -211,7 +214,7 @@ class BleProvisioner @Inject constructor(
             it.copy(
                 scanning = true,
                 connectionState = BleConnectionState.SCANNING,
-                statusMessage = "Searching for nearby BeVest smart vest signals...",
+                statusMessage = "Searching for nearby Bevest vest signals...",
                 discoveredVests = emptyList()
             )
         }
@@ -271,7 +274,7 @@ class BleProvisioner @Inject constructor(
             it.copy(
                 connectedVest = vest,
                 connectionState = BleConnectionState.CONNECTING,
-                statusMessage = "Connecting to ${vest.name} over Bluetooth Low Energy..."
+                statusMessage = "Connecting to ${vest.name}..."
             )
         }
 
@@ -304,11 +307,19 @@ class BleProvisioner @Inject constructor(
 
     @SuppressLint("MissingPermission")
     fun disconnect() {
-        try {
-            activeGatt?.disconnect()
-            activeGatt?.close()
-        } catch (_: Exception) {}
+        val gatt = activeGatt
         activeGatt = null
+        if (gatt != null) {
+            try {
+                gatt.disconnect()
+            } catch (_: Exception) {}
+            scope.launch {
+                delay(300)
+                try {
+                    gatt.close()
+                } catch (_: Exception) {}
+            }
+        }
         _state.update {
             it.copy(
                 connectedVest = null,
@@ -379,13 +390,20 @@ class BleProvisioner @Inject constructor(
                 _state.update {
                     it.copy(
                         connectionState = BleConnectionState.CONNECTED,
-                        statusMessage = "BLE Connected! Discovering services..."
+                        statusMessage = "Connected to vest! Discovering services..."
                     )
                 }
                 gatt?.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                try {
+                    gatt?.close()
+                } catch (_: Exception) {}
+                if (activeGatt == gatt) {
+                    activeGatt = null
+                }
                 _state.update {
                     it.copy(
+                        connectedVest = null,
                         connectionState = BleConnectionState.DISCONNECTED,
                         statusMessage = "Vest disconnected."
                     )

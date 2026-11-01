@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 //  BeVest — Complete Smart Wearable IoT Vest Firmware
 //  Combines Full Sensor Telemetry + In-App BLE Wi-Fi Provisioning
 //
@@ -239,7 +239,8 @@ class ServerCallbacks: public BLEServerCallbacks {
     bleDeviceConnected = false;
     Serial.println("[BLE] Mobile App disconnected.");
     if (inProvisioningMode && pServer) {
-      pServer->getAdvertising()->start();
+      delay(100);
+      BLEDevice::startAdvertising();
       Serial.println("[BLE] Re-advertising for BeVest App connection...");
     }
   }

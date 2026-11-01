@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -193,7 +194,7 @@ class PairVestViewModel @Inject constructor(
         if (cleanBleMac.isNotBlank() && cleanQrMac.isNotBlank() && !Validators.isMatchingEsp32Mac(cleanBleMac, cleanQrMac)) {
             _state.update {
                 it.copy(
-                    error = "Hardware Mismatch! Scanned QR MAC ($qrMac) does not match the connected BLE vest ($cleanBleMac). Please scan the QR code physically affixed to the connected vest."
+                    error = "Hardware Mismatch! Scanned QR MAC ($qrMac) does not match the connected vest ($cleanBleMac). Please scan the QR code physically affixed to the connected vest."
                 )
             }
             return
@@ -341,21 +342,52 @@ class PairVestViewModel @Inject constructor(
         }
     }
 
-    fun back() {
+    fun disconnectAndRescan() {
+        bleProvisioner.disconnect()
         _state.update {
-            when (it.step) {
-                PairStep.BLE_CONNECTED -> it.copy(step = PairStep.LOOK_FOR_BLE, connectedBle = null)
-                PairStep.SCAN_QR -> it.copy(step = PairStep.BLE_CONNECTED)
-                PairStep.PROVISION_WIFI -> it.copy(step = PairStep.SCAN_QR)
-                PairStep.SELECT_WORKER -> it.copy(step = PairStep.PROVISION_WIFI)
-                PairStep.CONNECTION_TEST -> it.copy(step = PairStep.SELECT_WORKER, selectedWorkerId = null)
-                else -> it
+            it.copy(
+                step = PairStep.LOOK_FOR_BLE,
+                connectedBle = null,
+                identifiedVestId = null,
+                scannedSerial = null,
+                scannedMac = null,
+                error = null
+            )
+        }
+        viewModelScope.launch {
+            delay(400)
+            startBleScan()
+        }
+    }
+
+    fun disconnectIfNotFinished() {
+        if (_state.value.step != PairStep.DONE) {
+            bleProvisioner.disconnect()
+            bleProvisioner.stopScan()
+        }
+    }
+
+    fun back() {
+        when (_state.value.step) {
+            PairStep.BLE_CONNECTED, PairStep.SCAN_QR -> {
+                disconnectAndRescan()
             }
+            PairStep.PROVISION_WIFI -> {
+                _state.update { it.copy(step = PairStep.SCAN_QR) }
+            }
+            PairStep.SELECT_WORKER -> {
+                _state.update { it.copy(step = PairStep.PROVISION_WIFI) }
+            }
+            PairStep.CONNECTION_TEST -> {
+                _state.update { it.copy(step = PairStep.SELECT_WORKER, selectedWorkerId = null) }
+            }
+            else -> {}
         }
     }
 
     override fun onCleared() {
         super.onCleared()
+        bleProvisioner.disconnect()
         bleProvisioner.stopScan()
     }
 }
