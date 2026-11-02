@@ -31,45 +31,6 @@ This section provides the complete technical walkthrough of the BeVest Smart Ves
 
 ---
 
-### Architecture & Lifecycle Overview
-
-```mermaid
-flowchart TD
-    subgraph Phase1["Phase 1: Hardware MAC Identification"]
-        ESP32["ESP32 Microcontroller"] -->|Flash getMac.ino| Serial["Serial Monitor (115200 baud)"]
-        Serial -->|Reads Base eFuse| WifiMAC["Wi-Fi Station MAC (Base + 0)"]
-        Serial -->|Calculates +2 Offset| BleMAC["BLE Radio MAC (Base + 2)"]
-    end
-
-    subgraph Phase2["Phase 2: Developer Registration & QR Generation"]
-        Dev["Developer / Manufacturer"] -->|Input MAC, Vest ID, Serial| DevPortal["Web Admin Developer Portal<br/>(DeveloperDashboard.jsx)"]
-        DevPortal -->|Creates Document| FirestoreVests[("Firestore: /vests/{vestId}<br/>status: 'AVAILABLE'<br/>verified: true")]
-        DevPortal -->|Generates Scannable QR| QRSticker["Physical QR Code Sticker<br/>(JSON with Vest ID, MAC, Serial)"]
-        QRSticker -->|Affixed to Physical Vest| PhysicalVest["Assembled Smart Vest"]
-    end
-
-    subgraph Phase3["Phase 3: SSO Mobile Pairing & Worker Assignment"]
-        SSO["Site Safety Officer (SSO)"] -->|Open BeVest Android App| MobileApp["SSO Vest Pairing Flow<br/>(PairVestViewModel.kt)"]
-        
-        MobileApp -->|1. BLE Scan| Scan["Scan for 'BeVest-XXXXXX'<br/>Service UUID: 4fafc201-..."]
-        PhysicalVest -->|Advertises BLE| Scan
-        Scan -->|2. Connect| BleConnect["GATT Connection Established<br/>Blue LED Solid"]
-
-        BleConnect -->|3. Scan Physical QR| CameraScan["CameraX QR Scanner"]
-        CameraScan -->|Read QR Sticker| Validate["Two-Factor Verification:<br/>1. Hardware Check: QR MAC == BLE MAC (±2)<br/>2. Cloud Check: Vest in Firestore & verified"]
-        
-        Validate -->|4. Claim Vest| FirestoreClaim[("Firestore Update:<br/>inCompanyDirectory: true<br/>addedBySsoUid, siteId")]
-        
-        FirestoreClaim -->|5. Optional Wi-Fi| ProvisionWifi["BLE Provisioning:<br/>Send SSID + Password<br/>ESP32 saves to NVS"]
-        
-        ProvisionWifi -->|6. Worker Select| SelectWorker["Choose Unassigned Worker<br/>from Company Directory"]
-        
-        SelectWorker -->|7. Live Test & Activate| ActiveVest[("Firestore Transaction:<br/>vest.status = 'ACTIVE'<br/>vest.assignedWorkerId = workerId<br/>worker.assignedVestId = vestId")]
-    end
-```
-
----
-
 ### Phase 1: Obtaining the ESP32 Hardware MAC Address
 
 Every ESP32 chip contains a factory-programmed base MAC address stored in its eFuse controller. The hardware allocates sequential MAC addresses from this base:
