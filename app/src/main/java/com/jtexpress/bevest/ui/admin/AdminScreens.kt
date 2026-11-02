@@ -16,13 +16,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,6 +44,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.model.User
+import com.jtexpress.bevest.domain.model.UserRole
 import com.jtexpress.bevest.navigation.Routes
 import com.jtexpress.bevest.ui.common.BevestCard
 import com.jtexpress.bevest.ui.common.BevestScaffold
@@ -49,6 +56,8 @@ import com.jtexpress.bevest.ui.common.DetailSkeleton
 import com.jtexpress.bevest.ui.common.EmptyState
 import com.jtexpress.bevest.ui.common.ErrorNote
 import com.jtexpress.bevest.ui.common.ErrorState
+import com.jtexpress.bevest.ui.common.FilterOption
+import com.jtexpress.bevest.ui.common.FilterRow
 import com.jtexpress.bevest.ui.common.FormField
 import com.jtexpress.bevest.ui.common.FormSection
 import com.jtexpress.bevest.ui.common.InsightCard
@@ -56,6 +65,7 @@ import com.jtexpress.bevest.ui.common.ListSkeleton
 import com.jtexpress.bevest.ui.common.PrimaryButton
 import com.jtexpress.bevest.ui.common.ProfileAction
 import com.jtexpress.bevest.ui.common.ReflectiveBand
+import com.jtexpress.bevest.ui.common.SearchBar
 import com.jtexpress.bevest.ui.common.SecondaryButton
 import com.jtexpress.bevest.ui.common.SectionHeader
 import com.jtexpress.bevest.ui.common.StatTile
@@ -63,6 +73,7 @@ import com.jtexpress.bevest.ui.common.StatusBadge
 import com.jtexpress.bevest.ui.common.StatusBar
 import com.jtexpress.bevest.ui.common.StatusSlice
 import com.jtexpress.bevest.ui.common.SuccessNote
+import com.jtexpress.bevest.ui.common.label
 import com.jtexpress.bevest.ui.contractor.PersonRow
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.BevestShapes
@@ -92,8 +103,8 @@ fun AdminDashboardScreen(
     val palette = LocalStatusPalette.current
 
     BevestScaffold(
-        title = "Administration",
-        subtitle = "System overview",
+        title = "System Dashboard",
+        subtitle = "Real-time oversight across all sites",
         actions = { ProfileAction(user, onClick = { navigate(Routes.PROFILE) }) },
     ) { padding ->
         if (state.loading) {
@@ -175,18 +186,6 @@ fun AdminDashboardScreen(
                         ),
                     )
                 }
-
-                SectionHeader("Manage")
-                PrimaryButton(
-                    text = "Contractors",
-                    onClick = { navigate(Routes.ADMIN_CONTRACTORS) },
-                    icon = BevestIcons.Contractors,
-                )
-                SecondaryButton(
-                    text = "System & devices",
-                    onClick = { navigate(Routes.ADMIN_SYSTEM) },
-                    icon = BevestIcons.System,
-                )
 
                 SectionHeader(
                     title = "Recent activity",
@@ -294,24 +293,29 @@ private fun ActivityRow(
     }
 }
 
-// ------------------------------------------------------------ contractors
+// ------------------------------------------------------------------ users
 
+/**
+ * User Management — the same list the web admin shows: every account, searchable by name
+ * or email, filterable by role and sortable by name.
+ */
 @Composable
-fun AdminContractorsScreen(
+fun AdminUsersScreen(
     onAdd: () -> Unit,
     onOpen: (String) -> Unit,
-    viewModel: AdminContractorsViewModel = hiltViewModel(),
+    viewModel: AdminUsersViewModel = hiltViewModel(),
 ) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val palette = LocalStatusPalette.current
 
     BevestScaffold(
-        title = "Contractors",
+        title = "User Management",
+        subtitle = "${state.activeCount} active users",
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = onAdd,
                 icon = { Icon(BevestIcons.Add, contentDescription = null) },
-                text = { Text("Add contractor") },
+                text = { Text("Register user") },
             )
         },
     ) { padding ->
@@ -320,39 +324,77 @@ fun AdminContractorsScreen(
 
             state.error != null -> ErrorState(state.error, modifier = Modifier.padding(padding))
 
-            state.contractors.isEmpty() -> EmptyState(
-                title = "No contractors yet",
-                message = "Add a contractor so they can register sites, officers and workers.",
-                icon = BevestIcons.Contractors,
-                actionLabel = "Add contractor",
-                onAction = onAdd,
-                modifier = Modifier.padding(padding),
-            )
-
-            else -> LazyColumn(
-                Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(
-                    start = Spacing.gutter,
-                    end = Spacing.gutter,
-                    top = Spacing.md,
-                    bottom = 96.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(Spacing.md),
-            ) {
-                items(state.contractors, key = { it.uid }) { c ->
-                    PersonRow(
-                        name = c.fullName.ifBlank { c.email },
-                        email = c.email,
-                        supporting = c.phone.ifBlank { "No phone on file" },
-                        active = c.active,
-                        trailing = {
-                            StatusBadge(
-                                text = if (c.active) "Active" else "Disabled",
-                                color = if (c.active) palette.normal else palette.offline,
-                            )
-                        },
-                        onClick = { onOpen(c.uid) },
+            else -> Column(Modifier.fillMaxSize().padding(padding)) {
+                SearchBar(
+                    query = state.query,
+                    onQueryChange = viewModel::setQuery,
+                    placeholder = "Search users by name or email",
+                    modifier = Modifier.padding(horizontal = Spacing.gutter, vertical = Spacing.sm),
+                )
+                FilterRow(
+                    options = listOf(
+                        FilterOption(ALL_ROLES, "All roles", state.all.size),
+                        FilterOption(UserRole.SSO.name, "SSO", state.count(UserRole.SSO)),
+                        FilterOption(UserRole.CONTRACTOR.name, "Contractor", state.count(UserRole.CONTRACTOR)),
+                        FilterOption(UserRole.ADMIN.name, "Admin", state.count(UserRole.ADMIN)),
+                    ),
+                    selectedKey = state.roleFilter,
+                    onSelect = viewModel::setRoleFilter,
+                )
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.gutter),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${state.visible.size} users",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
                     )
+                    TextButton(onClick = viewModel::toggleSort) {
+                        Text(if (state.sortAscending) "Name ↑" else "Name ↓")
+                    }
+                }
+
+                if (state.visible.isEmpty()) {
+                    EmptyState(
+                        title = if (state.all.isEmpty()) "No users yet" else "No matching users",
+                        message = if (state.all.isEmpty()) {
+                            "Register a user so they can sign in."
+                        } else {
+                            "Try a different name, email or role."
+                        },
+                        icon = BevestIcons.NoResults,
+                    )
+                } else {
+                    LazyColumn(
+                        Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = Spacing.gutter,
+                            end = Spacing.gutter,
+                            top = Spacing.sm,
+                            bottom = 96.dp,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.md),
+                    ) {
+                        items(state.visible, key = { it.uid }) { u ->
+                            PersonRow(
+                                name = u.fullName.ifBlank { u.email },
+                                email = u.email,
+                                supporting = u.role.label(),
+                                active = u.active,
+                                trailing = {
+                                    StatusBadge(
+                                        text = if (u.active) "Active" else "Disabled",
+                                        color = if (u.active) palette.normal else palette.offline,
+                                    )
+                                },
+                                onClick = { onOpen(u.uid) },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -360,17 +402,17 @@ fun AdminContractorsScreen(
 }
 
 @Composable
-fun AddContractorScreen(
+fun AddUserScreen(
     actorId: String,
     onDone: () -> Unit,
-    viewModel: AddContractorViewModel = hiltViewModel(),
+    viewModel: AddUserViewModel = hiltViewModel(),
 ) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
     LaunchedEffect(state.created) { if (state.created) onDone() }
 
     BevestScaffold(
-        title = "Add contractor",
-        subtitle = "New account",
+        title = "Register new user",
+        subtitle = "User Management",
         onBack = onDone,
     ) { padding ->
         Column(
@@ -381,7 +423,7 @@ fun AddContractorScreen(
                 .padding(horizontal = Spacing.gutter, vertical = Spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Spacing.xl),
         ) {
-            FormSection(title = "Name") {
+            FormSection(title = "Personal data") {
                 FormField(
                     state.firstName,
                     { viewModel.update("firstName", it) },
@@ -396,19 +438,13 @@ fun AddContractorScreen(
                     error = state.errors["lastName"],
                     required = true,
                 )
-            }
-
-            FormSection(title = "Organisation") {
                 FormField(
-                    state.company,
-                    { viewModel.update("company", it) },
-                    "Company / project",
-                    error = state.errors["company"],
-                    required = true,
+                    state.phone,
+                    { viewModel.update("phone", it) },
+                    "Phone",
+                    error = state.errors["phone"],
+                    keyboardType = KeyboardType.Phone,
                 )
-            }
-
-            FormSection(title = "Contact") {
                 FormField(
                     state.email,
                     { viewModel.update("email", it) },
@@ -418,33 +454,48 @@ fun AddContractorScreen(
                     keyboardType = KeyboardType.Email,
                     required = true,
                 )
-                FormField(
-                    state.phone,
-                    { viewModel.update("phone", it) },
-                    "Phone",
-                    error = state.errors["phone"],
-                    keyboardType = KeyboardType.Phone,
-                )
             }
 
             FormSection(title = "Access") {
+                PickerField(
+                    label = "Assign role",
+                    selected = state.role.label(),
+                    options = listOf(UserRole.SSO, UserRole.CONTRACTOR, UserRole.ADMIN)
+                        .map { it.label() to { viewModel.setRole(it) } },
+                )
+                if (state.role == UserRole.SSO) {
+                    PickerField(
+                        label = "Contractor",
+                        selected = state.contractors.firstOrNull { it.uid == state.contractorId }
+                            ?.let { it.fullName.ifBlank { it.email } }
+                            ?: "Choose a contractor",
+                        options = state.contractors.map { c ->
+                            c.fullName.ifBlank { c.email } to { viewModel.setContractor(c.uid) }
+                        },
+                        error = state.errors["contractorId"],
+                    )
+                }
                 FormField(
                     state.tempPassword,
                     { viewModel.update("tempPassword", it) },
-                    "Temporary password",
+                    "Password",
                     error = state.errors["tempPassword"],
                     helper = "They change this from their profile after signing in",
-                    isPassword = true,
                     required = true,
                     imeAction = ImeAction.Done,
                     onImeAction = { viewModel.submit(actorId) },
+                )
+                SecondaryButton(
+                    text = "Generate password",
+                    onClick = viewModel::generatePassword,
+                    icon = BevestIcons.Refresh,
                 )
             }
 
             state.formError?.let { ErrorNote(it) }
 
             PrimaryButton(
-                text = "Create contractor",
+                text = "Create user",
                 onClick = { viewModel.submit(actorId) },
                 loading = state.submitting,
                 loadingText = "Creating…",
@@ -454,30 +505,66 @@ fun AddContractorScreen(
     }
 }
 
+/** A read-only dropdown field; each option is a label and what picking it does. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AdminContractorDetailScreen(
-    contractorId: String,
+private fun PickerField(
+    label: String,
+    selected: String,
+    options: List<Pair<String, () -> Unit>>,
+    error: String? = null,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = selected,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            isError = error != null,
+            supportingText = error?.let { { Text(it) } },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            shape = BevestShapes.control,
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { (text, onPick) ->
+                DropdownMenuItem(
+                    text = { Text(text) },
+                    onClick = { onPick(); expanded = false },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminUserDetailScreen(
     actorId: String,
     onBack: () -> Unit,
-    viewModel: AdminContractorDetailViewModel = hiltViewModel(),
+    viewModel: AdminUserDetailViewModel = hiltViewModel(),
 ) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val palette = LocalStatusPalette.current
     var confirm by remember { mutableStateOf(false) }
 
-    BevestScaffold(title = "Contractor", onBack = onBack) { padding ->
+    BevestScaffold(title = "User", onBack = onBack) { padding ->
         when {
             state.loading -> DetailSkeleton(Modifier.padding(padding))
 
             state.error != null -> ErrorState(state.error, modifier = Modifier.padding(padding))
 
-            state.contractor == null -> ErrorState(
-                "That contractor no longer exists.",
+            state.user == null -> ErrorState(
+                "That user no longer exists.",
                 modifier = Modifier.padding(padding),
             )
 
             else -> {
-                val c = state.contractor
+                val u = state.user
+                val isSelf = u.uid == actorId
                 Column(
                     Modifier
                         .fillMaxSize()
@@ -487,45 +574,53 @@ fun AdminContractorDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(Spacing.lg),
                 ) {
                     PersonRow(
-                        name = c.fullName.ifBlank { c.email },
-                        email = c.email,
-                        supporting = c.phone.ifBlank { "No phone on file" },
-                        active = c.active,
+                        name = u.fullName.ifBlank { u.email },
+                        email = u.email,
+                        supporting = u.phone.ifBlank { "No phone on file" },
+                        active = u.active,
                         trailing = {
                             StatusBadge(
-                                text = if (c.active) "Active" else "Disabled",
-                                color = if (c.active) palette.normal else palette.offline,
+                                text = if (u.active) "Active" else "Disabled",
+                                color = if (u.active) palette.normal else palette.offline,
                             )
                         },
                     )
 
                     SectionHeader("Access")
                     DetailRow(
+                        label = "Role",
+                        value = u.role.label(),
+                        icon = BevestIcons.WorkerId,
+                    )
+                    DetailRow(
                         label = "Account status",
-                        value = if (c.active) {
-                            "Active — they and their officers can sign in."
+                        value = if (u.active) {
+                            "Active — they can sign in."
                         } else {
-                            "Disabled — they and their officers cannot sign in."
+                            "Disabled — they cannot sign in."
                         },
-                        icon = if (c.active) {
+                        icon = if (u.active) {
                             BevestIcons.forStatus(SafetyStatus.NORMAL)
                         } else {
                             BevestIcons.Error
                         },
-                        valueColor = if (c.active) null else palette.offline,
+                        valueColor = if (u.active) null else palette.offline,
                     )
 
-                    if (c.active) {
-                        DangerButton(
-                            text = "Disable contractor",
-                            onClick = { confirm = true },
-                        )
-                    } else {
-                        PrimaryButton(
-                            text = "Re-enable contractor",
-                            onClick = { viewModel.setActive(true, actorId) },
-                            icon = BevestIcons.forStatus(SafetyStatus.NORMAL),
-                        )
+                    // An admin disabling their own account would lock themselves out.
+                    if (!isSelf) {
+                        if (u.active) {
+                            DangerButton(
+                                text = "Disable user",
+                                onClick = { confirm = true },
+                            )
+                        } else {
+                            PrimaryButton(
+                                text = "Re-enable user",
+                                onClick = { viewModel.setActive(true, actorId) },
+                                icon = BevestIcons.forStatus(SafetyStatus.NORMAL),
+                            )
+                        }
                     }
 
                     state.message?.let { SuccessNote(it) }
@@ -537,8 +632,8 @@ fun AdminContractorDetailScreen(
 
     if (confirm) {
         ConfirmationDialog(
-            title = "Disable this contractor?",
-            message = "They and their officers lose access on next app open. Records are kept.",
+            title = "Disable this user?",
+            message = "They lose access on next app open. Records are kept.",
             confirmLabel = "Disable",
             onConfirm = { confirm = false; viewModel.setActive(false, actorId) },
             onDismiss = { confirm = false },
@@ -558,7 +653,10 @@ fun AdminSystemScreen(
     val palette = LocalStatusPalette.current
     var confirmMaintenance by remember { mutableStateOf(false) }
 
-    BevestScaffold(title = "System & devices", subtitle = "Fleet") { padding ->
+    BevestScaffold(
+        title = "System Management",
+        subtitle = "System configuration and devices",
+    ) { padding ->
         if (state.loading) {
             DetailSkeleton(Modifier.padding(padding))
         } else {

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jtexpress.bevest.domain.model.Alert
 import com.jtexpress.bevest.domain.model.AlertSeverity
+import com.jtexpress.bevest.domain.model.AlertStatus
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.repository.AlertRepository
 import com.jtexpress.bevest.domain.repository.MonitoringRepository
@@ -30,12 +31,35 @@ data class SsoDashboardState(
     val activeAlerts: List<Alert> = emptyList(),
 ) {
     val emergencies get() = workers.filter { it.status == SafetyStatus.EMERGENCY }
-    val dangerCount get() = workers.count { it.status == SafetyStatus.DANGER }
+    // An emergency is danger that went unanswered — it must not drop out of the count.
+    val dangerCount get() = workers.count {
+        it.status == SafetyStatus.DANGER || it.status == SafetyStatus.EMERGENCY
+    }
     val warningCount get() = workers.count { it.status == SafetyStatus.WARNING }
     val offlineCount get() = workers.count { it.status == SafetyStatus.OFFLINE }
     val onSiteCount get() = workers.count { it.status != SafetyStatus.OFFLINE }
+    /**
+     * The alert behind a worker's danger — the one an officer needs to open to respond.
+     * Unanswered first, then the most severe, then the newest.
+     */
+    fun dangerAlertFor(workerId: String): Alert? = activeAlerts
+        .filter { it.workerId == workerId && it.severity != AlertSeverity.WARNING }
+        .sortedWith(
+            compareBy<Alert>({ it.status != AlertStatus.ACTIVE }, { -it.severity.ordinal }, { -it.createdAt }),
+        )
+        .firstOrNull()
+
+    /** The emergency worth a banner: an open EMERGENCY alert whose worker is in trouble. */
     val topEmergencyAlert: Alert?
-        get() = activeAlerts.firstOrNull { it.severity == AlertSeverity.EMERGENCY }
+        get() {
+            val inTrouble = workers
+                .filter { it.status == SafetyStatus.EMERGENCY || it.status == SafetyStatus.DANGER }
+                .map { it.worker.workerId }
+                .toSet()
+            return activeAlerts.firstOrNull {
+                it.severity == AlertSeverity.EMERGENCY && it.workerId in inTrouble
+            }
+        }
 
     /**
      * The worst state anyone on site is in. Drives the dashboard's headline and the
@@ -114,19 +138,20 @@ class SsoDashboardViewModel @Inject constructor(
                         ) { readings, thresholds, alertsOutcome ->
                             val engine = SafetyStatusEngine(thresholds)
                             val now = System.currentTimeMillis()
+                            val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
                             val live = workers.map { w ->
                                 val r = readings[w.workerId]
                                 WorkerLive(
                                     worker = w,
                                     reading = r,
-                                    status = engine.evaluate(r, now),
+                                    status = engine.evaluate(r, alerts, w.workerId, now),
                                     stale = engine.isStale(r, now),
                                 )
                             }.sortedByDescending { it.status.ordinal }
                             SsoDashboardState(
                                 loading = false,
                                 workers = live,
-                                activeAlerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty(),
+                                activeAlerts = alerts,
                             )
                         }
                     }

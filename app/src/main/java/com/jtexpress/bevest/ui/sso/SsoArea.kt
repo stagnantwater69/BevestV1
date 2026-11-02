@@ -1,7 +1,9 @@
 package com.jtexpress.bevest.ui.sso
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.jtexpress.bevest.domain.model.User
@@ -22,6 +24,14 @@ fun SsoArea(
 ) {
     val siteId = user.siteId
     val navController = rememberNavController()
+
+    // Fall detection + escalation runs on the phone while the SSO is signed in (the
+    // project's free Firebase plan can't run the cloud functions that would do it).
+    val safetyWatcher: SafetyWatcherHost = hiltViewModel()
+    DisposableEffect(siteId) {
+        safetyWatcher.start(siteId)
+        onDispose { safetyWatcher.stop() }
+    }
 
     LaunchedEffect(deepLinks) {
         deepLinks?.collect { link ->

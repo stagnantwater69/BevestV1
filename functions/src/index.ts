@@ -8,10 +8,14 @@
  *   liveReadings/{workerId}  --onWrite-->  evaluateReading
  *     - writes worker.currentStatus
  *     - opens/updates a "condition window" doc when status leaves NORMAL
+ *     - a fall opens a FALL_DETECTED alert and pushes to the site's SSOs at once
  *   every 1 min  --schedule-->  escalate
  *     - WARNING longer than warningDuration        -> DANGER (+ buzzer flag)
  *     - DANGER longer than responseTimeout w/o ack -> EMERGENCY -> incident + FCM
- *   incidents/{id}  --onCreate-->  notifyIncident  (high-priority FCM to on-duty SSOs)
+ *   incidents/{id}  --onCreate-->  notifyIncident  (siren push to on-duty SSOs,
+ *                                                   normal push to the contractor)
+ *
+ * The siren is for Site Safety Officers only; contractors and admins never get it.
  */
 
 import { initializeApp } from "firebase-admin/app";
@@ -57,6 +61,123 @@ async function workerContext(workerId: string) {
   };
 }
 
+async function workerName(workerId: string): Promise<string> {
+  const data = (await db.doc(`workers/${workerId}`).get()).data() ?? {};
+  const name = `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim();
+  return name || `Worker ${workerId}`;
+}
+
+const TYPE_LABELS: Record<string, string> = {
+  FALL_DETECTED: "Fall detected",
+  NO_SAFETY_RESPONSE: "No safety response",
+  EMERGENCY_REQUEST: "Emergency requested",
+};
+
+function typeLabel(type: string): string {
+  return TYPE_LABELS[type] ?? type;
+}
+
+function isFall(reading: Reading): boolean {
+  return Boolean(reading.fallDetected) || reading.motionState === "FALL_DETECTED";
+}
+
+/**
+ * High-priority, data-only push. Data-only so the app's messaging service always builds
+ * the notification itself — with the siren, repeating vibration and full-screen alert
+ * when `alarm` is set — even while the app is closed. A `notification` block would
+ * let Android draw a plain notification instead and skip all of that.
+ */
+async function send(
+  tokens: string[],
+  title: string,
+  body: string,
+  data: Record<string, string>,
+  alarm: boolean
+): Promise<void> {
+  if (tokens.length === 0) return;
+  await getMessaging().sendEachForMulticast({
+    tokens,
+    android: { priority: "high" },
+    data: { ...data, title, body, alarm: String(alarm) },
+  });
+}
+
+/** Siren push to every active SSO on a site — the people who can reach the worker. */
+async function pushToSite(
+  siteId: string,
+  title: string,
+  body: string,
+  data: Record<string, string>
+): Promise<void> {
+  const officers = await db
+    .collection("users")
+    .where("role", "==", "SSO")
+    .where("siteId", "==", siteId)
+    .where("active", "==", true)
+    .get();
+
+  const tokens: string[] = [];
+  for (const o of officers.docs) {
+    const t = o.data().fcmTokens as string[] | undefined;
+    if (t) tokens.push(...t);
+  }
+  if (tokens.length === 0) {
+    logger.warn(`No FCM tokens for site ${siteId}`);
+    return;
+  }
+  await send(tokens, title, body, data, true);
+}
+
+/** Normal (never siren) push to the contractor who owns the site. */
+async function pushToContractor(
+  contractorId: string,
+  title: string,
+  body: string,
+  data: Record<string, string>
+): Promise<void> {
+  if (!contractorId) return;
+  const snap = await db.doc(`users/${contractorId}`).get();
+  const user = snap.data();
+  if (!user || user.active === false) return;
+  await send((user.fcmTokens as string[] | undefined) ?? [], title, body, data, false);
+}
+
+/**
+ * Open the FALL_DETECTED alert for a condition window, once. The window's
+ * `fallAlertId` is claimed in a transaction so back-to-back readings can't open two.
+ */
+async function openFallAlert(
+  windowRef: FirebaseFirestore.DocumentReference,
+  workerId: string,
+  ctx: { vestId: string; siteId: string; contractorId: string },
+  now: number
+): Promise<void> {
+  const alertRef = db.collection("alerts").doc();
+  const created = await db.runTransaction(async (tx) => {
+    const w = await tx.get(windowRef);
+    if (!w.exists || w.data()?.fallAlertId) return false;
+    tx.set(alertRef, {
+      workerId,
+      vestId: ctx.vestId,
+      siteId: ctx.siteId,
+      contractorId: ctx.contractorId,
+      type: "FALL_DETECTED",
+      severity: "DANGER",
+      status: "ACTIVE",
+      message: "Fall detected",
+      createdAt: now,
+    });
+    tx.update(windowRef, { fallAlertId: alertRef.id });
+    return true;
+  });
+  if (!created) return;
+
+  const name = await workerName(workerId);
+  const data = { type: "ALERT", alertId: alertRef.id, workerId };
+  await pushToSite(ctx.siteId, "⚠ Fall detected", `${name} may have fallen. Check on them now.`, data);
+  await pushToContractor(ctx.contractorId, "Fall detected on your site", `${name} may have fallen.`, data);
+}
+
 /**
  * Create exactly one incident + one ACTIVE alert for an emergency. Idempotent on
  * `incidentId`. `notifyIncident` picks up the new incident doc and sends the FCM.
@@ -67,7 +188,9 @@ async function openIncident(p: {
   vestId?: string;
   siteId?: string;
   contractorId?: string;
-  type: "NO_SAFETY_RESPONSE" | "EMERGENCY_REQUEST";
+  type: "NO_SAFETY_RESPONSE" | "EMERGENCY_REQUEST" | "FALL_DETECTED";
+  /** An alert already open for this condition (a fall); upgraded instead of duplicated. */
+  alertId?: string;
   heartRate?: number | null;
   temperature?: number | null;
   latitude?: number | null;
@@ -97,14 +220,21 @@ async function openIncident(p: {
     outcome: null,
     resolutionNotes: null,
   });
-  const alertRef = await db.collection("alerts").add({
+  const alertBody = {
     ...common,
     status: "ACTIVE",
     message: p.message,
-    createdAt: p.now,
     incidentId: p.incidentId,
-  });
-  await incidentRef.update({ alertId: alertRef.id });
+  };
+  const existing = p.alertId ? db.doc(`alerts/${p.alertId}`) : null;
+  let alertId: string;
+  if (existing && (await existing.get()).exists) {
+    await existing.update(alertBody);
+    alertId = existing.id;
+  } else {
+    alertId = (await db.collection("alerts").add({ ...alertBody, createdAt: p.now })).id;
+  }
+  await incidentRef.update({ alertId });
 }
 
 /** Step 1: react to every new reading. */
@@ -117,12 +247,24 @@ export const evaluateReading = onValueWritten(
 
     const t = await thresholds();
     const now = Date.now();
-    const status = instantaneousStatus(reading, t, now);
     const ctx = await workerContext(workerId);
     if (!ctx.exists) return;
 
-    // Reflect the instantaneous status on the worker record (never downgrade an
-    // open EMERGENCY here — only escalate/resolve does that).
+    const windowRef = db.doc(`conditionWindows/${workerId}`);
+    let status = instantaneousStatus(reading, t, now);
+    // The vest reports a fall in one reading and clears it on the next. Hold DANGER
+    // while the window's fall alert is unresolved, so the next normal reading doesn't
+    // close the window (and with it the escalation) before anyone has responded.
+    if (status === "NORMAL" || status === "WARNING" || status === "OFFLINE") {
+      const fallAlertId = (await windowRef.get()).data()?.fallAlertId as string | undefined;
+      if (fallAlertId) {
+        const fallAlert = await db.doc(`alerts/${fallAlertId}`).get();
+        if (fallAlert.exists && fallAlert.data()?.status !== "RESOLVED") status = "DANGER";
+      }
+    }
+
+    // Reflect the status on the worker record (never downgrade an open EMERGENCY
+    // here — only escalate/resolve does that).
     if (ctx.currentStatus !== "EMERGENCY") {
       await db.doc(`workers/${workerId}`).update({
         currentStatus: status,
@@ -130,7 +272,6 @@ export const evaluateReading = onValueWritten(
       });
     }
 
-    const windowRef = db.doc(`conditionWindows/${workerId}`);
     if (status === "WARNING" || status === "DANGER") {
       const existing = await windowRef.get();
       if (!existing.exists) {
@@ -165,6 +306,10 @@ export const evaluateReading = onValueWritten(
       }
       if (reading.safetyResponse === "ACKNOWLEDGED") {
         await windowRef.update({ acknowledgedAt: now });
+      }
+      // Don't wait for the response timeout to tell anyone about a fall.
+      if (status === "DANGER" && isFall(reading)) {
+        await openFallAlert(windowRef, workerId, ctx, now);
       }
     } else if (status === "EMERGENCY" && reading.safetyResponse === "EMERGENCY_REQUESTED") {
       // Manual SOS — the worker held the button. (NO_RESPONSE / ESCALATED already
@@ -247,18 +392,20 @@ export const escalate = onSchedule("every 1 minutes", async () => {
       await db.doc(`workers/${workerId}`).update({ currentStatus: "EMERGENCY" });
       await rtdb.ref(`liveReadings/${workerId}/safetyResponse`).set("NO_RESPONSE");
 
+      const fell = Boolean(w.fallAlertId) || w.reason === "Fall detected";
       await openIncident({
         incidentId: `${workerId}_${w.startedAt}`,
         workerId,
         vestId: w.vestId,
         siteId: w.siteId,
         contractorId: w.contractorId,
-        type: "NO_SAFETY_RESPONSE",
+        type: fell ? "FALL_DETECTED" : "NO_SAFETY_RESPONSE",
+        alertId: w.fallAlertId ?? undefined,
         heartRate: w.heartRate ?? null,
         temperature: w.temperature ?? null,
         latitude: w.latitude ?? null,
         longitude: w.longitude ?? null,
-        message: w.reason ?? "No safety response",
+        message: fell ? "Fall detected — no response" : (w.reason ?? "No safety response"),
         now,
       });
     }
@@ -269,36 +416,10 @@ export const escalate = onSchedule("every 1 minutes", async () => {
 export const notifyIncident = onDocumentCreated("incidents/{incidentId}", async (event) => {
   const incident = event.data?.data();
   if (!incident) return;
-  const siteId = incident.siteId as string;
+  const workerId = String(incident.workerId);
+  const body = `${await workerName(workerId)}: ${typeLabel(String(incident.type))}`;
+  const data = { type: "INCIDENT", incidentId: event.params.incidentId, workerId };
 
-  const officers = await db
-    .collection("users")
-    .where("role", "==", "SSO")
-    .where("siteId", "==", siteId)
-    .where("active", "==", true)
-    .get();
-
-  const tokens: string[] = [];
-  for (const o of officers.docs) {
-    const t = o.data().fcmTokens as string[] | undefined;
-    if (t) tokens.push(...t);
-  }
-  if (tokens.length === 0) {
-    logger.warn(`No FCM tokens for site ${siteId}`);
-    return;
-  }
-
-  await getMessaging().sendEachForMulticast({
-    tokens,
-    notification: {
-      title: "⚠ EMERGENCY",
-      body: `Worker ${incident.workerId}: ${incident.type}`,
-    },
-    android: { priority: "high", notification: { channelId: "critical" } },
-    data: {
-      type: "INCIDENT",
-      incidentId: event.params.incidentId,
-      workerId: String(incident.workerId),
-    },
-  });
+  await pushToSite(incident.siteId as string, "⚠ EMERGENCY", body, data);
+  await pushToContractor(String(incident.contractorId ?? ""), "⚠ Emergency on your site", body, data);
 });

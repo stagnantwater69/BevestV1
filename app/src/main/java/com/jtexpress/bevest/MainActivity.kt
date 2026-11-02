@@ -61,6 +61,8 @@ class MainActivity : ComponentActivity() {
         val type = intent?.getStringExtra(NotificationHelper.EXTRA_DEEPLINK_TYPE) ?: return
         val id = intent.getStringExtra(NotificationHelper.EXTRA_DEEPLINK_ID) ?: return
         val worker = intent.getStringExtra(NotificationHelper.EXTRA_DEEPLINK_WORKER)
+        // Opening the alert is responding to it: stop its alarm if one is sounding.
+        NotificationHelper.cancel(this, id)
         deepLinkBus.post(DeepLink(type, id, worker))
     }
 }

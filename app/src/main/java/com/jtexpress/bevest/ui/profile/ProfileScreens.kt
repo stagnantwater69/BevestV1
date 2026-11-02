@@ -78,6 +78,7 @@ fun ProfileScreen(
     onChangePassword: () -> Unit,
     onSignOut: () -> Unit,
     onBack: (() -> Unit)? = null,
+    onAlarmSetup: (() -> Unit)? = null,
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
     val user by viewModel.user.collectAsStateWithLifecycle()
@@ -123,6 +124,16 @@ fun ProfileScreen(
                         supporting = "Update your sign-in password",
                         onClick = onChangePassword,
                     )
+                    // Only officers get the siren, so only they need to set it up.
+                    if (onAlarmSetup != null && u.role == UserRole.SSO) {
+                        RowDivider()
+                        ActionRow(
+                            icon = BevestIcons.Alerts,
+                            label = "Emergency alarm",
+                            supporting = "Check the siren gets through on this phone",
+                            onClick = onAlarmSetup,
+                        )
+                    }
                 }
 
                 SignOutButton(

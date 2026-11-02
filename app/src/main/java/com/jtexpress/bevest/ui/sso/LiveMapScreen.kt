@@ -82,11 +82,12 @@ fun LiveMapScreen(
 
             state.located.isEmpty() -> EmptyState(
                 title = "No positions yet",
-                message = if (state.markers.isEmpty()) {
-                    "No workers are registered on this site."
-                } else {
-                    "None of the ${state.markers.size} workers on this site are reporting " +
-                        "GPS right now. Check their vests are powered on and outdoors."
+                message = when {
+                    state.markers.isEmpty() -> "No workers are registered on this site."
+                    state.online.isEmpty() -> "No workers are online right now. Check their " +
+                        "vests are powered on."
+                    else -> "None of the ${state.online.size} online workers are reporting " +
+                        "GPS right now. Check their vests are outdoors."
                 },
                 icon = BevestIcons.Location,
                 modifier = Modifier.padding(padding),
@@ -98,7 +99,7 @@ fun LiveMapScreen(
                 val cameraPositionState = rememberCameraPositionState {
                     position = CameraPosition.fromLatLngZoom(center, 15f)
                 }
-                val missing = state.markers.size - state.located.size
+                val missing = state.online.size - state.located.size
 
                 Box(Modifier.fillMaxSize().padding(padding)) {
                     GoogleMap(
@@ -173,7 +174,7 @@ private fun MapLegend(located: Int, missing: Int, modifier: Modifier = Modifier)
                 LegendKey("Normal", palette.normal)
                 LegendKey("Warning", palette.warning)
                 LegendKey("Danger", palette.danger)
-                LegendKey("Offline", palette.offline)
+                LegendKey("Emergency", palette.emergency)
             }
             // The honest footnote: this map is not everyone.
             if (missing > 0) {

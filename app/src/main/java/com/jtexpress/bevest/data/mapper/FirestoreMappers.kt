@@ -6,9 +6,12 @@ import com.jtexpress.bevest.domain.model.Alert
 import com.jtexpress.bevest.domain.model.AlertSeverity
 import com.jtexpress.bevest.domain.model.AlertStatus
 import com.jtexpress.bevest.domain.model.AlertType
+import com.jtexpress.bevest.domain.model.BillingCycle
 import com.jtexpress.bevest.domain.model.Incident
 import com.jtexpress.bevest.domain.model.ProjectSite
 import com.jtexpress.bevest.domain.model.SafetyStatus
+import com.jtexpress.bevest.domain.model.Subscription
+import com.jtexpress.bevest.domain.model.SubscriptionPlans
 import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.domain.model.UserRole
 import com.jtexpress.bevest.domain.model.Vest
@@ -38,7 +41,46 @@ fun DocumentSnapshot.toUser(): User = User(
     contractorId = strOrNull("contractorId"),
     siteId = strOrNull("siteId"),
     active = bool("active", true),
+    subscription = (get("subscription") as? Map<*, *>)?.toSubscription(millis("createdAt")),
 )
+
+private fun Any?.asMillis(): Long? = when (this) {
+    is Timestamp -> toDate().time
+    is java.util.Date -> time
+    is Long -> this
+    is Double -> toLong()
+    else -> null
+}
+
+private fun Any?.asLong(): Long? = (this as? Number)?.toLong()
+
+/**
+ * Same fallbacks as getContractorSubscription() on the web: a missing or "NONE" plan
+ * means no subscription, and any field the doc lacks comes from the plan's defaults.
+ */
+private fun Map<*, *>.toSubscription(createdAt: Long?): Subscription? {
+    val planId = this["planId"] as? String
+    if (planId.isNullOrBlank() || planId == "NONE") return null
+    val isCustom = planId == SubscriptionPlans.CUSTOM_ID
+    val plan = if (isCustom) null else SubscriptionPlans.fixedById(planId) ?: SubscriptionPlans.BUSINESS
+    val cycle = BillingCycle.fromRaw(this["billingCycle"] as? String)
+    val assigned = this["assignedAt"].asMillis() ?: createdAt
+    return Subscription(
+        planId = plan?.id ?: SubscriptionPlans.CUSTOM_ID,
+        planName = plan?.name ?: "Custom",
+        billingCycle = cycle,
+        vestLimit = this["vestLimit"].asLong()?.toInt() ?: plan?.vests ?: 0,
+        ssoLimit = this["ssoLimit"].asLong()?.toInt() ?: plan?.ssos ?: 0,
+        storageGb = this["storageGb"].asLong()?.toInt() ?: plan?.storageGb ?: SubscriptionPlans.CUSTOM_STORAGE_GB,
+        monthlyPrice = this["monthlyPrice"].asLong() ?: plan?.monthlyPrice ?: 0L,
+        annualPrice = this["annualPrice"].asLong() ?: plan?.annualPrice ?: 0L,
+        discountPercent = this["discountPercent"].asLong()?.toInt()
+            ?: plan?.discountPercent ?: SubscriptionPlans.CUSTOM_DISCOUNT_PERCENT,
+        assignedAt = assigned,
+        renewDate = this["renewDate"].asMillis() ?: assigned?.let { SubscriptionPlans.renewalDate(it, cycle) },
+        status = (this["status"] as? String)?.ifBlank { null } ?: "Active",
+    )
+}
 
 fun DocumentSnapshot.toWorker(): Worker = Worker(
     workerId = id,

@@ -8,6 +8,9 @@ import kotlinx.coroutines.flow.Flow
 interface AlertRepository {
     fun observeActiveAlerts(siteId: String?): Flow<Outcome<List<Alert>>>
 
+    /** Open (active or acknowledged) alerts across every site a contractor runs. */
+    fun observeContractorActiveAlerts(contractorId: String): Flow<Outcome<List<Alert>>>
+
     fun observeAlertHistory(siteId: String?, limit: Long = 100): Flow<Outcome<List<Alert>>>
 
     fun observeAlert(alertId: String): Flow<Outcome<Alert>>
