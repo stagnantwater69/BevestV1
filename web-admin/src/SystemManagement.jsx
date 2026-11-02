@@ -6,7 +6,7 @@ import {
   FiClock, FiTag, FiMinimize2
 } from 'react-icons/fi';
 import { 
-  collection, doc, getDocs, setDoc, deleteDoc, updateDoc, onSnapshot 
+  collection, doc, getDoc, getDocs, setDoc, deleteDoc, updateDoc, onSnapshot 
 } from 'firebase/firestore';
 import { db } from './firebase';
 import jsQR from 'jsqr';
@@ -65,14 +65,26 @@ const SystemManagement = ({ user }) => {
     fetchWorkers();
   }, []);
 
-  // 2. Subscribe to Vests in real-time
+  // 2. Subscribe to Vests in real-time (Only Company Directory claimed vests)
   useEffect(() => {
     setLoading(true);
     const q = collection(db, 'vests');
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const vestList = [];
+      const currentAdminComp = (user?.companyId || user?.profile?.company || user?.profile?.companyName || '').trim().toLowerCase();
+
       snapshot.forEach((docSnap) => {
-        vestList.push({ id: docSnap.id, ...docSnap.data() });
+        const data = docSnap.data();
+        // RULE 1: Unclaimed developer inventory must NEVER appear in System Management.
+        // Only vests that have been paired/scanned and added to the company directory are shown.
+        if (!data.inCompanyDirectory) return;
+
+        // RULE 2: If the current admin belongs to a specific company, scope to this company
+        if (currentAdminComp && data.companyId) {
+          if (data.companyId.trim().toLowerCase() !== currentAdminComp) return;
+        }
+
+        vestList.push({ id: docSnap.id, ...data });
       });
       // Sort newest first by addedAt or vestId
       vestList.sort((a, b) => {
@@ -88,7 +100,7 @@ const SystemManagement = ({ user }) => {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   // Generate QR code Data URL whenever QR Viewer Modal opens
   useEffect(() => {
@@ -130,7 +142,7 @@ const SystemManagement = ({ user }) => {
     return text.toUpperCase();
   };
 
-  // Add Vest to Database & Company Directory
+  // Add Vest to Database & Company Directory with Verification
   const registerScannedVest = async (rawId) => {
     const vestId = parseVestId(rawId);
     if (!vestId) {
@@ -142,50 +154,75 @@ const SystemManagement = ({ user }) => {
     setScanFeedback({ type: '', message: '' });
 
     try {
-      // Check if vest already exists in local state
-      const existing = vests.find(v => (v.id || v.vestId || '').toUpperCase() === vestId);
-      if (existing) {
-        const assignedWorker = existing.assignedWorkerId ? workersMap[existing.assignedWorkerId] : null;
-        const workerInfo = assignedWorker 
-          ? ` Currently assigned to ${assignedWorker.firstName} ${assignedWorker.lastName} (${assignedWorker.id}).`
-          : ' Currently available for SSO pairing.';
+      // 1. VERIFY VEST DIRECTLY IN 'vests' COLLECTION
+      let vestRecord = null;
+      try {
+        const vestSnap = await getDoc(doc(db, 'vests', vestId));
+        if (vestSnap.exists()) {
+          vestRecord = vestSnap.data();
+        }
+      } catch (err) {
+        console.warn('Vest direct check error:', err.message);
+      }
+
+      // If vest is NOT found in 'vests': Refuse registration
+      if (!vestRecord) {
         setScanFeedback({
-          type: 'warning',
-          message: `Vest "${vestId}" is already registered in the database! Status: ${existing.status || 'AVAILABLE'}.${workerInfo}`
+          type: 'error',
+          message: `❌ Vest Verification Failed: Vest "${vestId}" was NOT found in the Bevest hardware database. Only authentic Bevest smart vests can be registered.`
         });
         setIsProcessing(false);
         return false;
       }
 
-      // Add to Firestore collection 'vests'
+      // If already registered to another admin:
+      if (vestRecord.addedByAdminEmail && vestRecord.addedByAdminEmail !== currentAdminEmail) {
+        setScanFeedback({
+          type: 'warning',
+          message: `⚠️ Vest "${vestId}" is already claimed by ${vestRecord.addedByAdminName || vestRecord.addedByAdminEmail}. It cannot be registered to another organization.`
+        });
+        setIsProcessing(false);
+        return false;
+      }
+
+      // If already in this company's directory:
+      if (vestRecord.inCompanyDirectory && vestRecord.addedByAdminEmail === currentAdminEmail) {
+        setScanFeedback({
+          type: 'warning',
+          message: `Vest "${vestId}" is already registered in your company database! Status: ${vestRecord.status || 'AVAILABLE'}.`
+        });
+        setIsProcessing(false);
+        return false;
+      }
+
+      // 2. Claim / Register vest in 'vests' collection
       const now = new Date();
-      await setDoc(doc(db, 'vests', vestId), {
-        vestId: vestId,
-        status: 'AVAILABLE',
-        assignedWorkerId: null,
-        battery: 100,
-        online: false,
-        lastSeen: null,
-        openAssignmentId: null,
+      const currentCompany = user?.companyId || user?.profile?.company || user?.profile?.companyName || null;
+      await updateDoc(doc(db, 'vests', vestId), {
+        status: vestRecord.status || 'AVAILABLE',
         inCompanyDirectory: true,
+        companyId: currentCompany,
+        siteId: user?.siteId || null,
         addedByAdminId: user?.uid || 'admin',
         addedByAdminEmail: currentAdminEmail,
         addedByAdminName: currentAdminName,
+        registeredToAdmin: currentAdminEmail,
+        registeredAt: now,
         addedAt: now
       });
 
       setScanFeedback({
         type: 'success',
-        message: `✓ Success! Vest "${vestId}" has been added to the company directory by ${currentAdminName}. SSOs can now assign this vest to workers on site.`
+        message: `✓ Verified & Registered! Vest "${vestId}" (Status: ${vestRecord.status || 'AVAILABLE'}) is now verified and active in your company directory!`
       });
-      logActivity(`Registered new vest: ${vestId}`, currentAdminEmail);
+      logActivity(`Verified & registered smart vest: ${vestId}`, currentAdminEmail);
       setIsProcessing(false);
       return true;
     } catch (err) {
       console.error('Error registering vest:', err);
       setScanFeedback({
         type: 'error',
-        message: `Failed to add vest: ${err.message}`
+        message: `Failed to register vest: ${err.message}`
       });
       setIsProcessing(false);
       return false;
@@ -336,22 +373,33 @@ const SystemManagement = ({ user }) => {
     }
   };
 
-  // Delete Vest from Company Directory
+  // Remove Vest from Company Directory (safely detaches without destroying the hardware record)
   const handleDeleteVest = async (vest) => {
-    const confirm = window.confirm(`Permanently remove Vest ${vest.id} from the company directory? This action cannot be undone.`);
+    const confirm = window.confirm(`Remove Vest ${vest.id} from your company directory?\n\nThe vest will be detached from your company and returned to unassigned inventory. It can be re-paired anytime.`);
     if (!confirm) return;
 
     try {
-      await deleteDoc(doc(db, 'vests', vest.id));
+      await updateDoc(doc(db, 'vests', vest.id), {
+        inCompanyDirectory: false,
+        companyId: null,
+        siteId: null,
+        addedByAdminId: null,
+        addedByAdminEmail: null,
+        addedByAdminName: null,
+        addedBySsoUid: null,
+        status: 'AVAILABLE',
+        assignedWorkerId: null,
+        removedFromDirectoryAt: new Date()
+      });
       if (vest.assignedWorkerId) {
         await updateDoc(doc(db, 'workers', vest.assignedWorkerId), {
           assignedVestId: null
         });
       }
       logActivity(`Removed vest: ${vest.id} from directory`, currentAdminEmail);
-      alert(`Vest ${vest.id} removed from company directory.`);
+      alert(`Vest ${vest.id} has been removed from your company directory.`);
     } catch (err) {
-      console.error('Error deleting vest:', err);
+      console.error('Error removing vest:', err);
       alert('Could not remove vest: ' + err.message);
     }
   };
@@ -592,6 +640,11 @@ const SystemManagement = ({ user }) => {
                                 <FiEye style={{ fontSize: '0.9rem' }} />
                               </button>
                             </div>
+                            {(vest.serialNumber || vest.esp32Serial) && (
+                              <div style={{ fontSize: '0.75rem', color: '#ea580c', fontWeight: 700, fontFamily: 'monospace' }}>
+                                ESP32: {vest.serialNumber || vest.esp32Serial}
+                              </div>
+                            )}
                             <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
                               Battery: {vest.battery != null ? `${vest.battery}%` : '100%'}
                             </span>
@@ -840,6 +893,11 @@ const SystemManagement = ({ user }) => {
               <div style={{ marginTop: '0.75rem', fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', letterSpacing: '0.05em' }}>
                 {showQrViewerModal.id || showQrViewerModal.vestId}
               </div>
+              {(showQrViewerModal.serialNumber || showQrViewerModal.esp32Serial) && (
+                <div style={{ fontSize: '0.85rem', color: '#ea580c', fontWeight: 700, fontFamily: 'monospace', marginTop: '0.2rem' }}>
+                  ESP32 S/N: {showQrViewerModal.serialNumber || showQrViewerModal.esp32Serial}
+                </div>
+              )}
               <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.15rem' }}>
                 Scan with BeVest Mobile App to Pair
               </div>
@@ -875,6 +933,7 @@ const SystemManagement = ({ user }) => {
                             <div class="logo">BEVEST SAFETY HARDWARE</div>
                             <img src="${qrCodeDataUrl}" />
                             <div class="id">${showQrViewerModal.id}</div>
+                            ${(showQrViewerModal.serialNumber || showQrViewerModal.esp32Serial) ? `<div style="font-size:12px; font-weight:700; color:#ea580c; font-family:monospace; margin-top:2px; margin-bottom:4px;">ESP32 S/N: ${showQrViewerModal.serialNumber || showQrViewerModal.esp32Serial}</div>` : ''}
                             <div class="sub">Scan with BeVest Mobile to Pair</div>
                           </div>
                           <script>window.onload = function() { window.print(); window.close(); }</script>

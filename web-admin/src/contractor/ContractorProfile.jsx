@@ -6,6 +6,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { initialsOf } from './contractorData';
+import PhoneInput, { formatPhoneWithCountryCode } from '../PhoneInput';
 
 const ContractorProfile = ({ user, profile, onProfileChange }) => {
   const [showEdit, setShowEdit] = useState(false);
@@ -53,7 +54,7 @@ const ContractorProfile = ({ user, profile, onProfileChange }) => {
       const updated = {
         firstName: editFirstName.trim(),
         lastName: editLastName.trim(),
-        phone: editPhone.trim()
+        phone: formatPhoneWithCountryCode(editPhone)
       };
       await updateDoc(userRef, updated);
 
@@ -212,15 +213,13 @@ const ContractorProfile = ({ user, profile, onProfileChange }) => {
                   <label>Last name *</label>
                 </div>
 
-                <div className="floating-input-group">
-                  <input
-                    type="text"
-                    value={editPhone}
-                    onChange={(e) => setEditPhone(e.target.value)}
-                    placeholder=" "
-                  />
-                  <label>Phone number</label>
-                </div>
+                <PhoneInput
+                  variant="floating"
+                  label="Phone number"
+                  value={editPhone}
+                  onChange={(phone) => setEditPhone(phone)}
+                  placeholder="900 000 0000"
+                />
 
                 <button type="submit" className="btn-orange" disabled={savingProfile}>
                   {savingProfile ? 'Saving...' : 'Save changes'}

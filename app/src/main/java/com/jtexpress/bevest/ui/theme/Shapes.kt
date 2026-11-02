@@ -92,6 +92,7 @@ object BevestShapes {
 
     /** Avatars, dots, status lamps. */
     val round: Shape = CircleShape
+    val circle: Shape = CircleShape
 
     /** Bottom sheets and dialogs — rounded on top only, flat against the edge. */
     val sheet: Shape = RoundedCornerShape(topStart = Radius.xl, topEnd = Radius.xl)

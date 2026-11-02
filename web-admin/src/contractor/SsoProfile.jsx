@@ -6,6 +6,7 @@ import {
   useContractorSsos, useContractorSites, siteLabel, STATUS_COLOR, initialsOf,
 } from './contractorData';
 import { PageHeader, Badge, EmptyState, ErrorState, Skeleton } from './ui';
+import PhoneInput, { formatPhoneWithCountryCode } from '../PhoneInput';
 
 /**
  * Site Safety Officer profile for the contractor.
@@ -88,7 +89,7 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
       await updateDoc(doc(db, 'users', sso.uid), {
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
-        phone: form.phone.trim(),
+        phone: formatPhoneWithCountryCode(form.phone),
         siteId: form.siteId ? form.siteId.trim() : null,
       });
       setEditing(false);
@@ -149,12 +150,10 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
               </div>
               <div className="form-group-custom">
                 <label className="form-label" htmlFor="ct-sso-phone">Phone number</label>
-                <input
+                <PhoneInput
                   id="ct-sso-phone"
-                  className="form-input"
-                  placeholder="+1 (555) 000-0000"
                   value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  onChange={(phone) => setForm({ ...form, phone })}
                 />
               </div>
               <div className="form-group-custom" style={{ gridColumn: '1 / -1' }}>
