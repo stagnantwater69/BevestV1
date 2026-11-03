@@ -67,8 +67,11 @@ class SafetyWatcher @Inject constructor(
     /** Alerts already notified about, keyed by id, with the severity they had then. */
     private val notified = mutableMapOf<String, AlertSeverity>()
 
+    /** Last fall reading timestamp already handled per worker, preventing resolved falls from re-opening. */
+    private val lastHandledFallTimestamp = mutableMapOf<String, Long>()
+
     fun start(siteId: String?) {
-        if (siteId.isNullOrBlank() || siteId == watchingSite) return
+        if (siteId == watchingSite && jobs.isNotEmpty()) return
         stop()
         watchingSite = siteId
         jobs = listOf(watchReadings(siteId), watchAlerts(siteId))
@@ -79,20 +82,22 @@ class SafetyWatcher @Inject constructor(
         jobs = emptyList()
         watchingSite = null
         notified.clear()
+        lastHandledFallTimestamp.clear()
     }
 
     // ------------------------------------------------------------ detection
 
-    private fun watchReadings(siteId: String) = scope.launch {
+    private fun watchReadings(siteId: String?) = scope.launch {
         val ticker = flow { while (true) { emit(System.currentTimeMillis()); delay(TICK_MS) } }
-        workerRepository.observeWorkers(contractorId = null, siteId = siteId)
+        val targetSite = siteId?.takeIf { it.isNotBlank() }
+        workerRepository.observeWorkers(contractorId = null, siteId = targetSite)
             .flatMapLatest { outcome ->
                 val workers = (outcome as? Outcome.Success)?.data.orEmpty()
                 if (workers.isEmpty()) return@flatMapLatest flowOf(null)
                 combine(
                     monitoringRepository.observeReadings(workers.map { it.workerId }),
                     settingsRepository.observeThresholds(),
-                    alertRepository.observeActiveAlerts(siteId),
+                    alertRepository.observeActiveAlerts(targetSite),
                     ticker,
                 ) { readings, thresholds, alerts, now ->
                     Snapshot(workers, readings, thresholds, (alerts as? Outcome.Success)?.data.orEmpty(), now)
@@ -113,9 +118,16 @@ class SafetyWatcher @Inject constructor(
         val engine = SafetyStatusEngine(s.thresholds)
         for (worker in s.workers) {
             val reading = s.readings[worker.workerId] ?: continue
+            // Strictly isolate hardware vest readings to the worker assigned to that specific vest
+            if (reading.vestId.isNotBlank() && !reading.vestId.equals(worker.assignedVestId, ignoreCase = true)) {
+                continue
+            }
             val status = engine.evaluate(reading, s.now)
             val fell = (reading.fallDetected || reading.motionState == MotionState.FALL_DETECTED) &&
-                (status == SafetyStatus.DANGER || status == SafetyStatus.EMERGENCY)
+                status != SafetyStatus.OFFLINE
+            if (!fell) {
+                lastHandledFallTimestamp.remove(worker.workerId)
+            }
 
             val fallAlert = s.alerts.firstOrNull {
                 it.workerId == worker.workerId && it.type == AlertType.FALL_DETECTED
@@ -123,7 +135,13 @@ class SafetyWatcher @Inject constructor(
             when {
                 // A fall with no open alert yet (the simulator raises its own, so a
                 // simulated fall already has one and is left alone).
-                fallAlert == null -> if (fell) openFallAlert(worker, reading)
+                fallAlert == null -> {
+                    val lastHandled = lastHandledFallTimestamp[worker.workerId]
+                    if (fell && (reading.timestamp <= 0L || lastHandled != reading.timestamp)) {
+                        lastHandledFallTimestamp[worker.workerId] = reading.timestamp
+                        openFallAlert(worker, reading)
+                    }
+                }
 
                 // Still unanswered after the timeout: escalate. The vest clears the fall
                 // flag after one reading, so this must not wait for it to still be set.
@@ -222,11 +240,12 @@ class SafetyWatcher @Inject constructor(
      * whichever phone created it. The alerts already open when watching starts are
      * recorded without notifying, so opening the app doesn't replay old alerts.
      */
-    private fun watchAlerts(siteId: String) = scope.launch {
+    private fun watchAlerts(siteId: String?) = scope.launch {
         var first = true
+        val targetSite = siteId?.takeIf { it.isNotBlank() }
         combine(
-            alertRepository.observeActiveAlerts(siteId),
-            workerRepository.observeWorkers(contractorId = null, siteId = siteId),
+            alertRepository.observeActiveAlerts(targetSite),
+            workerRepository.observeWorkers(contractorId = null, siteId = targetSite),
         ) { alerts, workers -> alerts to workers }
             .collect { (alertsOutcome, workersOutcome) ->
                 val alerts = (alertsOutcome as? Outcome.Success)?.data ?: return@collect

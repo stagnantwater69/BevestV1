@@ -110,7 +110,7 @@ service cloud.firestore {
     // ---- vests ----
     match /vests/{vestId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin() || isSso() || isDeveloper();
+      allow write: if isAdmin() || isSso() || isDeveloper() || isSignedIn();
     }
 
     // ---- subscription payments ----

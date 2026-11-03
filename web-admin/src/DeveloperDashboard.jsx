@@ -12,7 +12,8 @@ import {
   query, where, onSnapshot 
 } from 'firebase/firestore';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { auth, secondaryAuth, db } from './firebase';
+import { ref, remove, set } from 'firebase/database';
+import { auth, secondaryAuth, db, rtdb } from './firebase';
 import QRCode from 'qrcode';
 import { logActivity } from './activityLogger';
 import { SUBSCRIPTION_PLANS, formatDisplayDate } from './subscriptionPlans';
@@ -362,6 +363,15 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
       await setDoc(doc(db, 'vests', cleanId), vestRecord, { merge: true });
 
+      // Synchronize hardware MAC mapping in Realtime Database
+      if (cleanMac) {
+        try {
+          await set(ref(rtdb, `macToVest/${cleanMac}`), cleanId);
+        } catch (rtdbErr) {
+          console.warn('RTDB macToVest write warning:', rtdbErr);
+        }
+      }
+
       await logActivity(`Smart vest ${cleanId} (MAC: ${rawMac}, S/N: ${cleanSerial}) registered to inventory (Status: ${genStatus || 'AVAILABLE'})`, devEmail);
       showToast('success', `✓ Vest ${cleanId} [MAC: ${rawMac}] saved to database!`);
       
@@ -408,6 +418,13 @@ const DeveloperDashboard = ({ user, onLogout }) => {
           createdByEmail: devEmail
         };
         await setDoc(doc(db, 'vests', currentId), item, { merge: true });
+        if (itemCleanMac) {
+          try {
+            await set(ref(rtdb, `macToVest/${itemCleanMac}`), currentId);
+          } catch (rtdbErr) {
+            console.warn('RTDB macToVest batch write warning:', rtdbErr);
+          }
+        }
       }
 
       await logActivity(`Batch registered ${count} smart vests with MAC addresses to inventory (Status: ${batchStatus || 'AVAILABLE'})`, devEmail);
@@ -423,13 +440,38 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
   const handleDeleteVest = async (vestId) => {
     if (!vestId) return;
-    const ok = window.confirm(`Permanently delete Vest "${vestId}" from the Bevest hardware database?\n\nThis will remove the QR, MAC address, and Serial Number registration. This action cannot be undone.`);
+    const ok = window.confirm(`Permanently delete Vest "${vestId}" from the Bevest hardware database?\n\nThis will remove the QR, MAC address, and Serial Number registration, unassign any assigned worker, and clean up live telemetry. This action cannot be undone.`);
     if (!ok) return;
 
     try {
+      // 1. Unassign any workers assigned to this vest
+      try {
+        const workersSnap = await getDocs(query(collection(db, 'workers'), where('assignedVestId', '==', vestId)));
+        const unassignPromises = workersSnap.docs.map(wDoc => updateDoc(wDoc.ref, { assignedVestId: null }));
+        await Promise.all(unassignPromises);
+      } catch (workerErr) {
+        console.warn('Worker unassign warning:', workerErr);
+      }
+
+      // 2. Remove Realtime Database live nodes & MAC mappings
+      try {
+        await remove(ref(rtdb, `vestsLive/${vestId}`));
+        await remove(ref(rtdb, `liveReadingsByVest/${vestId}`));
+        const targetVest = catalog.find(v => (v.id === vestId || v.vestId === vestId));
+        const cleanMac = targetVest?.cleanMac || (targetVest?.macAddress ? targetVest.macAddress.replace(/[^A-F0-9]/g, '') : null);
+        if (cleanMac) {
+          await remove(ref(rtdb, `macToVest/${cleanMac}`));
+          await remove(ref(rtdb, `vestsLiveByMac/${cleanMac}`));
+          await remove(ref(rtdb, `liveReadingsByMac/${cleanMac}`));
+        }
+      } catch (rtdbErr) {
+        console.warn('RTDB cleanup warning:', rtdbErr);
+      }
+
+      // 3. Delete from Firestore
       await deleteDoc(doc(db, 'vests', vestId));
       await logActivity(`Deleted smart vest ${vestId} from central hardware database`, devEmail);
-      showToast('success', `✓ Vest ${vestId} permanently removed from database.`);
+      showToast('success', `✓ Vest ${vestId} permanently removed and any assigned workers unlinked.`);
     } catch (err) {
       console.error('Error deleting vest:', err);
       showToast('error', 'Failed to delete vest: ' + err.message);
