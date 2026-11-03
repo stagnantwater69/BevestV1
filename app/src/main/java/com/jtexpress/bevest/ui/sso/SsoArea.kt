@@ -1,19 +1,54 @@
 package com.jtexpress.bevest.ui.sso
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.jtexpress.bevest.domain.model.AlertSeverity
 import com.jtexpress.bevest.domain.model.User
+import com.jtexpress.bevest.domain.safety.FallPopupState
 import com.jtexpress.bevest.navigation.Routes
 import com.jtexpress.bevest.notifications.DeepLink
 import com.jtexpress.bevest.ui.common.BottomTab
-import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.common.RoleScaffold
-import com.jtexpress.bevest.ui.sim.SimulationScreen
 import com.jtexpress.bevest.ui.common.profileDestinations
+import com.jtexpress.bevest.ui.sim.SimulationScreen
+import com.jtexpress.bevest.ui.theme.BevestIcons
+import com.jtexpress.bevest.ui.theme.LocalStatusPalette
+import com.jtexpress.bevest.ui.theme.Spacing
 import kotlinx.coroutines.flow.SharedFlow
 
 @Composable
@@ -28,6 +63,8 @@ fun SsoArea(
     // Fall detection + escalation runs on the phone while the SSO is signed in (the
     // project's free Firebase plan can't run the cloud functions that would do it).
     val safetyWatcher: SafetyWatcherHost = hiltViewModel()
+    val fallPopup by safetyWatcher.fallPopup.collectAsState()
+
     DisposableEffect(siteId) {
         safetyWatcher.start(siteId)
         onDispose { safetyWatcher.stop() }
@@ -43,6 +80,25 @@ fun SsoArea(
                 }
             }
         }
+    }
+
+    fallPopup?.let { popup ->
+        FallDetectedPopupDialog(
+            popup = popup,
+            onRespond = {
+                safetyWatcher.dismissFallPopup(popup.alert)
+                navController.navigate(Routes.withArg(Routes.SSO_ALERT_DETAIL, popup.alert.alertId))
+            },
+            onAcknowledge = {
+                safetyWatcher.acknowledgeFall(popup.alert, user.uid)
+            },
+            onResolve = {
+                safetyWatcher.resolveFall(popup.alert, user.uid)
+            },
+            onDismiss = {
+                safetyWatcher.dismissFallPopup(popup.alert)
+            },
+        )
     }
 
     RoleScaffold(
@@ -140,5 +196,148 @@ fun SsoArea(
             SimulationScreen(user = user, onBack = { navController.popBackStack() })
         }
         profileDestinations(navController, onSignOut)
+    }
+}
+
+@Composable
+private fun FallDetectedPopupDialog(
+    popup: FallPopupState,
+    onRespond: () -> Unit,
+    onAcknowledge: () -> Unit,
+    onResolve: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val red = LocalStatusPalette.current.emergency
+    val isEmergency = popup.alert.severity == AlertSeverity.EMERGENCY
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(red)
+                .padding(horizontal = Spacing.xl, vertical = Spacing.xxl),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Warning,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(96.dp),
+            )
+            Spacer(Modifier.height(Spacing.lg))
+            Text(
+                text = if (isEmergency) "⚠ EMERGENCY: NO RESPONSE" else "⚠ WORKER FALL DETECTED",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(Spacing.md))
+            Surface(
+                color = Color.White.copy(alpha = 0.16f),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier.padding(Spacing.lg),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = "${popup.workerName} has fallen!",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(Spacing.xs))
+                    Text(
+                        text = buildString {
+                            append("Worker ID: ${popup.alert.workerId}")
+                            if (!popup.vestId.isNullOrBlank()) {
+                                append(" • Vest: ${popup.vestId}")
+                            }
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.9f),
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(Spacing.sm))
+                    Text(
+                        text = if (isEmergency) {
+                            "Worker fell and has not responded within the safety timeout. Immediate action required!"
+                        } else {
+                            "Impact / fall detected by the smart vest sensor. Check on this worker immediately."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+            Spacer(Modifier.height(Spacing.xxl))
+            Button(
+                onClick = onRespond,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White,
+                    contentColor = red,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+            ) {
+                Text(
+                    text = "Respond & View Alert",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Spacer(Modifier.height(Spacing.md))
+            OutlinedButton(
+                onClick = onResolve,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                border = ButtonDefaults.outlinedButtonBorder.copy(brush = SolidColor(Color.White)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+            ) {
+                Text(
+                    text = "Mark Resolved",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                )
+            }
+            Spacer(Modifier.height(Spacing.sm))
+            TextButton(
+                onClick = onAcknowledge,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+            ) {
+                Text(
+                    text = "Acknowledge Alert",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                )
+            }
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = "Silence & Dismiss",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.85f),
+                )
+            }
+        }
     }
 }

@@ -25,6 +25,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -33,6 +36,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
+
+data class FallPopupState(
+    val alert: Alert,
+    val workerName: String,
+    val vestId: String?,
+)
 
 /**
  * Fall detection and escalation, run on the SSO's phone.
@@ -70,6 +79,21 @@ class SafetyWatcher @Inject constructor(
     /** Last fall reading timestamp already handled per worker, preventing resolved falls from re-opening. */
     private val lastHandledFallTimestamp = mutableMapOf<String, Long>()
 
+    /** Workers currently in a continuous fall-reading burst (rising-edge detector). */
+    private val currentlyFalling = mutableSetOf<String>()
+
+    /** Per-worker cooldown window (epoch ms) during which repeated ESP32 fall packets are ignored. */
+    private val fallCooldownUntil = mutableMapOf<String, Long>()
+
+    /** Tracks workerId for each active fall alertId so resolving from any screen starts cooldown. */
+    private val activeFallAlertWorkers = mutableMapOf<String, String>()
+
+    /** Alert IDs whose pop-up was dismissed at the given severity. */
+    private val dismissedPopups = mutableMapOf<String, AlertSeverity>()
+
+    private val _fallPopup = MutableStateFlow<FallPopupState?>(null)
+    val fallPopup: StateFlow<FallPopupState?> = _fallPopup.asStateFlow()
+
     fun start(siteId: String?) {
         if (siteId == watchingSite && jobs.isNotEmpty()) return
         stop()
@@ -83,6 +107,46 @@ class SafetyWatcher @Inject constructor(
         watchingSite = null
         notified.clear()
         lastHandledFallTimestamp.clear()
+        currentlyFalling.clear()
+        fallCooldownUntil.clear()
+        activeFallAlertWorkers.clear()
+        dismissedPopups.clear()
+        _fallPopup.value = null
+    }
+
+    fun dismissFallPopup(alert: Alert) {
+        dismissedPopups[alert.alertId] = alert.severity
+        fallCooldownUntil[alert.workerId] = System.currentTimeMillis() + FALL_COOLDOWN_MS
+        NotificationHelper.cancel(context, alert.alertId)
+        if (_fallPopup.value?.alert?.alertId == alert.alertId) {
+            _fallPopup.value = null
+        }
+    }
+
+    fun acknowledgeFall(alert: Alert, byUserId: String) {
+        dismissedPopups[alert.alertId] = AlertSeverity.EMERGENCY
+        fallCooldownUntil[alert.workerId] = System.currentTimeMillis() + FALL_COOLDOWN_MS
+        currentlyFalling.add(alert.workerId)
+        dismissFallPopup(alert)
+        scope.launch {
+            runCatching {
+                alertRepository.acknowledgeAlert(alert.alertId, byUserId)
+                monitoringRepository.setSafetyResponse(alert.workerId, SafetyResponseState.ACKNOWLEDGED)
+            }
+        }
+    }
+
+    fun resolveFall(alert: Alert, byUserId: String) {
+        dismissedPopups[alert.alertId] = AlertSeverity.EMERGENCY
+        fallCooldownUntil[alert.workerId] = System.currentTimeMillis() + FALL_COOLDOWN_MS
+        currentlyFalling.add(alert.workerId)
+        dismissFallPopup(alert)
+        scope.launch {
+            runCatching {
+                alertRepository.resolveAlert(alert.alertId, byUserId, "Resolved from fall detection pop-up")
+                monitoringRepository.setSafetyResponse(alert.workerId, SafetyResponseState.NONE)
+            }
+        }
     }
 
     // ------------------------------------------------------------ detection
@@ -126,6 +190,7 @@ class SafetyWatcher @Inject constructor(
             val fell = (reading.fallDetected || reading.motionState == MotionState.FALL_DETECTED) &&
                 status != SafetyStatus.OFFLINE
             if (!fell) {
+                currentlyFalling.remove(worker.workerId)
                 lastHandledFallTimestamp.remove(worker.workerId)
             }
 
@@ -137,9 +202,19 @@ class SafetyWatcher @Inject constructor(
                 // simulated fall already has one and is left alone).
                 fallAlert == null -> {
                     val lastHandled = lastHandledFallTimestamp[worker.workerId]
-                    if (fell && (reading.timestamp <= 0L || lastHandled != reading.timestamp)) {
+                    val cooldownUntil = fallCooldownUntil[worker.workerId] ?: 0L
+                    val inBurst = worker.workerId in currentlyFalling
+                    if (fell && !inBurst && s.now >= cooldownUntil && (reading.timestamp <= 0L || lastHandled != reading.timestamp)) {
+                        currentlyFalling.add(worker.workerId)
                         lastHandledFallTimestamp[worker.workerId] = reading.timestamp
+                        fallCooldownUntil[worker.workerId] = s.now + FALL_COOLDOWN_MS
                         openFallAlert(worker, reading)
+                    } else if (fell) {
+                        // Still receiving repeated Fall:1 packets from the same fall burst; latch state so it cannot re-trigger
+                        currentlyFalling.add(worker.workerId)
+                        if (reading.timestamp > 0L) {
+                            lastHandledFallTimestamp[worker.workerId] = reading.timestamp
+                        }
                     }
                 }
 
@@ -156,17 +231,24 @@ class SafetyWatcher @Inject constructor(
 
     /**
      * Opens the fall alert, once. `openFallAlertId` on the worker is claimed in a
-     * transaction so two phones seeing the same fall can't both open one.
+     * transaction so two phones seeing the same fall (or repeated ESP32 fall packets
+     * during the 15s hardware cooldown) can't open multiple alerts.
      */
     private suspend fun openFallAlert(worker: Worker, reading: SensorReading) {
         val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
         val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
+        val now = System.currentTimeMillis()
         firestore.runTransaction { tx ->
             val existingId = tx.get(workerRef).getString("openFallAlertId")
             if (existingId != null) {
                 val existing = tx.get(firestore.collection(FirebasePaths.ALERTS).document(existingId))
-                val status = AlertStatus.fromRaw(existing.getString("status"))
-                if (existing.exists() && status != AlertStatus.RESOLVED) return@runTransaction
+                if (existing.exists()) {
+                    val status = AlertStatus.fromRaw(existing.getString("status"))
+                    val existingCreatedAt = existing.getLong("createdAt") ?: 0L
+                    if (status != AlertStatus.RESOLVED || (now - existingCreatedAt) < FALL_COOLDOWN_MS) {
+                        return@runTransaction
+                    }
+                }
             }
             tx.set(
                 alertRef,
@@ -179,7 +261,7 @@ class SafetyWatcher @Inject constructor(
                     "severity" to AlertSeverity.DANGER.name,
                     "status" to AlertStatus.ACTIVE.name,
                     "message" to "Fall detected",
-                    "createdAt" to System.currentTimeMillis(),
+                    "createdAt" to now,
                 ),
             )
             tx.update(workerRef, "openFallAlertId", alertRef.id)
@@ -249,12 +331,17 @@ class SafetyWatcher @Inject constructor(
         ) { alerts, workers -> alerts to workers }
             .collect { (alertsOutcome, workersOutcome) ->
                 val alerts = (alertsOutcome as? Outcome.Success)?.data ?: return@collect
-                val names = (workersOutcome as? Outcome.Success)?.data.orEmpty()
-                    .associate { it.workerId to it.fullName.ifBlank { "Worker ${it.workerId}" } }
+                val workerList = (workersOutcome as? Outcome.Success)?.data.orEmpty()
+                val names = workerList.associate { it.workerId to it.fullName.ifBlank { "Worker ${it.workerId}" } }
+                val workerVests = workerList.associate { it.workerId to it.assignedVestId }
+
                 for (alert in alerts) {
+                    if (alert.type == AlertType.FALL_DETECTED) {
+                        activeFallAlertWorkers[alert.alertId] = alert.workerId
+                    }
                     val seen = notified[alert.alertId]
                     notified[alert.alertId] = alert.severity
-                    // Once any officer acknowledges it, stop the siren on every phone.
+                    // Once any officer acknowledges it, stop the vibration on every phone.
                     if (alert.status != AlertStatus.ACTIVE) {
                         NotificationHelper.cancel(context, alert.alertId)
                         continue
@@ -263,12 +350,33 @@ class SafetyWatcher @Inject constructor(
                     if (seen != null && alert.severity.ordinal <= seen.ordinal) continue
                     notify(alert, names[alert.workerId] ?: "Worker ${alert.workerId}")
                 }
-                // Resolved alerts leave the active list; silence those too.
+                // Resolved alerts leave the active list; silence those too and start fall cooldown for that worker.
                 val open = alerts.mapTo(HashSet()) { it.alertId }
+                (activeFallAlertWorkers.keys - open).forEach { id ->
+                    activeFallAlertWorkers.remove(id)?.let { resolvedWorkerId ->
+                        fallCooldownUntil[resolvedWorkerId] = System.currentTimeMillis() + FALL_COOLDOWN_MS
+                        currentlyFalling.add(resolvedWorkerId)
+                    }
+                }
                 (notified.keys - open).forEach { id ->
                     NotificationHelper.cancel(context, id)
                     notified.remove(id)
                 }
+
+                // Update the in-app Fall Detection Pop-Up Screen with the newest unacknowledged fall alert
+                val activeFall = alerts.firstOrNull { alert ->
+                    alert.type == AlertType.FALL_DETECTED &&
+                        alert.status == AlertStatus.ACTIVE &&
+                        (dismissedPopups[alert.alertId]?.let { alert.severity.ordinal > it.ordinal } ?: true)
+                }
+                _fallPopup.value = activeFall?.let { alert ->
+                    FallPopupState(
+                        alert = alert,
+                        workerName = names[alert.workerId] ?: "Worker ${alert.workerId}",
+                        vestId = alert.vestId ?: workerVests[alert.workerId],
+                    )
+                }
+
                 first = false
             }
     }
@@ -301,5 +409,7 @@ class SafetyWatcher @Inject constructor(
 
     private companion object {
         const val TICK_MS = 5_000L
+        /** Cooldown window (20s) to absorb the ESP32's 15-second fall burst without opening duplicate alerts. */
+        const val FALL_COOLDOWN_MS = 20_000L
     }
 }

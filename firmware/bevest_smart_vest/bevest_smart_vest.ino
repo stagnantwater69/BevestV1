@@ -109,7 +109,7 @@
 RTC_DATA_ATTR int rtcDoubleTapFlag = 0;
 
 // ── Timing & Intervals ───────────────────────────────────────────────────────
-#define PUSH_INTERVAL_MS       1000   // Telemetry push to Firebase every 1s
+#define PUSH_INTERVAL_MS       2500   // Telemetry push to Firebase every 2.5s
 #define VESTLIVE_INTERVAL_MS   10000  // Heartbeat to /vestsLive every 10s
 #define FALL_COOLDOWN_MS       6000   // Hold fall status for 6s before resolving
 #define HR_AVG_SIZE            4      // Moving average window for heart rate
@@ -187,7 +187,12 @@ float              gpsHDOP             = 99.9f;
 unsigned long      gpsLastFixMs        = 0;
 
 bool               fallDetected        = false;
+bool               fallCooldownActive  = false;
 unsigned long      fallTimestamp       = 0;
+unsigned long      lastMovingMs        = 0;
+volatile bool      pendingFallPush     = false;
+volatile bool      pendingFallClear    = false;
+volatile bool      pendingImmediatePush = false;
 String             motionState         = "STATIONARY";
 int                heartBPM            = 0;
 int                spO2                = 0;
@@ -229,9 +234,10 @@ void startEmergencyAlarm(unsigned long durationMs = 10000);
 void stopEmergencyAlarm();
 void beepShort(unsigned long durationMs);
 void triggerBuzzer(int beeps);
-void pushReadingToFirebase();
+void pushReadingToFirebase(bool isFallEvent = false);
 void pushVestLiveToFirebase();
 void syncOnlinePresenceToFirestore(bool isOnline = true);
+void firebaseCloudTask(void* pvParameters);
 void printStatus();
 uint64_t getEpochMillis();
 float calcSpO2(long red, long ir);
@@ -419,9 +425,10 @@ void setup() {
     rtcDoubleTapFlag = 1;
   }
 
-  // 1. Read hardware MAC address from WiFi radio & set power-safe TX level
+  // 1. Read hardware MAC address from WiFi radio & configure full-strength non-sleeping Wi-Fi
   WiFi.mode(WIFI_STA);
-  WiFi.setTxPower(WIFI_POWER_15dBm); // Prevents powerbank 5V voltage sag
+  WiFi.setSleep(false);              // Disable Wi-Fi modem sleep to prevent read timeouts when moving device
+  WiFi.setTxPower(WIFI_POWER_19_5dBm); // Full antenna range when vest is worn/moved
   delay(120);
 
   esp32MacAddress   = WiFi.macAddress();
@@ -445,6 +452,7 @@ void setup() {
 
   // 4. Initialize I2C Bus for MPU6050 & MAX30102
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+  Wire.setTimeOut(25); // Prevent I2C bus lockup if jumper wires wiggle during motion/fall testing
   delay(100);
 
   // MPU6050 IMU
@@ -497,6 +505,17 @@ void setup() {
     setLedPattern(LED_SLOW_BLINK); // Slow Blinking = BLE Broadcast
     startBleProvisioning();
   }
+
+  // 6. Start Background FreeRTOS Task for Firebase Cloud Sync so sensor polling never blocks
+  xTaskCreatePinnedToCore(
+    firebaseCloudTask,
+    "FirebaseCloudTask",
+    12288,
+    NULL,
+    1,
+    NULL,
+    0
+  );
 }
 
 // ── Main Loop ────────────────────────────────────────────────────────────────
@@ -619,49 +638,15 @@ void loop() {
 
   const unsigned long now = millis();
 
-  // 3. Wi-Fi Auto-Reconnect
-  static unsigned long lastWifiRetry = 0;
-  if (WiFi.status() != WL_CONNECTED && (now - lastWifiRetry > 8000)) {
-    lastWifiRetry = now;
-    Serial.println("[WiFi] Reconnecting to Wi-Fi...");
-    WiFi.disconnect();
-    WiFi.begin(currentWifiSSID.c_str(), currentWifiPassword.c_str());
-  }
-
-  // 4. Firebase Auto-Reconnect
-  static unsigned long lastFbRetry = 0;
-  if (WiFi.status() == WL_CONNECTED && !Firebase.ready() && (now - lastFbRetry > 8000)) {
-    lastFbRetry = now;
-    Serial.println("[Firebase] Re-authenticating session...");
-    Firebase.begin(&config, &auth);
-  }
-
-  // 5. Push Live Readings to Firebase
-  if (now - lastPush >= PUSH_INTERVAL_MS) {
-    lastPush = now;
-    pushReadingToFirebase();
-  }
-
-  // 6. Push Vest Heartbeat to Firebase
-  if (now - lastVestLive >= VESTLIVE_INTERVAL_MS) {
-    lastVestLive = now;
-    pushVestLiveToFirebase();
-  }
-
-  // 7. Periodic Serial Monitor Summary
+  // 3. Periodic Serial Monitor Summary (Non-blocking in main loop)
   if (now - lastPrint >= 4000) {
     lastPrint = now;
     printStatus();
   }
 
-  // 8. Monitor Wi-Fi & Firebase connection health for Blue LED diagnostics
+  // 4. Monitor Wi-Fi & Firebase connection health for Blue LED diagnostics
   if (WiFi.status() != WL_CONNECTED) {
     setLedPattern(LED_ERR_WIFI_2_BLINKS); // 2 blinks per 2 sec
-    if (now - lastWifiRetryMs > 8000) {
-      lastWifiRetryMs = now;
-      Serial.println("[WiFi] Reconnecting to Wi-Fi...");
-      WiFi.reconnect();
-    }
   } else if (!Firebase.ready()) {
     setLedPattern(LED_ERR_FIREBASE_3_BLINKS); // 3 blinks per 2 sec
   } else if (!mpuOk) {
@@ -670,7 +655,7 @@ void loop() {
     setLedPattern(LED_FAST_BLINK); // Fast Blinking = Connected to Wi-Fi & Streaming
   }
 
-  delay(2);
+  delay(5);
 }
 
 // ── NVS Configuration Loader ─────────────────────────────────────────────────
@@ -743,6 +728,8 @@ void stopBleProvisioning() {
 // ── Attempt Wi-Fi Connection ─────────────────────────────────────────────────
 bool attemptWiFiConnection(const String& ssid, const String& pass, int timeoutSec) {
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
   WiFi.setAutoReconnect(true);
   WiFi.begin(ssid.c_str(), pass.c_str());
 
@@ -799,7 +786,7 @@ void initFirebaseService() {
 
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
-  fbdo.setBSSLBufferSize(4096, 1024);
+  fbdo.setBSSLBufferSize(4096, 2048);
   fbdo.setResponseSize(2048);
 
   Serial.print("[Firebase] Authenticating");
@@ -887,9 +874,82 @@ void checkResetTriggers() {
   }
 }
 
+// ── Background FreeRTOS Task for Non-Blocking Firebase Cloud Sync ────────────
+void firebaseCloudTask(void* pvParameters) {
+  unsigned long lastWifiRetry = 0;
+  unsigned long lastFbRetry   = 0;
+
+  for (;;) {
+    if (inProvisioningMode || !isConfigured) {
+      vTaskDelay(pdMS_TO_TICKS(200));
+      continue;
+    }
+
+    unsigned long now = millis();
+
+    // 1. Wi-Fi Auto-Reconnect
+    if (WiFi.status() != WL_CONNECTED) {
+      if (now - lastWifiRetry > 8000) {
+        lastWifiRetry = now;
+        Serial.println("[WiFi] Reconnecting to Wi-Fi...");
+        WiFi.disconnect();
+        WiFi.begin(currentWifiSSID.c_str(), currentWifiPassword.c_str());
+      }
+      vTaskDelay(pdMS_TO_TICKS(200));
+      continue;
+    }
+
+    // 2. Firebase Auto-Reconnect
+    if (!Firebase.ready()) {
+      if (now - lastFbRetry > 8000) {
+        lastFbRetry = now;
+        Serial.println("[Firebase] Re-authenticating session...");
+        Firebase.begin(&config, &auth);
+      }
+      vTaskDelay(pdMS_TO_TICKS(200));
+      continue;
+    }
+
+    // 3. Immediate Fall Event Push (Single Fall:1 signal)
+    if (pendingFallPush) {
+      pendingFallPush = false;
+      lastPush = now;
+      pushReadingToFirebase(true);
+      // Immediately clear fallDetected after sending the 1 fall signal so periodic pushes send Fall:0
+      fallDetected = false;
+      motionState = "STATIONARY";
+    }
+
+    // 4. Clear Fall Flag on Cooldown Completion
+    if (pendingFallClear) {
+      pendingFallClear = false;
+      Firebase.setBool(fbdo, String("/vestsLive/") + currentVestId + "/fallDetected", false);
+      pushReadingToFirebase(false);
+    }
+
+    // 5. Immediate Vital / SOS Push or Periodic Telemetry Push
+    if (pendingImmediatePush || (now - lastPush >= PUSH_INTERVAL_MS)) {
+      pendingImmediatePush = false;
+      lastPush = now;
+      pushReadingToFirebase(false);
+    }
+
+    // 6. Periodic Vest Heartbeat Push
+    if (now - lastVestLive >= VESTLIVE_INTERVAL_MS) {
+      lastVestLive = now;
+      pushVestLiveToFirebase();
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
 // ── Push Live Telemetry to Firebase ───────────────────────────────────────────
-void pushReadingToFirebase() {
+void pushReadingToFirebase(bool isFallEvent) {
   if (WiFi.status() != WL_CONNECTED || !Firebase.ready()) return;
+
+  bool sendFall = isFallEvent || fallDetected;
+  String sendMotion = sendFall ? String("FALL_DETECTED") : motionState;
 
   FirebaseJson json;
   json.set("vestId", currentVestId);
@@ -899,8 +959,8 @@ void pushReadingToFirebase() {
   json.set("serialNumber", esp32SerialNumber);
   json.set("heartRate", heartBPM);
   json.set("temperature", (double)bodyTempC);
-  json.set("motionState", motionState);
-  json.set("fallDetected", fallDetected);
+  json.set("motionState", sendMotion);
+  json.set("fallDetected", sendFall);
   json.set("online", true);
 
   json.set("gpsFixed", gpsFixed);
@@ -916,30 +976,26 @@ void pushReadingToFirebase() {
   json.set("timestampServer/.sv", "timestamp");
   json.set("safetyResponse", "NONE");
 
+  // Push to vest path (primary path used by Android App for both Worker Monitoring & Vest Online status)
+  String vestPath = String("/liveReadingsByVest/") + currentVestId;
+  bool okVest = Firebase.setJSON(fbdo, vestPath.c_str(), json);
+
   // Push to worker path
   String appPath = String("/liveReadings/") + currentWorkerId;
   bool okWorker = Firebase.setJSON(fbdo, appPath.c_str(), json);
 
-  // Push to vest path as well so fallback listener catches it
-  String vestPath = String("/liveReadingsByVest/") + currentVestId;
-  bool okVest = Firebase.setJSON(fbdo, vestPath.c_str(), json);
-
-  // Push to MAC path so app catches it regardless of vest ID
-  String macReadingPath = String("/liveReadingsByMac/") + esp32CleanMac;
-  Firebase.setJSON(fbdo, macReadingPath.c_str(), json);
-
   // If a fall is detected, immediately update fall alert flag on vest
-  if (fallDetected) {
+  if (sendFall) {
     Firebase.setBool(fbdo, String("/vestsLive/") + currentVestId + "/fallDetected", true);
   }
 
   if (okWorker || okVest) {
     if (gpsFixed) {
       Serial.printf("[PUSH] HR:%d | Temp:%.1f°C | %s | Fall:%d | 🛰️ GPS: Lat=%.6f Lng=%.6f Sats=%d\n",
-                    heartBPM, bodyTempC, motionState.c_str(), fallDetected, gpsLat, gpsLng, gpsSats);
+                    heartBPM, bodyTempC, sendMotion.c_str(), sendFall, gpsLat, gpsLng, gpsSats);
     } else {
       Serial.printf("[PUSH] HR:%d | Temp:%.1f°C | %s | Fall:%d | 📡 No GPS fix yet\n",
-                    heartBPM, bodyTempC, motionState.c_str(), fallDetected);
+                    heartBPM, bodyTempC, sendMotion.c_str(), sendFall);
     }
   } else {
     Serial.printf("[PUSH ERROR] %s\n", fbdo.errorReason().c_str());
@@ -950,20 +1006,9 @@ void pushReadingToFirebase() {
 void pushVestLiveToFirebase() {
   if (WiFi.status() != WL_CONNECTED || !Firebase.ready()) return;
 
-  // Check if Cloud mapped this ESP32 hardware MAC to a specific Vest ID (e.g. VEST-2026-XXXX)
-  String macMappingPath = String("/macToVest/") + esp32CleanMac;
-  if (Firebase.getString(fbdo, macMappingPath.c_str())) {
-    String mappedId = fbdo.stringData();
-    if (mappedId.length() > 0 && mappedId != "null" && mappedId != currentVestId) {
-      currentVestId = mappedId;
-      Serial.printf("[SYNC] 🎯 Cloud mapped Vest ID to: %s\n", currentVestId.c_str());
-      preferences.begin("bevest", false);
-      preferences.putString("vestId", currentVestId);
-      preferences.end();
-    }
-  }
-
   String path = String("/vestsLive/") + currentVestId;
+  String macPath = String("/vestsLiveByMac/") + esp32CleanMac;
+
   FirebaseJson json;
   json.set("vestId", currentVestId);
   json.set("mac", esp32CleanMac);
@@ -975,78 +1020,70 @@ void pushVestLiveToFirebase() {
   json.set("lastSeen", (double)getEpochMillis());
   json.set("lastSeenServer/.sv", "timestamp");
 
-  // Push to /vestsLive/{vestId}
   if (Firebase.setJSON(fbdo, path.c_str(), json)) {
     Serial.printf("[RTDB] 🟢 Vest %s marked ONLINE in /vestsLive\n", currentVestId.c_str());
   } else {
     Serial.printf("[RTDB ERROR] /vestsLive: %s\n", fbdo.errorReason().c_str());
   }
 
-  // Push to /vestsLiveByMac/{cleanMac}
-  String macPath = String("/vestsLiveByMac/") + esp32CleanMac;
   Firebase.setJSON(fbdo, macPath.c_str(), json);
 
-  // Sync online presence directly to Cloud Firestore
-  syncOnlinePresenceToFirestore(true);
+  // Only poll MAC-to-Vest and Worker assignment every 30 seconds to keep the loop fast and responsive
+  static unsigned long lastAssignmentCheckMs = 0;
+  unsigned long now = millis();
+  if (lastAssignmentCheckMs == 0 || (now - lastAssignmentCheckMs >= 30000)) {
+    lastAssignmentCheckMs = now;
 
-  // Sync assigned worker from Firebase Realtime Database (via vest path or mac path)
-  String workerFound = "";
-  if (Firebase.getString(fbdo, (path + "/assignedWorkerId").c_str())) {
-    workerFound = fbdo.stringData();
-  }
-  if ((workerFound.length() == 0 || workerFound == "null") && Firebase.getString(fbdo, (macPath + "/assignedWorkerId").c_str())) {
-    workerFound = fbdo.stringData();
-  }
+    String macMappingPath = String("/macToVest/") + esp32CleanMac;
+    if (Firebase.getString(fbdo, macMappingPath.c_str())) {
+      String mappedId = fbdo.stringData();
+      if (mappedId.length() > 0 && mappedId != "null" && mappedId != currentVestId) {
+        currentVestId = mappedId;
+        Serial.printf("[SYNC] 🎯 Cloud mapped Vest ID to: %s\n", currentVestId.c_str());
+        preferences.begin("bevest", false);
+        preferences.putString("vestId", currentVestId);
+        preferences.end();
+      }
+    }
 
-  if (workerFound.length() > 0 && workerFound != "null" && workerFound != currentWorkerId) {
-    currentWorkerId = workerFound;
-    Serial.printf("[SYNC] ✅ Synced assigned worker to: %s\n", currentWorkerId.c_str());
-    preferences.begin("bevest", false);
-    preferences.putString("workerId", currentWorkerId);
-    preferences.end();
+    String workerFound = "";
+    if (Firebase.getString(fbdo, (path + "/assignedWorkerId").c_str())) {
+      workerFound = fbdo.stringData();
+    }
+    if ((workerFound.length() == 0 || workerFound == "null") && Firebase.getString(fbdo, (macPath + "/assignedWorkerId").c_str())) {
+      workerFound = fbdo.stringData();
+    }
+
+    if (workerFound.length() > 0 && workerFound != "null" && workerFound != currentWorkerId) {
+      currentWorkerId = workerFound;
+      Serial.printf("[SYNC] ✅ Synced assigned worker to: %s\n", currentWorkerId.c_str());
+      preferences.begin("bevest", false);
+      preferences.putString("workerId", currentWorkerId);
+      preferences.end();
+    }
   }
 }
 
-// ── Cloud Firestore Presence Sync ────────────────────────────────────────────
+// ── Cloud Presence Sync (Handled via single RTDB SSL session; Android App mirrors to Firestore) ──
 void syncOnlinePresenceToFirestore(bool isOnline) {
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  WiFiClientSecure client;
-  client.setInsecure(); // No certificate verification for Google Cloud REST
-  HTTPClient http;
-
-  String url = String("https://firestore.googleapis.com/v1/projects/bevest-70698/databases/(default)/documents/vests/") 
-               + currentVestId + "?updateMask.fieldPaths=online&updateMask.fieldPaths=lastSeen&key=" + FIREBASE_API_KEY;
-
-  if (http.begin(client, url)) {
-    http.addHeader("Content-Type", "application/json");
-    const char* tok = Firebase.getToken();
-    if (tok != nullptr && strlen(tok) > 0) {
-      http.addHeader("Authorization", String("Bearer ") + tok);
-    } else if (config.signer.tokens.jwt.length() > 0) {
-      http.addHeader("Authorization", String("Bearer ") + config.signer.tokens.jwt.c_str());
-    }
-
-    uint64_t epochMs = getEpochMillis();
-    char epochBuf[24];
-    snprintf(epochBuf, sizeof(epochBuf), "%llu", (unsigned long long)(epochMs > 0 ? epochMs : millis()));
-    String body = String("{\"fields\":{\"online\":{\"booleanValue\":") + (isOnline ? "true" : "false")
-                + "},\"lastSeen\":{\"integerValue\":\"" + String(epochBuf) + "\"}}}";
-
-    int httpCode = http.PATCH(body);
-    if (httpCode == 200 || httpCode == 204) {
-      Serial.printf("[FIRESTORE] 🟢 Vest %s marked online=%s in Cloud Firestore!\n",
-                    currentVestId.c_str(), isOnline ? "true" : "false");
-    } else {
-      Serial.printf("[FIRESTORE] ℹ️ Cloud Firestore sync code: %d\n", httpCode);
-    }
-    http.end();
-  }
+  if (WiFi.status() != WL_CONNECTED || !Firebase.ready()) return;
+  Firebase.setBool(fbdo, String("/vestsLive/") + currentVestId + "/online", isOnline);
 }
 
-// ── MPU6050 Motion & Fall Detection ──────────────────────────────────────────
+// ── MPU6050 Motion & Fall Detection (Runs at 200Hz in non-blocking loop) ────
 void readMPU6050() {
   if (!mpuOk) {
+    static unsigned long lastMpuRetryMs = 0;
+    if (millis() - lastMpuRetryMs > 3000) {
+      lastMpuRetryMs = millis();
+      if (mpu.begin()) {
+        mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+        mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+        mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+        mpuOk = true;
+        Serial.println("[MPU6050] ✅ Reconnected on I2C bus!");
+      }
+    }
     motionState = "STATIONARY";
     return;
   }
@@ -1061,48 +1098,70 @@ void readMPU6050() {
 
   unsigned long now = millis();
 
-  if (fallDetected) {
+  if (fallCooldownActive) {
     if (now - fallTimestamp >= FALL_COOLDOWN_MS) {
+      fallCooldownActive = false;
       fallDetected = false;
       motionState = "STATIONARY";
       stopEmergencyAlarm();
-      Serial.println("[MPU6050] Fall alert resolved. Normal state resumed.");
-      Firebase.setBool(fbdo, String("/vestsLive/") + currentVestId + "/fallDetected", false);
-      pushReadingToFirebase();
+      Serial.println("[MPU6050] Fall cooldown finished. Normal state resumed.");
+      pendingFallClear = true;
     }
     return;
   }
 
-  if (isnan(mag) || mag < 0.05f) return;
+  // Self-heal I2C bus if jumper wires bounce during sudden movement
+  static int invalidReadCount = 0;
+  if (isnan(mag) || mag < 0.05f) {
+    invalidReadCount++;
+    if (invalidReadCount >= 10) {
+      invalidReadCount = 0;
+      Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+      Wire.setTimeOut(25);
+      if (mpu.begin()) {
+        mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+        mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+        mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+      }
+    }
+    return;
+  }
+  invalidReadCount = 0;
 
   static unsigned long freefallStartTime = 0;
   static bool freefallDetected = false;
 
-  if (mag < 0.55f) {
+  // Stage 1: Free-fall / sudden drop (< 0.65g)
+  if (mag < 0.65f) {
     freefallDetected = true;
     freefallStartTime = now;
   }
 
-  if (freefallDetected) {
-    if (now - freefallStartTime <= 1200) {
-      if (mag > 4.5f) {
-        fallDetected = true;
-        fallTimestamp = now;
-        freefallDetected = false;
-        motionState = "FALL_DETECTED";
-        Serial.printf("\n[MPU6050] ⚠️ REAL FALL DETECTED! (Impact: %.2fg)\n", mag);
-        startEmergencyAlarm(FALL_COOLDOWN_MS);
-        pushReadingToFirebase();
-        return;
-      }
-    } else {
-      freefallDetected = false;
-    }
+  // Stage 2: Impact (> 2.8g within 1.2s of free-fall, or severe impact > 4.5g)
+  bool impactAfterFreefall = freefallDetected && (now - freefallStartTime <= 1200) && (mag > 2.8f);
+  bool severeDirectImpact  = (mag > 4.5f);
+
+  if (freefallDetected && (now - freefallStartTime > 1200)) {
+    freefallDetected = false;
   }
 
-  if (fabs(mag - 1.0f) > 0.18f) {
+  if (impactAfterFreefall || severeDirectImpact) {
+    fallDetected = true;
+    fallCooldownActive = true;
+    fallTimestamp = now;
+    freefallDetected = false;
+    motionState = "FALL_DETECTED";
+    Serial.printf("\n[MPU6050] ⚠️ REAL FALL DETECTED! (Impact: %.2fg)\n", mag);
+    startEmergencyAlarm(FALL_COOLDOWN_MS);
+    pendingFallPush = true;
+    return;
+  }
+
+  // Hold MOVING state for 3.5 seconds after any movement (> 0.15g delta from 1.0g)
+  if (fabs(mag - 1.0f) > 0.15f) {
+    lastMovingMs = now;
     motionState = "MOVING";
-  } else {
+  } else if (now - lastMovingMs >= 3500) {
     motionState = "STATIONARY";
   }
 }
@@ -1209,7 +1268,7 @@ void checkVitalEmergency() {
     lastVitalAlertMs = now;
     Serial.printf("\n[VITAL ALERT] 🚨 CRITICAL VITALS: %s- Activating Alarm!\n", alertMsg.c_str());
     startEmergencyAlarm(5000);
-    pushReadingToFirebase();
+    pendingImmediatePush = true;
   }
 }
 
@@ -1220,7 +1279,7 @@ void checkSOS() {
       sosTriggered = true;
       Serial.println("\n[SOS] 🚨 SOS EMERGENCY PRESSED! Activating Siren!");
       startEmergencyAlarm(10000);
-      pushReadingToFirebase();
+      pendingImmediatePush = true;
     }
   } else {
     sosTriggered = false;
