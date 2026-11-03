@@ -14,6 +14,7 @@ import com.jtexpress.bevest.utils.AppError
 import com.jtexpress.bevest.utils.Outcome
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
@@ -26,28 +27,71 @@ class WorkerRepositoryImpl @Inject constructor(
 ) : WorkerRepository {
 
     private val workers get() = firestore.collection(FirebasePaths.WORKERS)
+    private val vests get() = firestore.collection(FirebasePaths.VESTS)
 
     override fun observeWorkers(contractorId: String?, siteId: String?): Flow<Outcome<List<Worker>>> {
         var query: Query = workers
         if (siteId != null) query = query.whereEqualTo("siteId", siteId)
         else if (contractorId != null) query = query.whereEqualTo("contractorId", contractorId)
-        return query.snapshots()
-            .map { qs -> Outcome.Success(qs.documents.map { it.toWorker() }) as Outcome<List<Worker>> }
-            .catch { emit(Outcome.Failure(it.toAppError())) }
+        return combine(
+            query.snapshots(),
+            vests.snapshots(),
+        ) { workersSnap, vestsSnap ->
+            val validVestIds = vestsSnap.documents.map { it.id }.toSet()
+            val list = workersSnap.documents.map { doc ->
+                val w = doc.toWorker()
+                val assigned = w.assignedVestId
+                if (assigned != null && !validVestIds.contains(assigned)) {
+                    // Vest was deleted from database! Automatically self-heal worker record
+                    doc.reference.update("assignedVestId", null)
+                    w.copy(assignedVestId = null)
+                } else {
+                    w
+                }
+            }
+            Outcome.Success(list) as Outcome<List<Worker>>
+        }.catch { emit(Outcome.Failure(it.toAppError())) }
     }
 
     override fun observeWorker(workerId: String): Flow<Outcome<Worker>> =
-        workers.document(workerId).snapshots()
-            .map { snap ->
-                if (snap.exists()) Outcome.Success(snap.toWorker())
-                else Outcome.Failure(AppError.NotFound("This worker no longer exists."))
+        combine(
+            workers.document(workerId).snapshots(),
+            vests.snapshots(),
+        ) { snap, vestsSnap ->
+            if (!snap.exists()) {
+                Outcome.Failure(AppError.NotFound("This worker no longer exists."))
+            } else {
+                val validVestIds = vestsSnap.documents.map { it.id }.toSet()
+                val w = snap.toWorker()
+                val assigned = w.assignedVestId
+                if (assigned != null && !validVestIds.contains(assigned)) {
+                    snap.reference.update("assignedVestId", null)
+                    Outcome.Success(w.copy(assignedVestId = null))
+                } else {
+                    Outcome.Success(w)
+                }
             }
-            .catch { emit(Outcome.Failure(it.toAppError())) }
+        }.catch { emit(Outcome.Failure(it.toAppError())) }
 
     override suspend fun getWorker(workerId: String): Outcome<Worker> = try {
         val snap = workers.document(workerId).get().await()
-        if (snap.exists()) Outcome.Success(snap.toWorker())
-        else Outcome.Failure(AppError.NotFound())
+        if (snap.exists()) {
+            val w = snap.toWorker()
+            val assigned = w.assignedVestId
+            if (assigned != null) {
+                val vestSnap = vests.document(assigned).get().await()
+                if (!vestSnap.exists()) {
+                    workers.document(workerId).update("assignedVestId", null)
+                    Outcome.Success(w.copy(assignedVestId = null))
+                } else {
+                    Outcome.Success(w)
+                }
+            } else {
+                Outcome.Success(w)
+            }
+        } else {
+            Outcome.Failure(AppError.NotFound())
+        }
     } catch (e: Exception) {
         Outcome.Failure(e.toAppError())
     }

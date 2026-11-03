@@ -69,6 +69,23 @@ Install the following via the Arduino IDE **Library Manager** (`Ctrl+Shift+I`):
 
 ---
 
+## Blue LED Diagnostic Status Table
+
+Since the smart vest does not have a physical screen, the onboard **Blue LED (GPIO 2)** acts as the real-time system status monitor:
+
+| LED Pattern | Meaning / State | Action / Troubleshooting |
+| :--- | :--- | :--- |
+| **Slow Blinking**<br/>*(500ms ON / 500ms OFF)* | **BLE Broadcast / Pairing Mode** | Open BeVest App -> Add Vest -> Connect. Ready to pair. |
+| **Fast Blinking**<br/>*(120ms ON / 120ms OFF)* | **Wi-Fi Connected & Normal Streaming** | All systems operational. Real-time telemetry streaming to Firebase. |
+| **Solid ON** | **BLE Connected** | Mobile app is actively connected to the vest over Bluetooth GATT. |
+| **2 Blinks every 2 sec**<br/>*(• • pause)* | **Wi-Fi Connection Error** | Cannot connect to saved Wi-Fi. Check 2.4GHz router, password, or signal strength. (Vest keeps retrying in background). |
+| **3 Blinks every 2 sec**<br/>*(• • • pause)* | **Firebase Connection / Auth Error** | Connected to Wi-Fi, but cannot reach or authenticate with Firebase. Check internet access or Firebase rules. |
+| **4 Blinks every 2 sec**<br/>*(• • • • pause)* | **Sensor Hardware Error (MPU6050)** | MPU6050 Gyro/Accelerometer not detected on I2C. Check SDA=GPIO21, SCL=GPIO22, VCC=3.3V, GND. |
+| **5 Blinks every 2 sec**<br/>*(• • • • • pause)* | **Power Supply / Brownout Warning** | USB voltage dropped below 4.3V (powerbank voltage sag or bad cable). Use a shorter, high-quality USB cable. |
+| **Rapid Double Strobe**<br/>*(Emergency flash)* | **Fall Detected or SOS Triggered** | Emergency state active. Worker requires immediate attention. |
+
+---
+
 ## How to Factory Reset / Re-Pair
 
 If you move to a new Wi-Fi network or need to re-pair the vest, you do not need to reflash the code:

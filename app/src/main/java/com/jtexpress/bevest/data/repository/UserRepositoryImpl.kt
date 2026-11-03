@@ -1,10 +1,12 @@
 package com.jtexpress.bevest.data.repository
 
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.jtexpress.bevest.data.firebase.FirebasePaths
 import com.jtexpress.bevest.data.firebase.snapshots
 import com.jtexpress.bevest.data.firebase.toAppError
 import com.jtexpress.bevest.data.mapper.toUser
+import com.jtexpress.bevest.domain.model.Subscription
 import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.domain.model.UserRole
 import com.jtexpress.bevest.domain.repository.UserRepository
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.tasks.await
+import java.util.Date
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -86,6 +89,8 @@ class UserRepositoryImpl @Inject constructor(
     override fun observeSsos(contractorId: String): Flow<Outcome<List<User>>> =
         users.whereEqualTo("role", UserRole.SSO.name)
             .whereEqualTo("contractorId", contractorId)
+            // The rules only let a contractor list /users with a bounded query.
+            .limit(200)
             .snapshots()
             .map { qs -> Outcome.Success(qs.documents.map { it.toUser() }) as Outcome<List<User>> }
             .catch { emit(Outcome.Failure(it.toAppError())) }
@@ -99,6 +104,11 @@ class UserRepositoryImpl @Inject constructor(
             .map { qs -> Outcome.Success(qs.documents.map { it.toUser() }) as Outcome<List<User>> }
             .catch { emit(Outcome.Failure(it.toAppError())) }
 
+    override fun observeAllUsers(): Flow<Outcome<List<User>>> =
+        users.snapshots()
+            .map { qs -> Outcome.Success(qs.documents.map { it.toUser() }) as Outcome<List<User>> }
+            .catch { emit(Outcome.Failure(it.toAppError())) }
+
     override suspend fun updateProfile(
         uid: String,
         firstName: String,
@@ -107,6 +117,50 @@ class UserRepositoryImpl @Inject constructor(
     ): Outcome<Unit> = try {
         users.document(uid).update(
             mapOf("firstName" to firstName, "lastName" to lastName, "phone" to phone),
+        ).await()
+        Outcome.Success(Unit)
+    } catch (e: Exception) {
+        Outcome.Failure(e.toAppError())
+    }
+
+    override suspend fun updateSso(
+        uid: String,
+        firstName: String,
+        lastName: String,
+        phone: String,
+        siteId: String?,
+    ): Outcome<Unit> = try {
+        users.document(uid).update(
+            mapOf(
+                "firstName" to firstName,
+                "lastName" to lastName,
+                "phone" to phone,
+                "siteId" to siteId,
+            ),
+        ).await()
+        Outcome.Success(Unit)
+    } catch (e: Exception) {
+        Outcome.Failure(e.toAppError())
+    }
+
+    override suspend fun updateSubscription(uid: String, subscription: Subscription): Outcome<Unit> = try {
+        // Same shape the web contractor portal writes, so either client can read it.
+        users.document(uid).update(
+            "subscription",
+            mapOf(
+                "planId" to subscription.planId,
+                "planName" to subscription.planName,
+                "billingCycle" to subscription.billingCycle.raw,
+                "monthlyPrice" to subscription.monthlyPrice,
+                "annualPrice" to subscription.annualPrice,
+                "vestLimit" to subscription.vestLimit,
+                "ssoLimit" to subscription.ssoLimit,
+                "storageGb" to subscription.storageGb,
+                "discountPercent" to subscription.discountPercent,
+                "assignedAt" to subscription.assignedAt?.let { Timestamp(Date(it)) },
+                "renewDate" to subscription.renewDate?.let { Timestamp(Date(it)) },
+                "status" to subscription.status,
+            ),
         ).await()
         Outcome.Success(Unit)
     } catch (e: Exception) {

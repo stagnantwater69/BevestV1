@@ -15,6 +15,8 @@ data class User(
     val contractorId: String? = null,
     val siteId: String? = null,
     val active: Boolean = true,
+    /** Contractors only; null means no plan chosen yet. */
+    val subscription: Subscription? = null,
 ) {
     val fullName: String get() = listOf(firstName, lastName).filter { it.isNotBlank() }.joinToString(" ")
 }

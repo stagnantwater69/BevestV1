@@ -41,6 +41,18 @@ class AlertRepositoryImpl @Inject constructor(
             .catch { emit(Outcome.Failure(it.toAppError())) }
     }
 
+    override fun observeContractorActiveAlerts(contractorId: String): Flow<Outcome<List<Alert>>> =
+        alerts.whereIn("status", listOf(AlertStatus.ACTIVE.name, AlertStatus.ACKNOWLEDGED.name))
+            // The rules only let a contractor read alerts carrying their contractorId.
+            .whereEqualTo("contractorId", contractorId)
+            .snapshots()
+            .map { qs ->
+                Outcome.Success(
+                    qs.documents.map { it.toAlert() }.sortedByDescending { it.createdAt },
+                ) as Outcome<List<Alert>>
+            }
+            .catch { emit(Outcome.Failure(it.toAppError())) }
+
     override fun observeAlertHistory(siteId: String?, limit: Long): Flow<Outcome<List<Alert>>> {
         var query: Query = alerts.orderBy("createdAt", Query.Direction.DESCENDING).limit(limit)
         if (siteId != null) query = alerts.whereEqualTo("siteId", siteId)
@@ -117,7 +129,8 @@ class AlertRepositoryImpl @Inject constructor(
         outcome: String,
         notes: String,
     ): Outcome<Unit> = try {
-        incidents.document(incidentId).update(
+        val ref = incidents.document(incidentId)
+        ref.update(
             mapOf(
                 "outcome" to outcome,
                 "resolutionNotes" to notes,
@@ -125,6 +138,11 @@ class AlertRepositoryImpl @Inject constructor(
                 "resolvedAt" to FieldValue.serverTimestamp(),
             ),
         ).await()
+        // Closing the incident closes the alert it grew from, or that alert stays
+        // "active" on the dashboard forever.
+        ref.get().await().getString("alertId")?.takeIf { it.isNotBlank() }?.let { alertId ->
+            runCatching { resolveAlert(alertId, byUserId, notes.ifBlank { outcome }) }
+        }
         Outcome.Success(Unit)
     } catch (e: Exception) {
         Outcome.Failure(e.toAppError())

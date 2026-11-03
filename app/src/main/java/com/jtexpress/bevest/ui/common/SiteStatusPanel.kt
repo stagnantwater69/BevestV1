@@ -3,6 +3,7 @@ package com.jtexpress.bevest.ui.common
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
@@ -35,11 +37,12 @@ import com.jtexpress.bevest.ui.theme.Motion
 import com.jtexpress.bevest.ui.theme.Spacing
 import com.jtexpress.bevest.ui.theme.StatStyle
 
-/** One figure in the panel's count strip. */
+/** One figure in the panel's count strip. [onClick] makes it tappable. */
 data class SiteCount(
     val value: Int,
     val label: String,
     val accent: Color? = null,
+    val onClick: (() -> Unit)? = null,
 )
 
 /**
@@ -164,9 +167,19 @@ private fun CountFigure(count: SiteCount, modifier: Modifier = Modifier) {
     // earns its semantic color, and a zero danger count reads as calm rather than red.
     val emphasised = count.value > 0 && count.accent != null
     Column(
-        modifier.semantics(mergeDescendants = true) {
-            contentDescription = "${count.value} ${count.label}"
-        },
+        modifier
+            .clip(BevestShapes.control)
+            .then(
+                if (count.onClick != null) {
+                    Modifier.clickable(onClickLabel = "Show ${count.label.lowercase()} workers", onClick = count.onClick)
+                } else {
+                    Modifier
+                },
+            )
+            .padding(vertical = Spacing.xs)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "${count.value} ${count.label}"
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {

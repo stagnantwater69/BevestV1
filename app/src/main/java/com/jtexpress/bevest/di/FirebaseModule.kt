@@ -27,7 +27,8 @@ object FirebaseModule {
 
     @Provides
     @Singleton
-    fun provideFirebaseDatabase(): FirebaseDatabase = Firebase.database
+    fun provideFirebaseDatabase(): FirebaseDatabase =
+        Firebase.database("https://bevest-70698-default-rtdb.asia-southeast1.firebasedatabase.app")
 
     @Provides
     @Singleton

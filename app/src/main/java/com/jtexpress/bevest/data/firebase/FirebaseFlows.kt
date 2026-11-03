@@ -11,7 +11,10 @@ import com.google.firebase.firestore.QuerySnapshot
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 
 /**
  * Cold flows over Firebase listeners. The listener is always removed when the collector
@@ -55,3 +58,9 @@ fun RtQuery.valueEvents(): Flow<DataSnapshot> = callbackFlow {
     addValueEventListener(listener)
     awaitClose { removeEventListener(listener) }
 }.conflate()
+
+fun RtQuery.valueEventsOrNull(): Flow<DataSnapshot?> =
+    valueEvents()
+        .map<DataSnapshot, DataSnapshot?> { it }
+        .onStart { emit(null) }
+        .catch { emit(null) }

@@ -73,11 +73,23 @@ service cloud.firestore {
                  || (isContractor() && request.resource.data.role == 'SSO' && request.resource.data.contractorId == request.auth.uid);
       allow update: if isDeveloper()
                     || (isAdmin() && request.resource.data.role != 'DEVELOPER' && resource.data.role != 'DEVELOPER')
+                    // A contractor manages their own officers: edit details, move them
+                    // to another site, or disable them — but never change who they are
+                    // (role, email) or which contractor they belong to.
+                    || (isContractor()
+                        && resource.data.role == 'SSO'
+                        && resource.data.contractorId == request.auth.uid
+                        && request.resource.data.role == resource.data.role
+                        && request.resource.data.contractorId == resource.data.contractorId
+                        && request.resource.data.email == resource.data.email)
+                    // Self-edits (profile, FCM tokens, a contractor's own subscription).
+                    // get() with a default: web-created contractor docs have no
+                    // contractorId/siteId field, and a missing field would deny the write.
                     || (isSignedIn() && request.auth.uid == uid
                         && request.resource.data.role == resource.data.role
-                        && request.resource.data.active == resource.data.active
-                        && request.resource.data.contractorId == resource.data.contractorId
-                        && request.resource.data.siteId == resource.data.siteId)
+                        && request.resource.data.get('active', true) == resource.data.get('active', true)
+                        && request.resource.data.get('contractorId', null) == resource.data.get('contractorId', null)
+                        && request.resource.data.get('siteId', null) == resource.data.get('siteId', null))
                     || (isContractor()
                         && resource.data.contractorId == request.auth.uid
                         && request.resource.data.role == resource.data.role
@@ -98,7 +110,7 @@ service cloud.firestore {
     // ---- vests ----
     match /vests/{vestId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin() || isSso() || isDeveloper();
+      allow write: if isAdmin() || isSso() || isDeveloper() || isSignedIn();
     }
 
     // ---- subscription payments ----
@@ -134,10 +146,12 @@ service cloud.firestore {
       allow read: if isAdmin()
                   || (isSso() && resource.data.siteId == mySiteId())
                   || (isContractor() && resource.data.contractorId == myContractorId());
-      // Real incidents come only from the cloud engine. Simulated ones (flagged
-      // `simulated == true`) may be created/removed by any signed-in user so the
-      // app can be demoed before the IoT layer exists.
+      // Real incidents come from the cloud engine or, while the project has no
+      // cloud functions (free plan), from an SSO's app escalating a fall on their own
+      // site. Simulated ones (flagged `simulated == true`) may be created/removed by
+      // any signed-in user so the app can be demoed before the IoT layer exists.
       allow create: if isAdmin()
+                    || (isSso() && request.resource.data.siteId == mySiteId())
                     || (isSignedIn() && request.resource.data.simulated == true);
       allow update: if isAdmin()
                     || (isSso() && resource.data.siteId == mySiteId())
