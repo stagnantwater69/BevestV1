@@ -598,7 +598,9 @@ const SystemManagement = ({ user }) => {
                 paginatedVests.map((vest) => {
                   const worker = vest.assignedWorkerId ? workersMap[vest.assignedWorkerId] : null;
                   const isAssigned = Boolean(vest.assignedWorkerId);
-                  const isOnline = vest.online === true || vest.online === 'true';
+                  const lastSeenMs = vest.lastSeen?.toDate ? vest.lastSeen.toDate().getTime() : (typeof vest.lastSeen === 'number' ? vest.lastSeen : 0);
+                  const isRecent = lastSeenMs > 0 && (Date.now() - lastSeenMs < 45000);
+                  const isOnline = (vest.online === true || vest.online === 'true') && (lastSeenMs === 0 || isRecent);
 
                   return (
                     <tr key={vest.id}>

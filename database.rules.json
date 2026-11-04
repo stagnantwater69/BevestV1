@@ -4,31 +4,43 @@
     ".write": false,
 
     "liveReadings": {
-      "$workerId": {
-        ".read": "auth != null",
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
 
-        // Sensor fields: only the vest firmware (custom claim device == true) or an
-        // SSO/Admin (role claim set by the syncUserClaims function) may write the
-        // node. This covers the firmware, the in-app IoT simulator (run as an SSO),
-        // and the SSO tools — and blocks every other signed-in account.
-        ".write": "auth != null && (auth.token.device == true || auth.token.role == 'SSO' || auth.token.role == 'ADMIN' || auth.token.role == 'CONTRACTOR')",
-        ".validate": "newData.hasChildren(['timestamp'])",
+    "liveReadingsByVest": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
 
-        "safetyResponse": {
-          // The handshake target. Any signed-in user may set it (an SSO initiating a
-          // check), in addition to the vest and the cloud engine.
-          ".write": "auth != null",
-          ".validate": "newData.isString()"
-        }
-      }
+    "liveReadingsByMac": {
+      ".read": "auth != null",
+      ".write": "auth != null"
     },
 
     "vestsLive": {
-      "$vestId": {
-        ".read": "auth != null",
-        ".write": "auth != null && auth.token.device == true",
-        ".validate": "newData.hasChildren(['battery', 'lastSeen'])"
-      }
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "vestsLiveByMac": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "macToVest": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "vestToWorker": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "workerToVest": {
+      ".read": "auth != null",
+      ".write": "auth != null"
     }
   }
 }

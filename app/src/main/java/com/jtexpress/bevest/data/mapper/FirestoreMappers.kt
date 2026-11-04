@@ -95,19 +95,38 @@ fun DocumentSnapshot.toWorker(): Worker = Worker(
     active = bool("active", true),
 )
 
-fun DocumentSnapshot.toVest(): Vest = Vest(
-    vestId = id,
-    assignedWorkerId = strOrNull("assignedWorkerId"),
-    status = VestStatus.fromRaw(strOrNull("status")),
-    batteryPercent = int("battery"),
-    online = bool("online"),
-    lastSeen = millis("lastSeen"),
-    inCompanyDirectory = bool("inCompanyDirectory"),
-    companyId = strOrNull("companyId"),
-    siteId = strOrNull("siteId"),
-    macAddress = strOrNull("macAddress"),
-    serialNumber = strOrNull("serialNumber") ?: strOrNull("esp32Serial"),
-)
+fun DocumentSnapshot.toVest(): Vest {
+    val rawOnline = bool("online")
+    val lastSeen = millis("lastSeen")
+    // Freshness check: must have communicated within the last 45 seconds to be considered active online
+    val diff = if (lastSeen != null) System.currentTimeMillis() - lastSeen else Long.MAX_VALUE
+    val isRecentlySeen = lastSeen != null && (lastSeen > 100_000_000_000L) && diff <= 45_000L && diff >= -120_000L
+    val isOnline = rawOnline && isRecentlySeen
+    val rawStatus = VestStatus.fromRaw(strOrNull("status"))
+    val assignedWorker = strOrNull("assignedWorkerId")?.takeIf { it.isNotBlank() }
+    val inDir = bool("inCompanyDirectory")
+    
+    val effectiveStatus = when {
+        rawStatus == VestStatus.MAINTENANCE -> VestStatus.MAINTENANCE
+        isOnline && assignedWorker != null -> VestStatus.ACTIVE
+        isOnline -> VestStatus.AVAILABLE
+        assignedWorker != null -> VestStatus.ASSIGNED
+        else -> VestStatus.OFFLINE
+    }
+    return Vest(
+        vestId = id,
+        assignedWorkerId = assignedWorker,
+        status = effectiveStatus,
+        batteryPercent = int("battery"),
+        online = isOnline,
+        lastSeen = lastSeen ?: 0L,
+        inCompanyDirectory = inDir,
+        companyId = strOrNull("companyId"),
+        siteId = strOrNull("siteId"),
+        macAddress = strOrNull("macAddress"),
+        serialNumber = strOrNull("serialNumber") ?: strOrNull("esp32Serial"),
+    )
+}
 
 fun DocumentSnapshot.toAlert(): Alert = Alert(
     alertId = id,

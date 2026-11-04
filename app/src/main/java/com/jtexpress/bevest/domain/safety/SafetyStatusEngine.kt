@@ -34,11 +34,6 @@ class SafetyStatusEngine(
     ): SafetyStatus {
         if (reading == null) return SafetyStatus.OFFLINE
 
-        val ageSeconds = (nowMillis - reading.timestamp) / 1000
-        if (reading.timestamp <= 0L || ageSeconds > config.offlineTimeoutSeconds) {
-            return SafetyStatus.OFFLINE
-        }
-
         // The escalation flow (manual emergency button, or a DANGER that went
         // unanswered) is the most severe live state — outrank the vitals checks.
         if (reading.safetyResponse in EMERGENCY_RESPONSES) {
@@ -47,6 +42,11 @@ class SafetyStatusEngine(
 
         if (reading.fallDetected || reading.motionState == MotionState.FALL_DETECTED) {
             return SafetyStatus.DANGER
+        }
+
+        val ageSeconds = (nowMillis - reading.timestamp) / 1000
+        if (reading.timestamp <= 0L || ageSeconds > config.offlineTimeoutSeconds) {
+            return SafetyStatus.OFFLINE
         }
 
         val hrHigh = reading.heartRate?.let { it > config.heartRateHigh } ?: false

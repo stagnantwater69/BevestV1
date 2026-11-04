@@ -7,19 +7,44 @@ import com.jtexpress.bevest.domain.model.SensorReading
 import com.jtexpress.bevest.domain.safety.ThresholdConfig
 
 private fun DataSnapshot.int(key: String): Int? =
-    child(key).getValue(Long::class.java)?.toInt() ?: child(key).getValue(Double::class.java)?.toInt()
+    when (val v = child(key).value) {
+        is Number -> v.toInt()
+        is String -> v.toIntOrNull() ?: v.toDoubleOrNull()?.toInt()
+        else -> null
+    }
 
 private fun DataSnapshot.dbl(key: String): Double? =
-    child(key).getValue(Double::class.java) ?: child(key).getValue(Long::class.java)?.toDouble()
+    when (val v = child(key).value) {
+        is Number -> v.toDouble()
+        is String -> v.toDoubleOrNull()
+        else -> null
+    }
 
-private fun DataSnapshot.str(key: String): String? = child(key).getValue(String::class.java)
-private fun DataSnapshot.bool(key: String): Boolean = child(key).getValue(Boolean::class.java) ?: false
+private fun DataSnapshot.str(key: String): String? =
+    child(key).value?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+
+private fun DataSnapshot.bool(key: String): Boolean =
+    when (val v = child(key).value) {
+        is Boolean -> v
+        is Number -> v.toLong() > 0L
+        is String -> v.equals("true", ignoreCase = true) || v == "1"
+        else -> false
+    }
+
 private fun DataSnapshot.long(key: String): Long =
-    child(key).getValue(Long::class.java) ?: child(key).getValue(Double::class.java)?.toLong() ?: 0L
+    when (val v = child(key).value) {
+        is Number -> v.toLong()
+        is String -> v.toLongOrNull() ?: v.toDoubleOrNull()?.toLong() ?: 0L
+        else -> 0L
+    }
 
 /** Maps the agreed IoT payload (plan section 29). Confirm field names with the firmware team. */
 fun DataSnapshot.toSensorReading(workerId: String): SensorReading? {
     if (!exists()) return null
+    val effectiveTimestamp = long("timestampServer").takeIf { it > 1_000_000_000_000L }
+        ?: long("timestamp").takeIf { it > 1_000_000_000_000L }
+        ?: long("lastSeenServer").takeIf { it > 1_000_000_000_000L }
+        ?: 0L
     return SensorReading(
         workerId = workerId,
         vestId = str("vestId").orEmpty(),
@@ -31,7 +56,7 @@ fun DataSnapshot.toSensorReading(workerId: String): SensorReading? {
         longitude = dbl("longitude"),
         batteryPercent = int("battery"),
         safetyResponse = SafetyResponseState.fromRaw(str("safetyResponse")),
-        timestamp = long("timestamp"),
+        timestamp = effectiveTimestamp,
     )
 }
 

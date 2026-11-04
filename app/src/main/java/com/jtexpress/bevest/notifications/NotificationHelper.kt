@@ -6,8 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.jtexpress.bevest.MainActivity
@@ -16,50 +14,52 @@ import com.jtexpress.bevest.R
 object NotificationChannels {
     /**
      * Site Safety Officers only: full-screen alert, like an NDRRMC emergency alert. The
-     * channel itself is silent — [AlarmSoundService] plays the alarm on a loop until
-     * someone stops it, which a notification sound can't do.
+     * channel itself is silent — [AlarmSoundService] vibrates on a loop until someone
+     * stops it.
      */
     const val EMERGENCY = "emergency_alarm"
     /**
-     * Used only when Android won't let [AlarmSoundService] start: the alarm sound and
-     * vibration ride on the notification instead, repeating until it's dealt with.
+     * Used only when Android won't let [AlarmSoundService] start: vibration rides on the
+     * notification instead, repeating until it's dealt with (no placeholder sound).
      */
-    const val EMERGENCY_FALLBACK = "emergency_alarm_sound"
-    /** The first alarm channel, replaced when the alarm moved to [AlarmSoundService]. */
+    const val EMERGENCY_FALLBACK = "emergency_alarm_vibrate"
+    /** Retired channels that previously had placeholder sound attached. */
     internal const val RETIRED_EMERGENCY = "critical_alarm"
-    /** Contractors: a normal high-priority notification for danger on their sites. */
-    const val CRITICAL = "critical"
+    internal const val RETIRED_EMERGENCY_SOUND = "emergency_alarm_sound"
+    internal const val RETIRED_CRITICAL = "critical"
+    /** Contractors: a high-priority vibration-only notification for danger on their sites. */
+    const val CRITICAL = "critical_vibrate"
     const val WARNING = "warning"
     const val MAINTENANCE = "maintenance"
 }
 
 object NotificationHelper {
 
-    /** SOS-style: three short, three long, three short, then a pause. Loops while the alarm sounds. */
+    /** SOS-style: three short, three long, three short, then a pause. Loops while the alarm is active. */
     internal val ALARM_VIBRATION = longArrayOf(
         0, 250, 150, 250, 150, 250, 300,
         700, 200, 700, 200, 700, 300,
         250, 150, 250, 150, 250, 1000,
     )
 
-    private fun alarmUri(context: Context): Uri =
-        Uri.parse("android.resource://${context.packageName}/${R.raw.bevest_alarm}")
-
     fun ensureChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        // A channel's sound can't change once created, so the old one goes.
+        // A channel's sound can't change once created, so delete any retired sound channels.
         manager.deleteNotificationChannel(NotificationChannels.RETIRED_EMERGENCY)
+        manager.deleteNotificationChannel(NotificationChannels.RETIRED_EMERGENCY_SOUND)
+        manager.deleteNotificationChannel(NotificationChannels.RETIRED_CRITICAL)
         manager.createNotificationChannel(
             NotificationChannel(
                 NotificationChannels.EMERGENCY,
                 "Emergency alarms",
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "Full-screen alert with a looping alarm for falls, no safety " +
+                description = "Full-screen alert with looping vibration for falls, no safety " +
                     "response and emergencies"
-                // AlarmSoundService plays and vibrates; the channel only shows the alert.
+                // AlarmSoundService vibrates; the channel only shows the alert with no sound.
                 setSound(null, null)
-                enableVibration(false)
+                enableVibration(true)
+                vibrationPattern = ALARM_VIBRATION
                 // Only honoured once the user allows it; AlarmReadiness walks them there.
                 setBypassDnd(true)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
@@ -68,20 +68,13 @@ object NotificationHelper {
         manager.createNotificationChannel(
             NotificationChannel(
                 NotificationChannels.EMERGENCY_FALLBACK,
-                "Emergency alarms (backup sound)",
+                "Emergency alarms (backup vibration)",
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "Used if the looping alarm can't start"
+                description = "Used if the looping vibration service can't start"
+                setSound(null, null)
                 enableVibration(true)
                 vibrationPattern = ALARM_VIBRATION
-                // The alarm stream keeps playing when the ringer is on silent.
-                setSound(
-                    alarmUri(context),
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build(),
-                )
                 setBypassDnd(true)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             },
@@ -92,8 +85,10 @@ object NotificationHelper {
                 "Safety alerts",
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "Falls and emergencies on your sites"
+                description = "Falls and emergencies on your sites (vibration only)"
+                setSound(null, null)
                 enableVibration(true)
+                vibrationPattern = ALARM_VIBRATION
             },
         )
         manager.createNotificationChannel(
@@ -101,7 +96,11 @@ object NotificationHelper {
                 NotificationChannels.WARNING,
                 "Warnings",
                 NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply { description = "High heart rate, high temperature, inactivity, vest offline" },
+            ).apply {
+                description = "High heart rate, high temperature, inactivity, vest offline"
+                setSound(null, null)
+                enableVibration(true)
+            },
         )
         manager.createNotificationChannel(
             NotificationChannel(
@@ -117,7 +116,7 @@ object NotificationHelper {
     /**
      * Shows a notification that deep-links into the app. [type] is INCIDENT or ALERT and
      * [targetId] is the corresponding document id (plan section 22). On the
-     * [NotificationChannels.EMERGENCY] channel the alarm loops until someone stops it.
+     * [NotificationChannels.EMERGENCY] channel the vibration loops until someone stops it.
      */
     fun show(
         context: Context,
@@ -154,6 +153,8 @@ object NotificationHelper {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
             .setContentIntent(pending)
+            .setSound(null)
+            .setVibrate(if (silent) longArrayOf(0L) else ALARM_VIBRATION)
             .setSilent(silent)
 
         if (alarm) {
@@ -165,7 +166,7 @@ object NotificationHelper {
                 putDeepLink(type, targetId, workerId)
             }
             // Swiping the alert away stops the alarm too, rather than leaving it
-            // playing with nothing on screen to stop it.
+            // vibrating with nothing on screen to stop it.
             val swiped = Intent(stop).putExtra(EXTRA_SWIPED, true)
             builder
                 .addAction(0, "Respond", pending)
@@ -208,12 +209,12 @@ object NotificationHelper {
                 .setOngoing(true)
                 .setAutoCancel(false)
 
-            // The looping alarm. If Android won't start it right now, the notification
-            // carries the alarm itself instead (it repeats until dealt with, but opening
-            // the shade can cut it short — the service has no such limit).
+            // The looping vibration service. If Android won't start it right now, the
+            // notification carries the vibration itself instead.
             if (AlarmSoundService.start(context, id, builder.build())) return
             builder
                 .setChannelId(NotificationChannels.EMERGENCY_FALLBACK)
+                .setSound(null)
                 .setVibrate(ALARM_VIBRATION)
             val fallback = builder.build()
             fallback.flags = fallback.flags or Notification.FLAG_INSISTENT
@@ -227,7 +228,7 @@ object NotificationHelper {
     }
 
     /**
-     * Stops the siren and vibration but keeps the alert in the notification shade, so
+     * Stops the vibration but keeps the alert in the notification shade, so
      * the officer can still open it once they've silenced the phone.
      */
     fun silence(
