@@ -236,6 +236,7 @@ void beepShort(unsigned long durationMs);
 void triggerBuzzer(int beeps);
 void pushReadingToFirebase(bool isFallEvent = false);
 void pushVestLiveToFirebase();
+void checkRemoteWifiCommand();
 void syncOnlinePresenceToFirestore(bool isOnline = true);
 void firebaseCloudTask(void* pvParameters);
 void printStatus();
@@ -339,12 +340,14 @@ void updateLedIndicator() {
 class ServerCallbacks: public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) {
     bleDeviceConnected = true;
+    digitalWrite(BUZZER_PIN, LOW); // Ensure D25 buzzer stays completely silent on BLE connection
+    buzzerOffTime = 0;
     Serial.println("\n[BLE] >>> Mobile App connected over Bluetooth! <<<");
-    beepShort(120);
   }
 
   void onDisconnect(BLEServer* pServer) {
     bleDeviceConnected = false;
+    digitalWrite(BUZZER_PIN, LOW);
     Serial.println("[BLE] Mobile App disconnected.");
     if (inProvisioningMode && pServer) {
       delay(100);
@@ -523,8 +526,9 @@ void loop() {
   // Check for button reset triggers (BOOT button or SOS button held for 3s)
   checkResetTriggers();
 
-  // Update non-blocking Blue LED indicator pattern
+  // Always service non-blocking Blue LED and Buzzer timers (including during BLE provisioning mode)
   updateLedIndicator();
+  updateBuzzerAndLeds();
 
   // ── Provisioning Mode Handler ──
   if (inProvisioningMode) {
@@ -713,7 +717,7 @@ void startBleProvisioning() {
   BLEDevice::startAdvertising();
 
   Serial.println("[BLE]     ✅ Waiting for BeVest Mobile App to pair...");
-  triggerBuzzer(2); // Two beeps to signal Pairing Mode active
+  digitalWrite(BUZZER_PIN, LOW);
 }
 
 // ── Stop BLE Provisioning Server ─────────────────────────────────────────────
@@ -934,13 +938,86 @@ void firebaseCloudTask(void* pvParameters) {
       pushReadingToFirebase(false);
     }
 
-    // 6. Periodic Vest Heartbeat Push
+    // 6. Periodic Vest Heartbeat Push & Remote Wi-Fi Command Check
     if (now - lastVestLive >= VESTLIVE_INTERVAL_MS) {
       lastVestLive = now;
       pushVestLiveToFirebase();
     }
 
+    static unsigned long lastWifiCmdCheck = 0;
+    if (now - lastWifiCmdCheck >= 4000) {
+      lastWifiCmdCheck = now;
+      checkRemoteWifiCommand();
+    }
+
     vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
+// ── Remote Wi-Fi Re-Provisioning Handler (Option 1: Cloud + BLE Hybrid) ──────
+void checkRemoteWifiCommand() {
+  if (WiFi.status() != WL_CONNECTED || !Firebase.ready() || inProvisioningMode) return;
+
+  String cmdBase = String("/vestsLive/") + currentVestId + "/wifiCommand";
+  if (!Firebase.getBool(fbdo, (cmdBase + "/pending").c_str())) return;
+  if (!fbdo.boolData()) return;
+
+  String mode = "DIRECT_WIFI";
+  String newSsid = "";
+  String newPass = "";
+
+  if (Firebase.getString(fbdo, (cmdBase + "/mode").c_str())) {
+    mode = fbdo.stringData();
+  }
+  if (Firebase.getString(fbdo, (cmdBase + "/ssid").c_str())) {
+    newSsid = fbdo.stringData();
+  }
+  if (Firebase.getString(fbdo, (cmdBase + "/pass").c_str())) {
+    newPass = fbdo.stringData();
+  }
+
+  // Clear command node immediately so it never loops
+  Firebase.deleteNode(fbdo, cmdBase.c_str());
+
+  newSsid.trim();
+  newPass.trim();
+
+  if (mode == "BLE_PAIRING") {
+    Serial.println("\n[WIFI-CMD] 🔵 App requested Bluetooth Pairing Mode for Wi-Fi reconfiguration!");
+    Firebase.setBool(fbdo, String("/vestsLive/") + currentVestId + "/online", false);
+    WiFi.disconnect();
+    setLedPattern(LED_SLOW_BLINK);
+    startBleProvisioning();
+    return;
+  }
+
+  if (newSsid.length() > 0) {
+    Serial.printf("\n[WIFI-CMD] 🔄 Remote Wi-Fi change received -> New SSID: \"%s\"\n", newSsid.c_str());
+
+    // Save new Wi-Fi credentials to NVS Flash so they persist across site transport & reboots
+    preferences.begin("bevest", false);
+    preferences.putString("ssid", newSsid);
+    preferences.putString("pass", newPass);
+    preferences.putBool("configured", true);
+    preferences.end();
+
+    currentWifiSSID = newSsid;
+    currentWifiPassword = newPass;
+    isConfigured = true;
+
+    WiFi.disconnect();
+    delay(200);
+
+    if (attemptWiFiConnection(currentWifiSSID, currentWifiPassword, 15)) {
+      Serial.printf("[WIFI-CMD] ✅ Successfully switched to new Wi-Fi: \"%s\"!\n", currentWifiSSID.c_str());
+      setLedPattern(LED_FAST_BLINK);
+      initFirebaseService();
+    } else {
+      Serial.printf("[WIFI-CMD] ℹ️ New Wi-Fi \"%s\" saved for next site (not in range yet). Starting BLE & background retry...\n",
+                    currentWifiSSID.c_str());
+      setLedPattern(LED_ERR_WIFI_2_BLINKS);
+      startBleProvisioning();
+    }
   }
 }
 
@@ -1014,6 +1091,7 @@ void pushVestLiveToFirebase() {
   json.set("mac", esp32CleanMac);
   json.set("macAddress", esp32MacAddress);
   json.set("serialNumber", esp32SerialNumber);
+  json.set("wifiSsid", currentWifiSSID);
   json.set("battery", batteryPercent);
   json.set("online", true);
   json.set("fallDetected", fallDetected);

@@ -1,4 +1,4 @@
-﻿package com.jtexpress.bevest.ui.sso
+package com.jtexpress.bevest.ui.sso
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
@@ -37,6 +37,8 @@ import androidx.compose.material.icons.outlined.Bluetooth
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Wifi
+import androidx.compose.ui.window.Dialog
+import com.jtexpress.bevest.data.ble.BleConnectionState
 import com.jtexpress.bevest.data.ble.DiscoveredBleVest
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -64,6 +66,7 @@ import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.domain.model.Vest
 import com.jtexpress.bevest.domain.model.VestStatus
+import com.jtexpress.bevest.domain.model.Worker
 import com.jtexpress.bevest.ui.common.BatteryIndicator
 import com.jtexpress.bevest.ui.common.BevestScaffold
 import com.jtexpress.bevest.ui.common.ConfirmationDialog
@@ -317,6 +320,12 @@ fun VestDetailScreen(
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val palette = LocalStatusPalette.current
     var confirmUnassign by remember { mutableStateOf(false) }
+    var showAssignWorkerDialog by remember { mutableStateOf(false) }
+    var showChangeWifiDialog by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose { viewModel.disconnectBle() }
+    }
 
     BevestScaffold(
         title = state.vest?.vestId ?: "Vest",
@@ -416,19 +425,64 @@ fun VestDetailScreen(
                     }
 
                     // ---- Assignment ----
-                    SectionHeader("Assignment")
+                    SectionHeader(
+                        title = "Assignment",
+                        supporting = "Pair or reassign this vest to an active site worker",
+                    )
+                    val currentWearerLabel = vest.assignedWorkerId
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { state.workerNameById[it] ?: it }
+                        ?: "Not assigned to anyone"
                     DetailRow(
                         label = "Current wearer",
-                        value = vest.assignedWorkerId ?: "Not assigned to anyone",
+                        value = currentWearerLabel,
                         icon = BevestIcons.Workers,
+                        valueColor = if (!vest.assignedWorkerId.isNullOrBlank()) palette.normal else null,
                     )
 
-                    if (!vest.assignedWorkerId.isNullOrBlank()) {
+                    if (vest.assignedWorkerId.isNullOrBlank()) {
+                        PrimaryButton(
+                            text = if (state.assigningWorker) "Assigning vest…" else "Assign vest to worker",
+                            onClick = { showAssignWorkerDialog = true },
+                            icon = BevestIcons.Workers,
+                            loading = state.assigningWorker,
+                            enabled = !state.assigningWorker,
+                        )
+                    } else {
+                        SecondaryButton(
+                            text = if (state.assigningWorker) "Reassigning…" else "Assign to a different worker",
+                            onClick = { showAssignWorkerDialog = true },
+                            icon = BevestIcons.Workers,
+                            enabled = !state.assigningWorker,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                         DangerButton(
                             text = "Unassign vest",
                             onClick = { confirmUnassign = true },
                         )
                     }
+
+                    // ---- Site Wi-Fi Network (Option 1: Hybrid Cloud + BLE Re-Provisioning) ----
+                    SectionHeader(
+                        title = "Site Wi-Fi network",
+                        supporting = "Change Wi-Fi SSID & password when moving this vest to another site",
+                    )
+                    DetailRow(
+                        label = "Configured Wi-Fi",
+                        value = vest.wifiSsid?.takeIf { it.isNotBlank() }
+                            ?: if (vest.online) "Connected (active stream)" else "Not connected",
+                        icon = Icons.Outlined.Wifi,
+                        valueColor = if (vest.online) palette.normal else null,
+                    )
+                    SecondaryButton(
+                        text = "Change Wi-Fi network",
+                        onClick = {
+                            viewModel.resetWifiDialogState(vest.wifiSsid)
+                            showChangeWifiDialog = true
+                        },
+                        icon = Icons.Outlined.Wifi,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
 
                     // ---- Service ----
                     SectionHeader(
@@ -468,9 +522,10 @@ fun VestDetailScreen(
                     } else {
                         state.assignments.forEach { a ->
                             val current = a.unassignedAt == null
+                            val workerLabel = state.workerNameById[a.workerId] ?: a.workerId
                             DetailRow(
                                 label = if (current) "Current" else "Previous",
-                                value = "${a.workerId}  ·  ${DateTimeUtils.formatDate(a.assignedAt)} → " +
+                                value = "$workerLabel  ·  ${DateTimeUtils.formatDate(a.assignedAt)} → " +
                                     (a.unassignedAt?.let { DateTimeUtils.formatDate(it) } ?: "now"),
                                 icon = BevestIcons.History,
                                 valueColor = if (current) palette.normal else null,
@@ -492,6 +547,465 @@ fun VestDetailScreen(
             onConfirm = { confirmUnassign = false; viewModel.unassign(actorId) },
             onDismiss = { confirmUnassign = false },
         )
+    }
+
+    if (showAssignWorkerDialog && state.vest != null) {
+        AssignWorkerToVestDialog(
+            vest = state.vest,
+            workers = state.activeWorkers,
+            assigning = state.assigningWorker,
+            onSelectWorker = { selectedWorkerId ->
+                showAssignWorkerDialog = false
+                viewModel.assignToWorker(selectedWorkerId, actorId)
+            },
+            onDismiss = { showAssignWorkerDialog = false },
+        )
+    }
+
+    if (showChangeWifiDialog && state.vest != null) {
+        ChangeVestWifiDialog(
+            vest = state.vest,
+            wifiUi = state.wifiUi,
+            onSsidChange = viewModel::onWifiSsidInput,
+            onPassChange = viewModel::onWifiPassInput,
+            onUpdateViaCloud = viewModel::updateWifiViaCloud,
+            onTriggerRemoteBleAndScan = viewModel::triggerRemoteBleModeAndScan,
+            onStartBleScan = viewModel::startBleScan,
+            onConnectBle = viewModel::connectBleVest,
+            onSendOverBle = viewModel::sendWifiOverBle,
+            onDismiss = {
+                viewModel.disconnectBle()
+                showChangeWifiDialog = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun AssignWorkerToVestDialog(
+    vest: Vest,
+    workers: List<Worker>,
+    assigning: Boolean,
+    onSelectWorker: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val palette = LocalStatusPalette.current
+    var searchQuery by remember { mutableStateOf("") }
+
+    val candidateWorkers = remember(workers, vest.assignedWorkerId, searchQuery) {
+        val q = searchQuery.trim().lowercase()
+        workers.filter { w ->
+            w.workerId != vest.assignedWorkerId &&
+                (q.isBlank() || w.fullName.lowercase().contains(q) || w.workerId.lowercase().contains(q))
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = BevestShapes.card,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(Spacing.lg),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                ) {
+                    Icon(
+                        BevestIcons.Workers,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = if (vest.assignedWorkerId.isNullOrBlank()) {
+                                "Assign ${vest.vestId} to Worker"
+                            } else {
+                                "Reassign ${vest.vestId} to Another Worker"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "Select an active worker to wear and be monitored by this vest",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                FormField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = "Search worker by name or ID",
+                    helper = "e.g. Juan or WRK-001",
+                    imeAction = ImeAction.Search,
+                )
+
+                if (candidateWorkers.isEmpty()) {
+                    Surface(
+                        shape = BevestShapes.inner,
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(Spacing.lg),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                        ) {
+                            Text(
+                                text = if (workers.isEmpty()) "No active workers found" else "No matching workers",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = if (workers.isEmpty()) {
+                                    "Add an active worker in the Workers tab first."
+                                } else {
+                                    "Try clearing the search filter or choosing another worker."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                } else {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    ) {
+                        candidateWorkers.forEach { w ->
+                            val isUnassigned = w.assignedVestId.isNullOrBlank()
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(BevestShapes.inner)
+                                    .clickable(enabled = !assigning) { onSelectWorker(w.workerId) },
+                                shape = BevestShapes.inner,
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isUnassigned) {
+                                        palette.normal.copy(alpha = 0.5f)
+                                    } else {
+                                        MaterialTheme.colorScheme.outlineVariant
+                                    },
+                                ),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(Spacing.md),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                                ) {
+                                    com.jtexpress.bevest.ui.common.WorkerAvatar(
+                                        name = w.fullName.ifBlank { w.workerId },
+                                        photoUrl = w.photoUrl,
+                                        size = 40.dp,
+                                    )
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            text = w.fullName.ifBlank { w.workerId },
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = if (isUnassigned) {
+                                                "${w.workerId} · Ready to assign"
+                                            } else {
+                                                "${w.workerId} · Currently wearing ${w.assignedVestId}"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    StatusBadge(
+                                        text = if (isUnassigned) "Available" else "Reassign",
+                                        color = if (isUnassigned) palette.normal else palette.warning,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                SecondaryButton(
+                    text = "Cancel",
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChangeVestWifiDialog(
+    vest: Vest,
+    wifiUi: com.jtexpress.bevest.ui.vest.WifiReprovisionUiState,
+    onSsidChange: (String) -> Unit,
+    onPassChange: (String) -> Unit,
+    onUpdateViaCloud: () -> Unit,
+    onTriggerRemoteBleAndScan: () -> Unit,
+    onStartBleScan: () -> Unit,
+    onConnectBle: (DiscoveredBleVest) -> Unit,
+    onSendOverBle: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val palette = LocalStatusPalette.current
+    var selectedTab by remember { mutableStateOf(if (vest.online) 0 else 1) }
+
+    val permissionsToRequest = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            )
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { onStartBleScan() }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = BevestShapes.card,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(Spacing.lg),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                ) {
+                    Icon(
+                        Icons.Outlined.Wifi,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "Change Wi-Fi Network",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "${vest.vestId} · ${if (vest.online) "Currently Online" else "Currently Offline"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                // Mode selector: Cloud (when Online) vs Bluetooth (when at new site / BLE mode)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                ) {
+                    SecondaryButton(
+                        text = "Over Cloud",
+                        onClick = { selectedTab = 0 },
+                        icon = Icons.Outlined.Wifi,
+                        modifier = Modifier.weight(1f),
+                    )
+                    SecondaryButton(
+                        text = "Via Bluetooth",
+                        onClick = { selectedTab = 1 },
+                        icon = Icons.Outlined.Bluetooth,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+
+                FormField(
+                    label = "New Site Wi-Fi SSID (2.4 GHz)",
+                    value = wifiUi.ssid,
+                    onValueChange = onSsidChange,
+                    helper = "e.g. SiteB-Safety-WiFi",
+                    imeAction = ImeAction.Next,
+                )
+
+                FormField(
+                    label = "New Wi-Fi Password",
+                    value = wifiUi.pass,
+                    onValueChange = onPassChange,
+                    helper = "Enter Wi-Fi password",
+                    keyboardType = KeyboardType.Password,
+                    isPassword = true,
+                    imeAction = ImeAction.Done,
+                )
+
+                if (selectedTab == 0) {
+                    Text(
+                        text = if (vest.online) {
+                            "Since this vest is currently Online, it will receive the new Wi-Fi credentials immediately over Cloud, save them to Flash, and switch networks (or keep them ready for the next site)."
+                        } else {
+                            "This vest is currently Offline. Sending via Cloud will queue the new Wi-Fi credentials for the next time it connects, or use 'Via Bluetooth' if the vest is nearby."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    PrimaryButton(
+                        text = if (wifiUi.sendingCloud) "Sending to Vest..." else "Save & Switch Wi-Fi via Cloud",
+                        onClick = onUpdateViaCloud,
+                        loading = wifiUi.sendingCloud,
+                        enabled = !wifiUi.sendingCloud,
+                    )
+                } else {
+                    Text(
+                        text = "Use Bluetooth when the vest is at a new site without Wi-Fi, or switch an online vest into Bluetooth Pairing Mode.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    if (vest.online && wifiUi.connectedBle == null) {
+                        SecondaryButton(
+                            text = "Switch Online Vest to Bluetooth Mode",
+                            onClick = {
+                                permissionLauncher.launch(permissionsToRequest)
+                                onTriggerRemoteBleAndScan()
+                            },
+                            icon = Icons.Outlined.Bluetooth,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    if (wifiUi.connectedBle == null) {
+                        SecondaryButton(
+                            text = if (wifiUi.scanningBle) "Scanning for Vest..." else "Scan Nearby Bluetooth Vests",
+                            onClick = { permissionLauncher.launch(permissionsToRequest) },
+                            icon = Icons.Outlined.Bluetooth,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+
+                        val cleanTargetMac = vest.macAddress?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()
+                        wifiUi.discoveredBles.forEach { dev ->
+                            val isThisVest = !cleanTargetMac.isNullOrBlank() && dev.cleanMac.equals(cleanTargetMac, ignoreCase = true)
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(BevestShapes.inner)
+                                    .clickable { onConnectBle(dev) },
+                                shape = BevestShapes.inner,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isThisVest) palette.normal else MaterialTheme.colorScheme.outlineVariant,
+                                ),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(Spacing.md),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Bluetooth,
+                                        contentDescription = null,
+                                        tint = if (isThisVest) palette.normal else MaterialTheme.colorScheme.primary,
+                                    )
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (isThisVest) "${dev.name} (Matches ${vest.vestId})" else dev.name,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                        Text(
+                                            text = "MAC: ${dev.address} · RSSI: ${dev.rssi} dBm",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Text(
+                                        text = "Connect",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = BevestShapes.inner,
+                            color = palette.normal.copy(alpha = 0.1f),
+                            border = BorderStroke(1.dp, palette.normal),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(Spacing.md),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                            ) {
+                                Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = palette.normal)
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Connected to ${wifiUi.connectedBle.name}",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    wifiUi.bleStatusMsg?.let {
+                                        Text(
+                                            text = it,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        PrimaryButton(
+                            text = if (wifiUi.bleConnectionState == BleConnectionState.TRANSMITTING_WIFI) {
+                                "Transmitting over BLE..."
+                            } else {
+                                "Send New Wi-Fi over Bluetooth"
+                            },
+                            onClick = onSendOverBle,
+                            loading = wifiUi.bleConnectionState == BleConnectionState.TRANSMITTING_WIFI,
+                            enabled = wifiUi.bleConnectionState != BleConnectionState.TRANSMITTING_WIFI,
+                        )
+                    }
+                }
+
+                wifiUi.bleStatusMsg?.takeIf { selectedTab == 1 && wifiUi.connectedBle == null }?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                wifiUi.cloudSuccessMsg?.let { SuccessNote(it) }
+                if (wifiUi.bleConnectionState == BleConnectionState.SUCCESS_CONFIRMED) {
+                    SuccessNote("Vest confirmed new Wi-Fi connection and resumed live streaming!")
+                }
+                wifiUi.errorMsg?.let { ErrorNote(it) }
+
+                SecondaryButton(
+                    text = "Close",
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
     }
 }
 

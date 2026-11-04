@@ -45,6 +45,7 @@ class VestRepositoryImpl @Inject constructor(
         val mac: String? = null,
         val serialNumber: String? = null,
         val vestId: String? = null,
+        val wifiSsid: String? = null,
     )
 
     private fun DataSnapshot.safeStr(key: String): String? =
@@ -80,6 +81,7 @@ class VestRepositoryImpl @Inject constructor(
             val mac = child.safeStr("mac")
                 ?: child.safeStr("macAddress")?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()
             val serial = child.safeStr("serialNumber")
+            val wifiSsid = child.safeStr("wifiSsid")
             val rawOnline = child.safeBool("online", default = false)
             val battery = child.safeInt("battery")
             val lastSeen = child.safeLong("lastSeenServer")
@@ -97,6 +99,7 @@ class VestRepositoryImpl @Inject constructor(
                 mac = mac,
                 serialNumber = serial,
                 vestId = vestIdField ?: key,
+                wifiSsid = wifiSsid,
             )
 
             fun mergeInto(targetKey: String) {
@@ -112,6 +115,7 @@ class VestRepositoryImpl @Inject constructor(
                         mac = info.mac ?: prev.mac,
                         serialNumber = info.serialNumber ?: prev.serialNumber,
                         vestId = info.vestId ?: prev.vestId,
+                        wifiSsid = info.wifiSsid ?: prev.wifiSsid,
                     )
                 }
             }
@@ -225,6 +229,7 @@ class VestRepositoryImpl @Inject constructor(
                     status = effectiveStatus,
                     batteryPercent = live?.battery ?: base.batteryPercent,
                     lastSeen = validLastSeen ?: base.lastSeen,
+                    wifiSsid = live?.wifiSsid ?: base.wifiSsid,
                 )
             }
             Outcome.Success(mapped) as Outcome<List<Vest>>
@@ -381,16 +386,28 @@ class VestRepositoryImpl @Inject constructor(
     }
 
     override suspend fun assignVest(vestId: String, workerId: String, assignedBy: String): Outcome<Unit> = try {
+        val preVestSnap = try { vests.document(vestId).get().await() } catch (_: Exception) { null }
+        val prevWorkerId = preVestSnap?.getString("assignedWorkerId")?.takeIf { it.isNotBlank() }
+        val preWorkerSnap = try { workers.document(workerId).get().await() } catch (_: Exception) { null }
+        val prevVestId = preWorkerSnap?.getString("assignedVestId")?.takeIf { it.isNotBlank() }
+
         firestore.runTransaction { txn ->
             openAssignment(txn, vestId, workerId, assignedBy)
         }.await()
         try {
+            if (prevWorkerId != null && prevWorkerId != workerId) {
+                database.getReference("workerToVest/$prevWorkerId").removeValue()
+            }
+            if (prevVestId != null && prevVestId != vestId) {
+                database.getReference("vestsLive/$prevVestId/assignedWorkerId").removeValue()
+                database.getReference("vestToWorker/$prevVestId").removeValue()
+            }
             database.getReference("vestsLive/$vestId/assignedWorkerId").setValue(workerId)
             database.getReference("vestsLive/$vestId/assignedAt").setValue(System.currentTimeMillis())
             database.getReference("vestToWorker/$vestId").setValue(workerId)
             database.getReference("workerToVest/$workerId").setValue(vestId)
             // If cleanMac is known, also push to vestsLiveByMac
-            val vSnap = vests.document(vestId).get().await()
+            val vSnap = preVestSnap ?: vests.document(vestId).get().await()
             val mac = vSnap.getString("cleanMac")
                 ?: vSnap.getString("macAddress")?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()
             if (!mac.isNullOrBlank()) {
@@ -539,6 +556,12 @@ class VestRepositoryImpl @Inject constructor(
         val prevVestSnap = if (workerVest != null && workerVest != vestId) {
             txn.get(vests.document(workerVest))
         } else null
+        val prevVestOpenId = prevVestSnap?.getString("openAssignmentId")?.takeIf { it.isNotBlank() }
+        val prevVestOpenSnap = if (prevVestOpenId != null && prevVestOpenId != prevOpenId) {
+            txn.get(assignments.document(prevVestOpenId))
+        } else null
+
+        val now = System.currentTimeMillis()
 
         // 1. Unassign previous worker if vest was already assigned to someone else
         if (prevWorkerSnap != null && prevWorkerSnap.exists()) {
@@ -548,7 +571,7 @@ class VestRepositoryImpl @Inject constructor(
             txn.update(
                 prevOpenSnap.reference,
                 mapOf(
-                    "unassignedAt" to System.currentTimeMillis(),
+                    "unassignedAt" to now,
                     "unassignedBy" to assignedBy,
                 ),
             )
@@ -562,6 +585,15 @@ class VestRepositoryImpl @Inject constructor(
                     "assignedWorkerId" to null,
                     "status" to VestStatus.AVAILABLE.name,
                     "openAssignmentId" to null,
+                ),
+            )
+        }
+        if (prevVestOpenSnap != null && prevVestOpenSnap.exists()) {
+            txn.update(
+                prevVestOpenSnap.reference,
+                mapOf(
+                    "unassignedAt" to now,
+                    "unassignedBy" to assignedBy,
                 ),
             )
         }
@@ -582,7 +614,7 @@ class VestRepositoryImpl @Inject constructor(
             mapOf(
                 "workerId" to workerId,
                 "vestId" to vestId,
-                "assignedAt" to System.currentTimeMillis(),
+                "assignedAt" to now,
                 "unassignedAt" to null,
                 "assignedBy" to assignedBy,
             ),
@@ -598,8 +630,9 @@ class VestRepositoryImpl @Inject constructor(
         val vestSnap = txn.get(vestRef)
         if (!vestSnap.exists()) return null
 
-        val assignedWorker = vestSnap.getString("assignedWorkerId")
-        val openAssignmentId = vestSnap.getString("openAssignmentId")
+        val assignedWorker = vestSnap.getString("assignedWorkerId")?.takeIf { it.isNotBlank() }
+        val workerSnap = assignedWorker?.let { txn.get(workers.document(it)) }
+        val openAssignmentId = vestSnap.getString("openAssignmentId")?.takeIf { it.isNotBlank() }
         val openAssignmentSnap = openAssignmentId
             ?.let { assignments.document(it) }
             ?.let { ref -> txn.get(ref) }
@@ -612,12 +645,48 @@ class VestRepositoryImpl @Inject constructor(
                 "openAssignmentId" to null,
             ),
         )
-        if (!assignedWorker.isNullOrBlank()) {
-            txn.update(workers.document(assignedWorker), "assignedVestId", null)
+        if (workerSnap != null && workerSnap.exists()) {
+            txn.update(workerSnap.reference, "assignedVestId", null)
         }
         if (openAssignmentSnap != null && openAssignmentSnap.exists()) {
             txn.update(openAssignmentSnap.reference, "unassignedAt", System.currentTimeMillis())
         }
-        return assignedWorker?.takeIf { it.isNotBlank() }
+        return assignedWorker
+    }
+
+    override suspend fun updateVestWifiRemotely(
+        vestId: String,
+        ssid: String,
+        pass: String,
+    ): Outcome<Unit> = try {
+        val trimmedSsid = ssid.trim()
+        if (trimmedSsid.isBlank()) {
+            Outcome.Failure(AppError.Validation("Please enter a valid Wi-Fi SSID."))
+        } else {
+            val cmdPayload = mapOf(
+                "pending" to true,
+                "mode" to "DIRECT_WIFI",
+                "ssid" to trimmedSsid,
+                "pass" to pass.trim(),
+                "timestamp" to System.currentTimeMillis(),
+            )
+            database.getReference("vestsLive/$vestId/wifiCommand").setValue(cmdPayload).await()
+            runCatching { vests.document(vestId).update("wifiSsid", trimmedSsid) }
+            Outcome.Success(Unit)
+        }
+    } catch (e: Exception) {
+        Outcome.Failure(e.toAppError())
+    }
+
+    override suspend fun triggerVestBleModeRemotely(vestId: String): Outcome<Unit> = try {
+        val cmdPayload = mapOf(
+            "pending" to true,
+            "mode" to "BLE_PAIRING",
+            "timestamp" to System.currentTimeMillis(),
+        )
+        database.getReference("vestsLive/$vestId/wifiCommand").setValue(cmdPayload).await()
+        Outcome.Success(Unit)
+    } catch (e: Exception) {
+        Outcome.Failure(e.toAppError())
     }
 }

@@ -1,4 +1,4 @@
-﻿package com.jtexpress.bevest.data.ble
+package com.jtexpress.bevest.data.ble
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -436,7 +436,9 @@ class BleProvisioner @Inject constructor(
         @Deprecated("Deprecated in Java")
         override fun onCharacteristicChanged(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?) {
             if (characteristic?.uuid == STATUS_CHAR_UUID) {
-                val value = characteristic.value?.firstOrNull()?.toInt() ?: 0
+                val rawBytes = characteristic.value
+                val strVal = rawBytes?.toString(Charsets.UTF_8)?.trim()?.toIntOrNull()
+                val value = strVal ?: rawBytes?.firstOrNull()?.toInt() ?: 0
                 when (value) {
                     1 -> _state.update { it.copy(statusMessage = "Vest is connecting to Wi-Fi...") }
                     2 -> _state.update {
