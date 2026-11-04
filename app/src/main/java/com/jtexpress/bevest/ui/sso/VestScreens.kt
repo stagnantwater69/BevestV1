@@ -493,7 +493,7 @@ fun VestDetailScreen(
                         SecondaryButton(
                             text = "Needs service",
                             onClick = { viewModel.setStatus(VestStatus.MAINTENANCE) },
-                            icon = BevestIcons.Simulator,
+                            icon = BevestIcons.Maintenance,
                             enabled = vest.status != VestStatus.MAINTENANCE,
                             modifier = Modifier.weight(1f),
                         )

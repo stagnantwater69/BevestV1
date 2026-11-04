@@ -92,7 +92,7 @@ class SimulationEngine {
     this.boundKey = null;
     this.boundContractorId = null;
     this.boundSiteId = null;
-    this.canStream = true;
+    this.canStream = false;
 
     this.sim = new Map(); // workerId -> { worker, lat, lng }
     this.elapsedTicks = new Map();
@@ -104,7 +104,7 @@ class SimulationEngine {
       bound: false,
       streaming: false,
       busy: false,
-      canStream: true,
+      canStream: false,
       workers: [],
       log: [],
       message: null,
@@ -224,36 +224,15 @@ class SimulationEngine {
   }
 
   async start() {
-    if (!this.state.canStream || this.intervalId) return;
-    if (this.sim.size === 0) {
-      this.updateState({ message: 'No workers to stream.' });
-      return;
-    }
-
-    this.updateState({ busy: true });
-    try {
-      // Test writing first sensor reading to RTDB
-      const firstId = this.sim.keys().next().value;
-      await set(ref(rtdb, `liveReadings/${firstId}`), {
-        workerId: firstId,
-        timestamp: Date.now(),
-      });
-
-      this.log(`Live stream started — ${this.sim.size} vest(s) transmitting`);
-      this.updateState({ streaming: true, busy: false });
-
-      this.intervalId = setInterval(() => {
-        this.tickAll();
-      }, TICK_MS);
-    } catch (err) {
-      console.error('Simulation start error:', err);
-      this.updateState({
-        busy: false,
-        message: `Realtime Database stream failed: ${err.message}`,
-      });
-    }
+    // Simulations permanently disabled
+    this.stop();
+    return;
   }
 
+  tickAll() {
+    this.stop();
+    return;
+  }
   stop() {
     if (this.intervalId) {
       clearInterval(this.intervalId);
@@ -693,3 +672,4 @@ class SimulationEngine {
 
 // Global singleton instance so simulation keeps streaming while browsing tabs
 export const simulationEngine = new SimulationEngine();
+simulationEngine.stop();

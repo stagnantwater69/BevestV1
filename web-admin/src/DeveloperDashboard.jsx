@@ -581,6 +581,47 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
   };
 
+  /**
+   * One-click purge for any leftover simulated alerts, incidents, or live readings
+   */
+  const [purgingSim, setPurgingSim] = useState(false);
+  const handlePurgeAllSimulatedData = async () => {
+    const ok = window.confirm('Permanently delete all simulated alerts and incidents from Firestore and clear any simulated readings from Realtime Database?');
+    if (!ok) return;
+    setPurgingSim(true);
+    try {
+      let deletedAlerts = 0;
+      let deletedIncidents = 0;
+
+      const alertsSnap = await getDocs(query(collection(db, 'alerts'), where('simulated', '==', true)));
+      for (const d of alertsSnap.docs) {
+        await deleteDoc(d.ref);
+        deletedAlerts++;
+      }
+
+      const incidentsSnap = await getDocs(query(collection(db, 'incidents'), where('simulated', '==', true)));
+      for (const d of incidentsSnap.docs) {
+        await deleteDoc(d.ref);
+        deletedIncidents++;
+      }
+
+      const workersSnap = await getDocs(collection(db, 'workers'));
+      for (const w of workersSnap.docs) {
+        try {
+          await remove(ref(rtdb, 'liveReadings/' + w.id));
+        } catch (_) {}
+      }
+
+      await logActivity('Purged all simulated data: removed ' + deletedAlerts + ' alert(s) and ' + deletedIncidents + ' incident(s)', devEmail);
+      showToast('success', '✓ Purged ' + deletedAlerts + ' simulated alert(s) and ' + deletedIncidents + ' simulated incident(s).');
+    } catch (err) {
+      console.error('Purge simulated data failed:', err);
+      showToast('error', 'Purge failed: ' + err.message);
+    } finally {
+      setPurgingSim(false);
+    }
+  };
+
   const handleOpenQrViewer = (vest) => {
     setSelectedVestQr(vest);
     const cleanMac = (vest.cleanMac || (vest.macAddress ? vest.macAddress.replace(/[^A-F0-9]/g, '') : '')).toUpperCase();
@@ -1013,6 +1054,17 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   title="Unlink workers and delete assignment records that point to deleted vests"
                 >
                   <FiRefreshCw /> {repairing ? 'Repairing…' : 'Repair Orphaned Assignments'}
+                </button>
+              )}
+              {activeTab === 'hardware' && (
+                <button
+                  type="button"
+                  className="dev-btn-orange"
+                  onClick={handlePurgeAllSimulatedData}
+                  disabled={purgingSim}
+                  title="Purge all simulated alerts, incidents, and RTDB live readings"
+                >
+                  <FiTrash2 /> {purgingSim ? 'Purging…' : 'Purge Simulated Data'}
                 </button>
               )}
               {activeTab === 'subscriptions' && (

@@ -68,7 +68,7 @@ data class SimulationState(
     val bound: Boolean = false,
     val streaming: Boolean = false,
     val busy: Boolean = false,
-    val canStream: Boolean = true,
+    val canStream: Boolean = false,
     val workers: List<SimWorker> = emptyList(),
     val log: List<String> = emptyList(),
     val message: String? = null,
@@ -130,86 +130,21 @@ class SimulationEngine @Inject constructor(
      * Load the workers this operator can drive. Pass a siteId for an SSO (they own
      * live streaming), or a contractorId for a contractor (history + reset only).
      */
-    fun bind(contractorId: String?, siteId: String?, canStream: Boolean) {
-        val key = "${contractorId.orEmpty()}|${siteId.orEmpty()}"
-        if (key == boundKey && sim.isNotEmpty()) {
-            _state.update { it.copy(canStream = canStream) }
-            return // already bound — keep any running stream intact
-        }
-        boundKey = key
-        boundContractorId = contractorId
-        boundSiteId = siteId
-        _state.update { it.copy(busy = true, canStream = canStream) }
-        scope.launch {
-            val outcome = workerRepository.observeWorkers(contractorId, siteId).first()
-            val workers = (outcome as? Outcome.Success)?.data.orEmpty().filter { it.active }
-            if (workers.isEmpty()) {
-                _state.update {
-                    it.copy(busy = false, bound = true, message = "No active workers to simulate.")
-                }
-                return@launch
-            }
-            workers.firstOrNull()?.let { /* keep default center; could read last GPS */ }
-            sim.clear(); elapsedTicks.clear(); openAlertIds.clear(); incidentRaised.clear()
-            workers.forEach { worker ->
-                val sw = SimWorker(
-                    workerId = worker.workerId,
-                    name = worker.fullName.ifBlank { worker.workerId },
-                    vestId = worker.assignedVestId.orEmpty(),
-                    siteId = worker.siteId ?: siteId.orEmpty(),
-                    contractorId = worker.contractorId ?: contractorId.orEmpty(),
-                )
-                sim[worker.workerId] = MutableSim(
-                    sw,
-                    gpsCenter.first + Random.nextDouble(-0.0008, 0.0008),
-                    gpsCenter.second + Random.nextDouble(-0.0008, 0.0008),
-                )
-            }
-            publish()
-            _state.update { it.copy(busy = false, bound = true) }
-        }
+    init {
+        stop()
+    }
+
+    fun bind(contractorId: String? = null, siteId: String? = null, canStream: Boolean = false) {
+        // Disabled: simulations have been permanently disabled
+        stop()
     }
 
     // ---------------------------------------------------------------- streaming
 
     fun start() {
-        if (!state.value.canStream || loop?.isActive == true) return
-        // Probe with a vest that is meant to be transmitting, so an offline one stays offline.
-        val firstId = sim.entries.firstOrNull { it.value.w.scenario != Scenario.OFFLINE }?.key
-            ?: sim.keys.firstOrNull()
-        if (firstId == null) {
-            _state.update { it.copy(message = "No workers to stream.") }
-            return
-        }
-        _state.update { it.copy(busy = true) }
-        scope.launch {
-            // Probe: live streaming needs the Realtime Database to exist and be reachable.
-            val probe = monitoring.pushSimulatedReading(
-                SensorReading(workerId = firstId, timestamp = System.currentTimeMillis()),
-            )
-            if (probe is Outcome.Failure) {
-                _state.update {
-                    it.copy(
-                        busy = false,
-                        message = "Live streaming needs the Realtime Database. Create it in the " +
-                            "Firebase console, re-download google-services.json, and rebuild. " +
-                            "Seeding history still works without it.",
-                    )
-                }
-                return@launch
-            }
-            log("Live stream started — ${sim.size} vest(s) transmitting")
-            _state.update { it.copy(streaming = true, busy = false) }
-            loop = scope.launch {
-                while (isActive) {
-                    sim.keys.toList().forEach { id -> tick(id) }
-                    publish()
-                    delay(TICK_MS)
-                }
-            }
-        }
+        // Disabled: simulations have been permanently disabled
+        stop()
     }
-
     fun stop() {
         loop?.cancel(); loop = null
         _state.update { it.copy(streaming = false) }
@@ -224,25 +159,7 @@ class SimulationEngine @Inject constructor(
     }
 
     fun setScenario(workerId: String, scenario: Scenario) {
-        val s = sim[workerId] ?: return
-        s.w = s.w.copy(scenario = scenario)
-        elapsedTicks[workerId] = 0
-        acknowledged.remove(workerId)
-        incidentRaised.remove("$workerId:${scenario.name}")
-        if (scenario == Scenario.HEALTHY) {
-            resolveOpenAlert(workerId, "Condition cleared — worker recovered")
-            s.w = s.w.copy(phase = SimWorker.Phase.NORMAL, motion = MotionState.MOVING)
-            scope.launch { monitoring.setSafetyResponse(workerId, SafetyResponseState.NONE) }
-        }
-        if (scenario == Scenario.OFFLINE) {
-            // A dead vest sends nothing: drop its live reading and let the tick skip it.
-            resolveOpenAlert(workerId, "Vest went offline")
-            s.w = s.w.copy(phase = SimWorker.Phase.OFFLINE, motion = MotionState.MOVING)
-            scope.launch { monitoring.clearReading(workerId) }
-        }
-        log("${s.w.name}: scenario → ${scenario.label}")
-        publish()
-        if (!state.value.streaming && scenario != Scenario.HEALTHY && scenario != Scenario.OFFLINE) start()
+        // Disabled
     }
 
     /**
@@ -265,300 +182,16 @@ class SimulationEngine @Inject constructor(
 
     /** Jump a worker straight to a raised incident, skipping the wait. */
     fun escalateNow(workerId: String) {
-        val s = sim[workerId] ?: return
-        if (s.w.scenario == Scenario.HEALTHY || s.w.scenario == Scenario.OFFLINE) setScenario(workerId, Scenario.FALL)
-        elapsedTicks[workerId] = 999
-        scope.launch { tick(workerId); publish() }
+        // Disabled
     }
-
-    private suspend fun tick(id: String) {
-        val s = sim[id] ?: return
-        if (s.w.scenario == Scenario.OFFLINE) return
-        val ticks = (elapsedTicks[id] ?: 0) + 1
-        elapsedTicks[id] = ticks
-        val sc = s.w.scenario
-
-        // --- evolve vitals ---
-        var hr = s.w.heartRate
-        var temp = s.w.temperature
-        var motion = MotionState.MOVING
-        var fall = false
-        var response = SafetyResponseState.NONE
-
-        when (sc) {
-            Scenario.HEALTHY -> {
-                hr = drift(hr, 78, 68, 96, 4)
-                temp = drift(temp, 36.8, 36.3, 37.2, 0.1)
-            }
-            Scenario.HIGH_HEART_RATE -> {
-                hr = ramp(hr, target = 132, step = 9).let { drift(it, it, 118, 145, 4) }
-                temp = drift(temp, 37.1, 36.6, 37.6, 0.1)
-            }
-            Scenario.HIGH_TEMPERATURE -> {
-                temp = ramp(temp, target = 39.0, step = 0.35).let { drift(it, it, 38.2, 39.8, 0.15) }
-                hr = drift(hr, 96, 88, 108, 4)
-            }
-            Scenario.FALL -> {
-                fall = true; motion = MotionState.FALL_DETECTED
-                hr = drift(hr, 104, 92, 120, 5)
-            }
-            Scenario.INACTIVITY -> {
-                motion = MotionState.INACTIVE
-                hr = drift(hr, 62, 55, 72, 3)
-            }
-            Scenario.EMERGENCY_REQUEST -> {
-                response = SafetyResponseState.EMERGENCY_REQUESTED
-                hr = drift(hr, 110, 95, 130, 6)
-            }
-            Scenario.OFFLINE -> Unit // never reached — skipped at the top of tick()
-        }
-        val battery = (s.w.battery - if (Random.nextInt(3) == 0) 1 else 0).coerceIn(5, 100)
-
-        // --- gps random walk ---
-        s.lat += Random.nextDouble(-0.00025, 0.00025)
-        s.lng += Random.nextDouble(-0.00025, 0.00025)
-
-        // --- phase / escalation (fast timeline for demos) ---
-        var phase = s.w.phase
-        when {
-            sc == Scenario.HEALTHY -> phase = SimWorker.Phase.NORMAL
-            sc == Scenario.EMERGENCY_REQUEST -> phase = SimWorker.Phase.EMERGENCY
-            sc == Scenario.FALL && ticks >= 1 -> phase = if (ticks >= 8) SimWorker.Phase.EMERGENCY else SimWorker.Phase.DANGER
-            ticks in 1..2 -> phase = SimWorker.Phase.WARNING
-            ticks in 3..9 -> phase = SimWorker.Phase.DANGER
-            ticks >= 10 -> phase = SimWorker.Phase.EMERGENCY
-        }
-        s.w = s.w.copy(
-            heartRate = hr, temperature = round1(temp), battery = battery,
-            motion = motion, phase = phase,
-        )
-
-        // --- write the reading ---
-        monitoring.pushSimulatedReading(
-            SensorReading(
-                workerId = id,
-                vestId = s.w.vestId,
-                heartRate = hr,
-                temperature = round1(temp),
-                motionState = motion,
-                fallDetected = fall,
-                latitude = round5(s.lat),
-                longitude = round5(s.lng),
-                batteryPercent = battery,
-                safetyResponse = when {
-                    id in acknowledged -> SafetyResponseState.ACKNOWLEDGED
-                    phase == SimWorker.Phase.EMERGENCY && response == SafetyResponseState.NONE ->
-                        SafetyResponseState.NO_RESPONSE
-                    else -> response
-                },
-                timestamp = System.currentTimeMillis(),
-            ),
-        )
-
-        // --- raise the records the cloud engine would raise ---
-        // Once an officer has acknowledged, nothing new is raised for the same condition.
-        if (id in acknowledged) return
-        if (phase == SimWorker.Phase.DANGER && openAlertIds[id].isNullOrEmpty()) {
-            raiseAlert(s.w, AlertSeverity.DANGER)
-        }
-        if (phase == SimWorker.Phase.EMERGENCY) {
-            val key = "$id:${sc.name}"
-            if (!incidentRaised.contains(key)) {
-                incidentRaised.add(key)
-                raiseAlert(s.w, AlertSeverity.EMERGENCY)
-                raiseIncident(s.w)
-                monitoring.setSafetyResponse(id, SafetyResponseState.NO_RESPONSE)
-            }
-        }
-    }
-
-    private fun publish() {
-        _state.update { it.copy(workers = sim.values.map { s -> s.w }) }
-    }
-
-    // ---------------------------------------------------------------- records
-
-    private fun typeFor(scenario: Scenario): AlertType = when (scenario) {
-        Scenario.HIGH_HEART_RATE -> AlertType.HEART_RATE_WARNING
-        Scenario.HIGH_TEMPERATURE -> AlertType.TEMPERATURE_WARNING
-        Scenario.FALL -> AlertType.FALL_DETECTED
-        Scenario.INACTIVITY -> AlertType.INACTIVITY
-        Scenario.EMERGENCY_REQUEST -> AlertType.EMERGENCY_REQUEST
-        Scenario.OFFLINE -> AlertType.VEST_OFFLINE
-        Scenario.HEALTHY -> AlertType.NO_SAFETY_RESPONSE
-    }
-
-    private fun messageFor(w: SimWorker): String = when (w.scenario) {
-        Scenario.HIGH_HEART_RATE -> "Elevated heart rate (${w.heartRate} BPM)"
-        Scenario.HIGH_TEMPERATURE -> "High body temperature (${round1(w.temperature)} °C)"
-        Scenario.FALL -> "Fall detected — no movement since"
-        Scenario.INACTIVITY -> "Prolonged inactivity detected"
-        Scenario.EMERGENCY_REQUEST -> "Worker pressed the emergency button"
-        Scenario.OFFLINE -> "Vest stopped transmitting"
-        Scenario.HEALTHY -> "No safety response"
-    }
-
-    private fun raiseAlert(w: SimWorker, severity: AlertSeverity) {
-        // Reserve the id before the write, so the incident raised right after links to
-        // this alert and a later recovery can close it.
-        val ref = firestore.collection(FirebasePaths.ALERTS).document()
-        openAlertIds.getOrPut(w.workerId) { mutableListOf() }.add(ref.id)
-        scope.launch {
-            try {
-                ref.set(
-                    baseRecord(w) + mapOf(
-                        "type" to typeFor(w.scenario).name,
-                        "severity" to severity.name,
-                        "status" to AlertStatus.ACTIVE.name,
-                        "message" to messageFor(w),
-                    ),
-                ).await()
-                log("${w.name}: ${severity.name} alert raised")
-            } catch (e: Exception) {
-                Log.e(TAG, "raiseAlert failed", e)
-                _state.update { it.copy(message = "Could not write alert: ${e.message}") }
-            }
-        }
-    }
-
-    private fun raiseIncident(w: SimWorker) {
-        scope.launch {
-            try {
-                val ref = firestore.collection(FirebasePaths.INCIDENTS).document()
-                ref.set(
-                    baseRecord(w) + mapOf(
-                        "alertId" to openAlertIds[w.workerId]?.lastOrNull(),
-                        "type" to typeFor(w.scenario).name,
-                        "severity" to AlertSeverity.EMERGENCY.name,
-                        "heartRate" to w.heartRate,
-                        "temperature" to round1(w.temperature),
-                        "latitude" to round5(sim[w.workerId]?.lat ?: gpsCenter.first),
-                        "longitude" to round5(sim[w.workerId]?.lng ?: gpsCenter.second),
-                        "outcome" to null,
-                        "resolutionNotes" to null,
-                    ),
-                ).await()
-                log("${w.name}: EMERGENCY incident created")
-            } catch (e: Exception) {
-                Log.e(TAG, "raiseIncident failed", e)
-                _state.update { it.copy(message = "Could not write incident: ${e.message}") }
-            }
-        }
-    }
-
-    private fun resolveOpenAlert(workerId: String, notes: String) {
-        val alertIds = openAlertIds.remove(workerId) ?: return
-        scope.launch {
-            alertIds.forEach { alertId ->
-                runCatching {
-                    firestore.collection(FirebasePaths.ALERTS).document(alertId).update(
-                        mapOf(
-                            "status" to AlertStatus.RESOLVED.name,
-                            "resolvedAt" to System.currentTimeMillis(),
-                            "resolutionNotes" to notes,
-                            "resolvedBy" to (authRepository.currentUserId() ?: "simulator"),
-                        ),
-                    ).await()
-                }
-            }
-        }
-    }
-
-    private fun baseRecord(w: SimWorker): Map<String, Any?> = mapOf(
-        "workerId" to w.workerId,
-        "vestId" to w.vestId,
-        "siteId" to w.siteId,
-        "contractorId" to w.contractorId,
-        "createdAt" to System.currentTimeMillis(),
-        "simulated" to true,
-    )
 
     // ---------------------------------------------------------------- history
 
-    /** Fill the last [months] months with plausible incident + alert history. */
     fun seedHistory(months: Int = 6) {
-        if (sim.isEmpty()) {
-            _state.update { it.copy(message = "Bind to a site first.") }
-            return
-        }
-        _state.update { it.copy(busy = true) }
-        scope.launch {
-            var written = 0
-            try {
-                val batch = firestore.batch()
-                val now = System.currentTimeMillis()
-                val monthMs = 30L * 24 * 3600 * 1000
-                sim.values.map { it.w }.forEach { w ->
-                    val count = Random.nextInt(4, 9)
-                    repeat(count) {
-                        val ageMs = Random.nextLong(0, months * monthMs)
-                        val createdAt = now - ageMs
-                        val (type, severity) = randomEvent()
-                        val resolved = Random.nextInt(100) < 85
-                        val hr = if (type == AlertType.HEART_RATE_WARNING) Random.nextInt(118, 150) else Random.nextInt(70, 105)
-                        val temp = if (type == AlertType.TEMPERATURE_WARNING) round1(Random.nextDouble(38.2, 39.9)) else round1(Random.nextDouble(36.4, 37.4))
-
-                        val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document()
-                        batch.set(
-                            incidentRef,
-                            mapOf(
-                                "workerId" to w.workerId,
-                                "vestId" to w.vestId,
-                                "siteId" to w.siteId,
-                                "contractorId" to w.contractorId,
-                                "type" to type.name,
-                                "severity" to severity.name,
-                                "heartRate" to hr,
-                                "temperature" to temp,
-                                "latitude" to round5(gpsCenter.first + Random.nextDouble(-0.001, 0.001)),
-                                "longitude" to round5(gpsCenter.second + Random.nextDouble(-0.001, 0.001)),
-                                "createdAt" to createdAt,
-                                "outcome" to if (resolved) randomOutcome() else null,
-                                "resolutionNotes" to if (resolved) "Reviewed by site safety officer." else null,
-                                "resolvedBy" to if (resolved) (authRepository.currentUserId() ?: "simulator") else null,
-                                "simulated" to true,
-                            ),
-                        )
-                        val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
-                        batch.set(
-                            alertRef,
-                            mapOf(
-                                "workerId" to w.workerId,
-                                "vestId" to w.vestId,
-                                "siteId" to w.siteId,
-                                "contractorId" to w.contractorId,
-                                "type" to type.name,
-                                "severity" to severity.name,
-                                // History is past events: the alert is long over even when
-                                // the incident review is still open, so it never goes live.
-                                "status" to AlertStatus.RESOLVED.name,
-                                "message" to "${type.name.replace('_', ' ').lowercase(Locale.US)} · ${w.name}",
-                                "createdAt" to createdAt,
-                                "incidentId" to incidentRef.id,
-                                "simulated" to true,
-                            ),
-                        )
-                        written += 2
-                    }
-                }
-                batch.commit().await()
-                log("Seeded $written history records across ${months} months")
-                _state.update { it.copy(busy = false, message = "Added ${written / 2} incidents to history.") }
-            } catch (e: Exception) {
-                Log.e(TAG, "seedHistory failed", e)
-                _state.update { it.copy(busy = false, message = "Seed failed: ${e.message}") }
-            }
-        }
+        // Disabled
     }
 
     // ---------------------------------------------------------------- reset
-
-    /**
-     * Stop everything and delete every `simulated == true` record in *this operator's
-     * scope*. The scope filter (siteId for an SSO, contractorId for a contractor) is
-     * required — a bare `where simulated == true` query is rejected by the Firestore
-     * rules because it can't be proven to return only readable documents.
-     */
     fun reset() {
         stop()
         val scopeField: String
@@ -605,6 +238,10 @@ class SimulationEngine @Inject constructor(
     }
 
     fun consumeMessage() = _state.update { it.copy(message = null) }
+
+    private fun publish() {
+        _state.update { it.copy(workers = sim.values.map { item -> item.w }) }
+    }
 
     // ---------------------------------------------------------------- helpers
 

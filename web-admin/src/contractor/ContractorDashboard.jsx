@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { FiGrid, FiUsers, FiFileText, FiCreditCard, FiX, FiMenu } from 'react-icons/fi';
-import { TbCpu } from 'react-icons/tb';
 import { doc, onSnapshot } from 'firebase/firestore';
 import logo from '../assets/bevest_logo.png';
 import { auth, db } from '../firebase';
@@ -11,7 +10,6 @@ import ContractorSsos, { AddSso } from './ContractorSsos';
 import SsoProfile from './SsoProfile';
 import ContractorProfile from './ContractorProfile';
 import ContractorSubscription from './ContractorSubscription';
-import SimulationScreen from '../simulation/SimulationScreen';
 import './contractor.css';
 
 /**
@@ -24,7 +22,6 @@ const NAV = [
   { key: 'SSOs', label: 'Site Safety Officers', icon: FiUsers },
   { key: 'Reports', label: 'Reports', icon: FiFileText },
   { key: 'Subscription', label: 'Subscription', icon: FiCreditCard },
-  { key: 'Simulation', label: 'IoT Simulation', icon: TbCpu },
 ];
 
 // Which nav tab each sub-page belongs to (for the active highlight).
@@ -37,7 +34,6 @@ const PARENT_TAB = {
   ReportDetail: 'Reports',
   Incidents: 'Reports',
   Subscription: 'Subscription',
-  Simulation: 'Simulation',
   Profile: null,
 };
 
@@ -117,8 +113,6 @@ const ContractorDashboard = ({ user, onLogout }) => {
         );
       case 'AddSso':
         return <AddSso contractorId={contractorId} onDone={() => go('SSOs')} />;
-      case 'Simulation':
-        return <SimulationScreen user={user} />;
       case 'Subscription':
         return <ContractorSubscription user={user} profile={profile} data={data} />;
       case 'Profile':

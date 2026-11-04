@@ -45,7 +45,6 @@ import com.jtexpress.bevest.notifications.DeepLink
 import com.jtexpress.bevest.ui.common.BottomTab
 import com.jtexpress.bevest.ui.common.RoleScaffold
 import com.jtexpress.bevest.ui.common.profileDestinations
-import com.jtexpress.bevest.ui.sim.SimulationScreen
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Spacing
@@ -119,7 +118,6 @@ fun SsoArea(
                 onOpenAlert = { id -> navController.navigate(Routes.withArg(Routes.SSO_ALERT_DETAIL, id)) },
                 onOpenAlerts = { navController.navigate(Routes.SSO_ALERTS) },
                 onOpenProfile = { navController.navigate(Routes.PROFILE) },
-                onOpenSimulator = { navController.navigate(Routes.SIMULATION) },
             )
         }
         composable(Routes.SSO_WORKERS) {
@@ -191,9 +189,6 @@ fun SsoArea(
         }
         composable(Routes.SSO_PAIR_VEST) {
             PairVestScreen(user = user, onDone = { navController.popBackStack() })
-        }
-        composable(Routes.SIMULATION) {
-            SimulationScreen(user = user, onBack = { navController.popBackStack() })
         }
         profileDestinations(navController, onSignOut)
     }

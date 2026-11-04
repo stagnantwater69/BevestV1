@@ -83,7 +83,6 @@ fun SsoDashboardScreen(
     onOpenAlert: (String) -> Unit,
     onOpenAlerts: () -> Unit,
     onOpenProfile: () -> Unit,
-    onOpenSimulator: () -> Unit,
     viewModel: SsoDashboardViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(user.siteId) { viewModel.start(user.siteId) }
@@ -114,11 +113,6 @@ fun SsoDashboardScreen(
         title = "Safety dashboard",
         subtitle = user.siteId,
         actions = {
-            if (BuildConfig.DEBUG) {
-                IconButton(onClick = onOpenSimulator) {
-                    Icon(BevestIcons.Simulator, contentDescription = "Reading simulator")
-                }
-            }
             ProfileAction(user, onClick = onOpenProfile)
         },
     ) { padding ->

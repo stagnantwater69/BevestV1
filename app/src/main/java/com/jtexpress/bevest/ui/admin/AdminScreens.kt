@@ -236,7 +236,7 @@ private fun MaintenanceBanner() {
                 horizontalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
                 Icon(
-                    BevestIcons.Simulator,
+                    BevestIcons.Maintenance,
                     contentDescription = null,
                     tint = palette.warning,
                     modifier = Modifier.size(IconSize.large),

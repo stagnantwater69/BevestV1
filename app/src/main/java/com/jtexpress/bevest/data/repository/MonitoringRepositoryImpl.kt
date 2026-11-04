@@ -44,9 +44,10 @@ class MonitoringRepositoryImpl @Inject constructor(
     ): SensorReading? {
         val candidates = mutableListOf<SensorReading>()
 
-        // 1. Direct reading at /liveReadings/{workerId}, only if it belongs to this worker's assigned vest (or is simulated)
+        // 1. Direct reading at /liveReadings/{workerId}, only if it belongs to this worker's assigned vest
         if (directReading != null &&
-            (directReading.vestId.isBlank() || directReading.vestId.equals(assignedVestId, ignoreCase = true))
+            directReading.vestId.isNotBlank() &&
+            directReading.vestId.equals(assignedVestId, ignoreCase = true)
         ) {
             candidates.add(directReading)
         }
@@ -123,9 +124,9 @@ class MonitoringRepositoryImpl @Inject constructor(
             val assignedFromVest = vestsSnap?.documents?.firstOrNull { it.getString("assignedWorkerId") == workerId }?.id
             val assignedVestId = assignedFromWorker ?: assignedFromVest
 
-            // If worker has no assigned vest, only allow simulated readings with blank vestId
+            // If worker has no assigned vest, do not attach or return any readings
             if (assignedVestId.isNullOrBlank()) {
-                return@combine directReading?.takeIf { it.vestId.isBlank() }
+                return@combine null
             }
 
             val vestDoc = validVests[assignedVestId]
@@ -183,10 +184,7 @@ class MonitoringRepositoryImpl @Inject constructor(
 
                 val directReading = directMap[workerId]
                 if (assignedVestId.isNullOrBlank()) {
-                    // Worker has no assigned vest: never attach hardware vest telemetry or fall alerts to them
-                    if (directReading != null && directReading.vestId.isBlank()) {
-                        result[workerId] = directReading
-                    }
+                    // Worker has no assigned vest: never attach telemetry or alerts
                     continue
                 }
 
@@ -269,23 +267,8 @@ class MonitoringRepositoryImpl @Inject constructor(
         Outcome.Failure(e.toAppError())
     }
 
-    override suspend fun pushSimulatedReading(reading: SensorReading): Outcome<Unit> = try {
-        database.getReference(FirebasePaths.liveReading(reading.workerId)).setValue(
-            mapOf(
-                "vestId" to reading.vestId,
-                "heartRate" to reading.heartRate,
-                "temperature" to reading.temperature,
-                "motionState" to reading.motionState.name,
-                "fallDetected" to reading.fallDetected,
-                "latitude" to reading.latitude,
-                "longitude" to reading.longitude,
-                "battery" to reading.batteryPercent,
-                "safetyResponse" to reading.safetyResponse.name,
-                "timestamp" to reading.timestamp,
-            ),
-        ).await()
-        Outcome.Success(Unit)
-    } catch (e: Exception) {
-        Outcome.Failure(e.toAppError())
+    override suspend fun pushSimulatedReading(reading: SensorReading): Outcome<Unit> {
+        // Simulations permanently disabled
+        return Outcome.Success(Unit)
     }
 }
