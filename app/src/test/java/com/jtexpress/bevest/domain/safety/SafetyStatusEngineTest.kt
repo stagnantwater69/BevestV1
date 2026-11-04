@@ -77,11 +77,24 @@ class SafetyStatusEngineTest {
     }
 
     @Test
-    fun `stale emergency reading is still offline`() {
+    fun `stale emergency reading stays emergency, not offline`() {
+        // A vest that drops off mid-SOS must not hide the emergency behind OFFLINE.
         val r = reading(
             ageSeconds = config.offlineTimeoutSeconds + 5L,
             safetyResponse = SafetyResponseState.EMERGENCY_REQUESTED,
         )
+        assertEquals(SafetyStatus.EMERGENCY, engine.evaluate(r, now))
+    }
+
+    @Test
+    fun `stale fall reading stays danger, not offline`() {
+        val r = reading(ageSeconds = config.offlineTimeoutSeconds + 5L, fall = true)
+        assertEquals(SafetyStatus.DANGER, engine.evaluate(r, now))
+    }
+
+    @Test
+    fun `stale reading with high vitals is offline`() {
+        val r = reading(ageSeconds = config.offlineTimeoutSeconds + 5L, hr = 130)
         assertEquals(SafetyStatus.OFFLINE, engine.evaluate(r, now))
     }
 
