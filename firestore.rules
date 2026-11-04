@@ -99,10 +99,12 @@ service cloud.firestore {
     // ---- workers ----
     match /workers/{workerId} {
       allow read: if isAdmin()
+                  || isDeveloper()
                   || resource == null  // let an SSO check whether an auto ID is free
                   || (isContractor() && resource.data.contractorId == request.auth.uid)
                   || (isSso() && resource.data.siteId == mySiteId());
       allow create, update: if isAdmin()
+                            || isDeveloper()  // developer vest deletion unlinks workers
                             || (isSso() && request.resource.data.siteId == mySiteId());
       allow delete: if isAdmin();
     }
@@ -120,10 +122,13 @@ service cloud.firestore {
     }
 
     // ---- vest assignments (history, never deleted — plan 31.7) ----
+    // Exception: when the Developer permanently deletes a vest from the hardware
+    // database, its assignment records are removed with it so no worker keeps
+    // pointing at a vest that no longer exists.
     match /vestAssignments/{id} {
-      allow read: if isAdmin() || isSso() || isContractor();
+      allow read: if isAdmin() || isSso() || isContractor() || isDeveloper();
       allow create, update: if isAdmin() || isSso();
-      allow delete: if false;
+      allow delete: if isDeveloper();
     }
 
     // ---- alerts ----
