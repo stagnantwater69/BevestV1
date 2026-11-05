@@ -12,12 +12,14 @@ import {
   formatDisplayDate, 
   calculateRenewalDate, 
   getContractorSubscription,
-  calculateCustomPricing 
+  calculateCustomPricing,
+  useSubscriptionPlans
 } from '../subscriptionPlans';
 import { logActivity } from '../activityLogger';
 import { PageHeader } from './ui';
 
 const ContractorSubscription = ({ user, profile, data }) => {
+  const { plans: activePlans, vestRate } = useSubscriptionPlans();
   const [billingCycle, setBillingCycle] = useState('monthly'); // 'monthly' | 'annual'
   const [selectedPlanModal, setSelectedPlanModal] = useState(null);
   const [showCustomModal, setShowCustomModal] = useState(false);
@@ -26,7 +28,7 @@ const ContractorSubscription = ({ user, profile, data }) => {
   const [toastMsg, setToastMsg] = useState('');
 
   const contractorId = profile?.contractorId || user?.uid;
-  const subscription = getContractorSubscription(profile || user?.profile || {});
+  const subscription = getContractorSubscription(profile || user?.profile || {}, activePlans);
 
   // Custom Tier state for > 125 vests and customizable SSOs
   const [customVests, setCustomVests] = useState(
@@ -116,8 +118,9 @@ const ContractorSubscription = ({ user, profile, data }) => {
     const vestCount = parseInt(customVests, 10);
     const ssoAllowance = parseInt(customSsos, 10);
 
-    if (isNaN(vestCount) || vestCount <= 125) {
-      alert('Custom tier calculation is specifically for deployments of more than 125 vests (minimum 126 vests). For up to 100 vests, please choose the Business or Enterprise tiers.');
+    const minCustom = activePlans.CUSTOM?.minVests || 125;
+    if (isNaN(vestCount) || vestCount <= minCustom) {
+      alert(`Custom tier calculation is specifically for deployments of more than ${minCustom} vests (minimum ${minCustom + 1} vests). For up to ${activePlans.ENTERPRISE?.vests || 100} vests, please choose the Business or Enterprise tiers.`);
       return;
     }
     if (isNaN(ssoAllowance) || ssoAllowance <= 0) {
@@ -125,7 +128,7 @@ const ContractorSubscription = ({ user, profile, data }) => {
       return;
     }
 
-    const pricing = calculateCustomPricing(vestCount, 10);
+    const pricing = calculateCustomPricing(vestCount, activePlans.CUSTOM?.discountPercent ?? 10, vestRate);
     setUpdating(true);
     try {
       const now = new Date();
@@ -135,14 +138,14 @@ const ContractorSubscription = ({ user, profile, data }) => {
       await updateDoc(userRef, {
         subscription: {
           planId: 'CUSTOM',
-          planName: 'Custom',
+          planName: activePlans.CUSTOM?.name || 'Custom',
           billingCycle: customBillingCycle,
           vestLimit: vestCount,
           ssoLimit: ssoAllowance,
-          storageGb: 100,
+          storageGb: activePlans.CUSTOM?.storageGb || 100,
           monthlyPrice: pricing.monthlyPrice,
           annualPrice: pricing.annualPrice,
-          discountPercent: 10,
+          discountPercent: activePlans.CUSTOM?.discountPercent ?? 10,
           assignedAt: now,
           renewDate: renew,
           status: 'Active'
@@ -367,8 +370,8 @@ const ContractorSubscription = ({ user, profile, data }) => {
               <div className="sub-price-block">
                 <div className="sub-price-main">
                   {billingCycle === 'annual'
-                    ? formatPhp(SUBSCRIPTION_PLANS.BUSINESS.annualPrice)
-                    : formatPhp(SUBSCRIPTION_PLANS.BUSINESS.monthlyPrice)}
+                    ? formatPhp(activePlans.BUSINESS.annualPrice)
+                    : formatPhp(activePlans.BUSINESS.monthlyPrice)}
                 </div>
                 <div className="sub-price-cycle">
                   /{billingCycle === 'annual' ? 'annual' : 'monthly'}
@@ -379,7 +382,7 @@ const ContractorSubscription = ({ user, profile, data }) => {
             <hr className="sub-tier-divider" />
 
             <ul className="sub-features-list">
-              {SUBSCRIPTION_PLANS.BUSINESS.features.map((feat, idx) => (
+              {activePlans.BUSINESS.features.map((feat, idx) => (
                 <li key={idx} className="sub-feature-item">
                   <span className="sub-bullet-dot"></span>
                   <span>{feat}</span>
@@ -391,7 +394,7 @@ const ContractorSubscription = ({ user, profile, data }) => {
               <button
                 type="button"
                 className={`sub-action-pill-btn ${isCurrent('BUSINESS') ? 'btn-current' : 'btn-active'}`}
-                onClick={() => handleSelectPlan(SUBSCRIPTION_PLANS.BUSINESS)}
+                onClick={() => handleSelectPlan(activePlans.BUSINESS)}
                 disabled={isCurrent('BUSINESS') && subscription.billingCycle === billingCycle}
               >
                 {isCurrent('BUSINESS') && subscription.billingCycle === billingCycle
@@ -410,14 +413,14 @@ const ContractorSubscription = ({ user, profile, data }) => {
                 {/* Strikethrough base price */}
                 <div className="sub-price-original">
                   {billingCycle === 'annual'
-                    ? formatPhp(SUBSCRIPTION_PLANS.ENTERPRISE.baseAnnualPrice)
-                    : formatPhp(SUBSCRIPTION_PLANS.ENTERPRISE.baseMonthlyPrice)}
+                    ? formatPhp(activePlans.ENTERPRISE.baseAnnualPrice)
+                    : formatPhp(activePlans.ENTERPRISE.baseMonthlyPrice)}
                 </div>
                 {/* Discounted price */}
                 <div className="sub-price-main">
                   {billingCycle === 'annual'
-                    ? formatPhp(SUBSCRIPTION_PLANS.ENTERPRISE.annualPrice)
-                    : formatPhp(SUBSCRIPTION_PLANS.ENTERPRISE.monthlyPrice)}
+                    ? formatPhp(activePlans.ENTERPRISE.annualPrice)
+                    : formatPhp(activePlans.ENTERPRISE.monthlyPrice)}
                 </div>
                 <div className="sub-price-cycle">
                   /{billingCycle === 'annual' ? 'annual' : 'monthly'}
@@ -428,7 +431,7 @@ const ContractorSubscription = ({ user, profile, data }) => {
             <hr className="sub-tier-divider" />
 
             <ul className="sub-features-list">
-              {SUBSCRIPTION_PLANS.ENTERPRISE.features.map((feat, idx) => (
+              {activePlans.ENTERPRISE.features.map((feat, idx) => (
                 <li key={idx} className="sub-feature-item">
                   <span className="sub-bullet-dot"></span>
                   <span>{feat}</span>
@@ -440,7 +443,7 @@ const ContractorSubscription = ({ user, profile, data }) => {
               <button
                 type="button"
                 className={`sub-action-pill-btn ${isCurrent('ENTERPRISE') ? 'btn-current' : 'btn-active'}`}
-                onClick={() => handleSelectPlan(SUBSCRIPTION_PLANS.ENTERPRISE)}
+                onClick={() => handleSelectPlan(activePlans.ENTERPRISE)}
                 disabled={isCurrent('ENTERPRISE') && subscription.billingCycle === billingCycle}
               >
                 {isCurrent('ENTERPRISE') && subscription.billingCycle === billingCycle

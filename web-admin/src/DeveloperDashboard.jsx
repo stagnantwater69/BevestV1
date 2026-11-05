@@ -5,7 +5,8 @@ import {
   FiAlertCircle, FiDollarSign, FiUsers, 
   FiRefreshCw, FiEye, FiTrash2, FiShield, FiTag, 
   FiAlertTriangle, FiCheck, FiX, FiLayers, FiMenu,
-  FiBriefcase, FiUserPlus, FiLock, FiMail, FiPhone
+  FiBriefcase, FiUserPlus, FiLock, FiMail, FiPhone,
+  FiSave, FiEdit3
 } from 'react-icons/fi';
 import { 
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
@@ -16,7 +17,14 @@ import { ref, remove, set } from 'firebase/database';
 import { auth, secondaryAuth, db, rtdb } from './firebase';
 import QRCode from 'qrcode';
 import { logActivity } from './activityLogger';
-import { SUBSCRIPTION_PLANS, formatDisplayDate } from './subscriptionPlans';
+import { 
+  SUBSCRIPTION_PLANS, 
+  formatDisplayDate, 
+  useSubscriptionPlans, 
+  saveSubscriptionPlans, 
+  resetSubscriptionPlans,
+  formatPhp 
+} from './subscriptionPlans';
 import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
 import logo from './assets/bevest_logo.png';
 import './developer.css';
@@ -31,6 +39,109 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogFilter, setCatalogFilter] = useState('ALL'); // 'ALL' | 'UNREGISTERED' | 'REGISTERED' | 'MAINTENANCE'
   
+  // Dynamic Subscription Tiers Configuration state
+  const { plans: cloudPlans, vestRate: cloudVestRate, isCustomConfig: cloudIsCustom } = useSubscriptionPlans();
+  const [tierEditor, setTierEditor] = useState(null);
+  const [vestRateInput, setVestRateInput] = useState(4000);
+  const [savingTiers, setSavingTiers] = useState(false);
+  const [newFeatureText, setNewFeatureText] = useState({ BUSINESS: '', ENTERPRISE: '', CUSTOM: '' });
+
+  useEffect(() => {
+    if (cloudPlans) {
+      setTierEditor(JSON.parse(JSON.stringify(cloudPlans)));
+      setVestRateInput(cloudVestRate || 4000);
+    }
+  }, [cloudPlans, cloudVestRate]);
+
+  const handleTierFieldChange = (tierKey, field, value) => {
+    setTierEditor(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        [tierKey]: {
+          ...prev[tierKey],
+          [field]: value
+        }
+      };
+    });
+  };
+
+  const handleFeatureChange = (tierKey, index, value) => {
+    setTierEditor(prev => {
+      if (!prev) return prev;
+      const updated = [...(prev[tierKey]?.features || [])];
+      updated[index] = value;
+      return {
+        ...prev,
+        [tierKey]: {
+          ...prev[tierKey],
+          features: updated
+        }
+      };
+    });
+  };
+
+  const handleRemoveFeature = (tierKey, index) => {
+    setTierEditor(prev => {
+      if (!prev) return prev;
+      const updated = [...(prev[tierKey]?.features || [])];
+      updated.splice(index, 1);
+      return {
+        ...prev,
+        [tierKey]: {
+          ...prev[tierKey],
+          features: updated
+        }
+      };
+    });
+  };
+
+  const handleAddFeature = (tierKey) => {
+    const text = (newFeatureText[tierKey] || '').trim();
+    if (!text) return;
+    setTierEditor(prev => {
+      if (!prev) return prev;
+      const updated = [...(prev[tierKey]?.features || []), text];
+      return {
+        ...prev,
+        [tierKey]: {
+          ...prev[tierKey],
+          features: updated
+        }
+      };
+    });
+    setNewFeatureText(prev => ({ ...prev, [tierKey]: '' }));
+  };
+
+  const handleSaveTiers = async () => {
+    if (!tierEditor) return;
+    setSavingTiers(true);
+    try {
+      await saveSubscriptionPlans(tierEditor, vestRateInput, devEmail);
+      showToast('success', '✔ Subscription tiers, prices, quotas, and inclusions saved successfully!');
+    } catch (err) {
+      console.error('Failed to save subscription tiers:', err);
+      showToast('error', 'Failed to save subscription tiers: ' + err.message);
+    } finally {
+      setSavingTiers(false);
+    }
+  };
+
+  const handleResetTiers = async () => {
+    const ok = window.confirm('Are you sure you want to reset all subscription tiers and inclusions back to factory defaults?');
+    if (!ok) return;
+    setSavingTiers(true);
+    try {
+      await resetSubscriptionPlans(devEmail);
+      showToast('success', '✔ Reset subscription tiers to factory default pricing and inclusions!');
+    } catch (err) {
+      console.error('Failed to reset subscription tiers:', err);
+      showToast('error', 'Failed to reset subscription tiers: ' + err.message);
+    } finally {
+      setSavingTiers(false);
+    }
+  };
+
   // QR Generator Form state
   const generateRandomMac = () => {
     const h = () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0').toUpperCase();
@@ -1644,6 +1755,296 @@ const DeveloperDashboard = ({ user, onLogout }) => {
           {/* TAB 3: SUBSCRIPTIONS & PAYMENTS */}
           {activeTab === 'subscriptions' && (
             <div>
+              {/* Subscription Tiers, Pricing & Inclusions Editor */}
+              <div className="dev-card" style={{ borderTop: '4px solid #ea580c' }}>
+                <div className="dev-card-header">
+                  <div>
+                    <h3 className="dev-card-title">
+                      <FiLayers /> Subscription Tiers & Inclusions Editor
+                    </h3>
+                    <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      Modify live pricing, hardware limits (vests & SSOs), data storage, and inclusion bullet points for every subscription tier.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    {cloudIsCustom ? (
+                      <span className="dev-badge-green" title="Configuration loaded from Firestore settings/subscriptionPlans">
+                        <FiCheckCircle /> Cloud Config Active
+                      </span>
+                    ) : (
+                      <span className="dev-badge-amber" title="Using default factory plan configuration">
+                        Factory Defaults
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="dev-btn-secondary"
+                      onClick={handleResetTiers}
+                      disabled={savingTiers}
+                      title="Reset all tiers and inclusions back to system factory defaults"
+                      style={{ padding: '0.45rem 0.85rem' }}
+                    >
+                      <FiRefreshCw /> Reset Defaults
+                    </button>
+                    <button
+                      type="button"
+                      className="dev-btn-orange"
+                      onClick={handleSaveTiers}
+                      disabled={savingTiers}
+                      style={{ padding: '0.45rem 1rem' }}
+                    >
+                      <FiSave /> {savingTiers ? 'Saving...' : 'Save All Tiers'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Base Vest Rate Global Setting */}
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '1rem', 
+                  padding: '0.75rem 1rem', 
+                  backgroundColor: '#fff7ed', 
+                  border: '1px solid #ffedd5', 
+                  borderRadius: '6px', 
+                  marginBottom: '1.25rem',
+                  flexWrap: 'wrap'
+                }}>
+                  <strong style={{ fontSize: '0.85rem', color: '#9a3412' }}>
+                    Base Hardware Rate (₱ / Vest / Month):
+                  </strong>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span style={{ fontWeight: 700, color: '#ea580c' }}>₱</span>
+                    <input
+                      type="number"
+                      className="dev-input"
+                      style={{ width: '130px', padding: '0.35rem 0.6rem', fontWeight: 700 }}
+                      value={vestRateInput}
+                      onChange={(e) => setVestRateInput(Math.max(0, Number(e.target.value) || 0))}
+                    />
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: '#9a3412' }}>
+                    * Base monthly unit cost used for custom calculations and enterprise discount scaling.
+                  </span>
+                </div>
+
+                {/* 3 Tiers Grid */}
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', 
+                  gap: '1.25rem' 
+                }}>
+                  {tierEditor && ['BUSINESS', 'ENTERPRISE', 'CUSTOM'].map(tierKey => {
+                    const t = tierEditor[tierKey] || {};
+                    const isCustom = tierKey === 'CUSTOM';
+
+                    return (
+                      <div key={tierKey} style={{
+                        border: t.highlight ? '2px solid #ea580c' : '1px solid var(--border-color, #e2e8f0)',
+                        borderRadius: '8px',
+                        padding: '1.25rem',
+                        backgroundColor: t.highlight ? '#fffaf5' : '#ffffff',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.85rem'
+                      }}>
+                        {/* Header */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <input
+                              type="text"
+                              className="dev-input"
+                              style={{ fontWeight: 700, fontSize: '1rem', width: '130px', padding: '0.3rem 0.5rem' }}
+                              value={t.name || ''}
+                              onChange={(e) => handleTierFieldChange(tierKey, 'name', e.target.value)}
+                            />
+                            <input
+                              type="text"
+                              className="dev-input"
+                              style={{ fontWeight: 600, fontSize: '0.75rem', width: '90px', padding: '0.3rem 0.5rem', textTransform: 'uppercase' }}
+                              value={t.tag || ''}
+                              onChange={(e) => handleTierFieldChange(tierKey, 'tag', e.target.value)}
+                            />
+                          </div>
+                          {t.highlight && (
+                            <span className="dev-badge-orange" style={{ fontSize: '0.7rem' }}>Recommended</span>
+                          )}
+                        </div>
+
+                        {/* Quotas */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
+                          <div className="dev-form-group" style={{ margin: 0 }}>
+                            <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>
+                              {isCustom ? 'Min Vests Limit' : 'Vests Quota'}
+                            </label>
+                            <input
+                              type="number"
+                              className="dev-input"
+                              style={{ padding: '0.35rem 0.5rem' }}
+                              value={isCustom ? (t.minVests || 125) : (t.vests || 0)}
+                              onChange={(e) => handleTierFieldChange(tierKey, isCustom ? 'minVests' : 'vests', Number(e.target.value) || 0)}
+                            />
+                          </div>
+                          <div className="dev-form-group" style={{ margin: 0 }}>
+                            <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>
+                              {isCustom ? 'SSO Allowance' : 'SSO Limit'}
+                            </label>
+                            <input
+                              type="text"
+                              className="dev-input"
+                              style={{ padding: '0.35rem 0.5rem' }}
+                              value={t.ssos || ''}
+                              onChange={(e) => handleTierFieldChange(tierKey, 'ssos', isCustom ? e.target.value : (Number(e.target.value) || 0))}
+                            />
+                          </div>
+                          <div className="dev-form-group" style={{ margin: 0 }}>
+                            <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>Storage Quota (GB)</label>
+                            <input
+                              type="number"
+                              className="dev-input"
+                              style={{ padding: '0.35rem 0.5rem' }}
+                              value={t.storageGb || 0}
+                              onChange={(e) => {
+                                const gb = Number(e.target.value) || 0;
+                                handleTierFieldChange(tierKey, 'storageGb', gb);
+                                handleTierFieldChange(tierKey, 'storage', `${gb}gb Data Storage`);
+                              }}
+                            />
+                          </div>
+                          <div className="dev-form-group" style={{ margin: 0 }}>
+                            <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>Discount %</label>
+                            <input
+                              type="number"
+                              className="dev-input"
+                              style={{ padding: '0.35rem 0.5rem' }}
+                              value={t.discountPercent || 0}
+                              onChange={(e) => handleTierFieldChange(tierKey, 'discountPercent', Number(e.target.value) || 0)}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Pricing */}
+                        {!isCustom ? (
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', backgroundColor: '#f8fafc', padding: '0.65rem', borderRadius: '6px' }}>
+                            <div className="dev-form-group" style={{ margin: 0 }}>
+                              <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>Monthly Price (₱)</label>
+                              <input
+                                type="number"
+                                className="dev-input"
+                                style={{ padding: '0.35rem 0.5rem', fontWeight: 600 }}
+                                value={t.monthlyPrice || 0}
+                                onChange={(e) => handleTierFieldChange(tierKey, 'monthlyPrice', Number(e.target.value) || 0)}
+                              />
+                            </div>
+                            <div className="dev-form-group" style={{ margin: 0 }}>
+                              <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>Annual Price (₱)</label>
+                              <input
+                                type="number"
+                                className="dev-input"
+                                style={{ padding: '0.35rem 0.5rem', fontWeight: 600 }}
+                                value={t.annualPrice || 0}
+                                onChange={(e) => handleTierFieldChange(tierKey, 'annualPrice', Number(e.target.value) || 0)}
+                              />
+                            </div>
+                            {tierKey === 'ENTERPRISE' && (
+                              <>
+                                <div className="dev-form-group" style={{ margin: 0 }}>
+                                  <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>Base Monthly (₱)</label>
+                                  <input
+                                    type="number"
+                                    className="dev-input"
+                                    style={{ padding: '0.35rem 0.5rem' }}
+                                    value={t.baseMonthlyPrice || 0}
+                                    onChange={(e) => handleTierFieldChange(tierKey, 'baseMonthlyPrice', Number(e.target.value) || 0)}
+                                  />
+                                </div>
+                                <div className="dev-form-group" style={{ margin: 0 }}>
+                                  <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>Base Annual (₱)</label>
+                                  <input
+                                    type="number"
+                                    className="dev-input"
+                                    style={{ padding: '0.35rem 0.5rem' }}
+                                    value={t.baseAnnualPrice || 0}
+                                    onChange={(e) => handleTierFieldChange(tierKey, 'baseAnnualPrice', Number(e.target.value) || 0)}
+                                  />
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ backgroundColor: '#f8fafc', padding: '0.65rem', borderRadius: '6px', fontSize: '0.8rem', color: '#475569' }}>
+                            <div><strong>Custom Tier Pricing:</strong> Calculated live based on selected vest count (minimum {t.minVests || 125} vests) × ₱{vestRateInput.toLocaleString()}/vest minus {t.discountPercent || 10}% volume discount.</div>
+                          </div>
+                        )}
+
+                        {/* Button Text */}
+                        <div className="dev-form-group" style={{ margin: 0 }}>
+                          <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>CTA Button Label</label>
+                          <input
+                            type="text"
+                            className="dev-input"
+                            style={{ padding: '0.35rem 0.5rem' }}
+                            value={t.buttonText || ''}
+                            onChange={(e) => handleTierFieldChange(tierKey, 'buttonText', e.target.value)}
+                          />
+                        </div>
+
+                        {/* Inclusions / Features List */}
+                        <div>
+                          <label className="dev-form-label" style={{ fontSize: '0.725rem', marginBottom: '0.4rem', display: 'flex', justifyContent: 'space-between' }}>
+                            <span>Plan Inclusions & Features ({t.features?.length || 0})</span>
+                          </label>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                            {(t.features || []).map((feat, fIdx) => (
+                              <div key={fIdx} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                <span style={{ color: '#ea580c', fontSize: '0.75rem' }}>•</span>
+                                <input
+                                  type="text"
+                                  className="dev-input"
+                                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', flex: 1 }}
+                                  value={feat}
+                                  onChange={(e) => handleFeatureChange(tierKey, fIdx, e.target.value)}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveFeature(tierKey, fIdx)}
+                                  title="Remove inclusion"
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: '2px 4px', fontSize: '0.9rem' }}
+                                >
+                                  <FiX />
+                                </button>
+                              </div>
+                            ))}
+                            
+                            {/* Add Feature input */}
+                            <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.35rem' }}>
+                              <input
+                                type="text"
+                                className="dev-input"
+                                placeholder="New inclusion / feature..."
+                                style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', flex: 1 }}
+                                value={newFeatureText[tierKey] || ''}
+                                onChange={(e) => setNewFeatureText(prev => ({ ...prev, [tierKey]: e.target.value }))}
+                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddFeature(tierKey); } }}
+                              />
+                              <button
+                                type="button"
+                                className="dev-btn-secondary"
+                                style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
+                                onClick={() => handleAddFeature(tierKey)}
+                              >
+                                + Add
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Contractors Subscriptions List */}
               <div className="dev-card">
                 <div className="dev-card-header">

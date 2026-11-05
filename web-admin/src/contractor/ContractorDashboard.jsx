@@ -15,7 +15,7 @@ import './contractor.css';
 /**
  * Contractor web area. Same shell as the Admin dashboard (sidebar, user chip,
  * nav items, sign-out footer, mobile burger menu) with the contractor's mobile
- * tabs — Dashboard, Workers, Reports, IoT Simulation — as its navigation.
+ * tabs — Dashboard, SSOs, Reports, Subscription — as its navigation.
  */
 const NAV = [
   { key: 'Dashboard', label: 'Dashboard', icon: FiGrid },

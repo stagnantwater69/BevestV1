@@ -260,11 +260,9 @@ class MonitoringRepositoryImpl @Inject constructor(
         Outcome.Failure(e.toAppError())
     }
 
-    override suspend fun clearReading(workerId: String): Outcome<Unit> = try {
-        database.getReference(FirebasePaths.liveReading(workerId)).removeValue().await()
-        Outcome.Success(Unit)
-    } catch (e: Exception) {
-        Outcome.Failure(e.toAppError())
+    override suspend fun clearReading(workerId: String): Outcome<Unit> {
+        // Disabled: live telemetry is owned by authentic IoT vests
+        return Outcome.Success(Unit)
     }
 
     override suspend fun pushSimulatedReading(reading: SensorReading): Outcome<Unit> {

@@ -149,7 +149,7 @@ class SimulationEngine @Inject constructor(
         loop?.cancel(); loop = null
         _state.update { it.copy(streaming = false) }
         log("Live stream stopped")
-        scope.launch { sim.keys.forEach { monitoring.clearReading(it) } }
+        // Cleared reading calls removed to prevent interfering with live telemetry
         sim.values.forEach {
             val phase = if (it.w.scenario == Scenario.OFFLINE) SimWorker.Phase.OFFLINE else SimWorker.Phase.NORMAL
             it.w = it.w.copy(phase = phase, motion = MotionState.MOVING)
@@ -224,7 +224,7 @@ class SimulationEngine @Inject constructor(
                         deleted += chunk.size
                     }
                 }
-                sim.keys.forEach { monitoring.clearReading(it) }
+                // Cleared reading calls removed to prevent interfering with live telemetry
                 sim.values.forEach { it.w = it.w.copy(scenario = Scenario.HEALTHY, phase = SimWorker.Phase.NORMAL) }
                 openAlertIds.clear(); incidentRaised.clear(); elapsedTicks.clear(); acknowledged.clear()
                 publish()
