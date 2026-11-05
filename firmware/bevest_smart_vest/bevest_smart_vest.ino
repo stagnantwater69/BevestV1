@@ -686,15 +686,17 @@ void startBleProvisioning() {
   Serial.printf("[BLE]     Broadcasting Name: \"%s\"\n", bleName.c_str());
 
   BLEDevice::init(bleName.c_str());
+  BLEDevice::setMTU(512); // Support high-speed unfragmented configuration payloads
   pBleServer = BLEDevice::createServer();
   pBleServer->setCallbacks(new ServerCallbacks());
 
   BLEService *pService = pBleServer->createService(SERVICE_UUID);
 
-  // Config Characteristic (Write)
+  // Config Characteristic (Write + Write Without Response)
   BLECharacteristic *pConfigChar = pService->createCharacteristic(
                                      CONFIG_CHAR_UUID,
-                                     BLECharacteristic::PROPERTY_WRITE
+                                     BLECharacteristic::PROPERTY_WRITE |
+                                     BLECharacteristic::PROPERTY_WRITE_NR
                                    );
   pConfigChar->setCallbacks(new ConfigCallbacks());
 
@@ -1048,6 +1050,8 @@ void pushReadingToFirebase(bool isFallEvent) {
     json.set("gpsHDOP",   (double)gpsHDOP);
   }
 
+  int wifiRssi = WiFi.RSSI();
+  json.set("wifiRssi", wifiRssi);
   json.set("battery", batteryPercent);
   json.set("timestamp", (double)getEpochMillis());
   json.set("timestampServer/.sv", "timestamp");
@@ -1092,6 +1096,8 @@ void pushVestLiveToFirebase() {
   json.set("macAddress", esp32MacAddress);
   json.set("serialNumber", esp32SerialNumber);
   json.set("wifiSsid", currentWifiSSID);
+  int wifiRssi = WiFi.RSSI();
+  json.set("wifiRssi", wifiRssi);
   json.set("battery", batteryPercent);
   json.set("online", true);
   json.set("fallDetected", fallDetected);

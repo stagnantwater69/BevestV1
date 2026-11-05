@@ -52,6 +52,7 @@ import com.jtexpress.bevest.ui.common.ErrorState
 import com.jtexpress.bevest.ui.common.LastUpdatedLabel
 import com.jtexpress.bevest.ui.common.LivePulse
 import com.jtexpress.bevest.ui.common.MetricCard
+import com.jtexpress.bevest.ui.common.WifiSignalLevel
 import com.jtexpress.bevest.ui.common.ReflectiveBand
 import com.jtexpress.bevest.ui.common.SectionHeader
 import com.jtexpress.bevest.ui.common.StatusChip
@@ -198,6 +199,17 @@ fun WorkerDetailScreen(
                             } else {
                                 null
                             },
+                            modifier = Modifier.weight(1f),
+                        )
+                        val wifiLevel = WifiSignalLevel.fromRssi(reading?.wifiRssi, online = !state.stale && reading != null)
+                        MetricCard(
+                            icon = wifiLevel.icon(),
+                            label = "Wi-Fi Signal",
+                            value = if (state.stale || reading == null) "Offline" else (reading.wifiRssi?.toString() ?: "—"),
+                            unit = if (!state.stale && reading?.wifiRssi != null) "dBm" else null,
+                            accent = if (!state.stale && reading != null) wifiLevel.color(palette) else null,
+                            stale = state.stale,
+                            supporting = if (!state.stale && reading != null && reading.wifiRssi != null) wifiLevel.label else null,
                             modifier = Modifier.weight(1f),
                         )
                     }

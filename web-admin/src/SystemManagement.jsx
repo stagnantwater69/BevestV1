@@ -13,6 +13,22 @@ import jsQR from 'jsqr';
 import QRCode from 'qrcode';
 import { logActivity } from './activityLogger';
 
+const getWifiSignalInfo = (rssi, isOnline) => {
+  if (!isOnline || rssi == null || rssi === 0) {
+    return { label: 'No Signal', color: '#94a3b8', bg: '#f1f5f9', isOnline: false };
+  }
+  if (rssi >= -60) {
+    return { label: 'Excellent', color: '#10b981', bg: '#ecfdf5', isOnline: true, text: `${rssi} dBm (Excellent)` };
+  }
+  if (rssi >= -72) {
+    return { label: 'Good', color: '#16a34a', bg: '#f0fdf4', isOnline: true, text: `${rssi} dBm (Good)` };
+  }
+  if (rssi >= -84) {
+    return { label: 'Fair', color: '#d97706', bg: '#fffbeb', isOnline: true, text: `${rssi} dBm (Fair)` };
+  }
+  return { label: 'Weak', color: '#dc2626', bg: '#fef2f2', isOnline: true, text: `${rssi} dBm (Weak)` };
+};
+
 const SystemManagement = ({ user }) => {
   const [vests, setVests] = useState([]);
   const [workersMap, setWorkersMap] = useState({});
@@ -647,9 +663,34 @@ const SystemManagement = ({ user }) => {
                                 ESP32: {vest.serialNumber || vest.esp32Serial}
                               </div>
                             )}
-                            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                              Battery: {vest.battery != null ? `${vest.battery}%` : '100%'}
-                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '2px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                Battery: {vest.battery != null ? `${vest.battery}%` : '100%'}
+                              </span>
+                              {(() => {
+                                const isOnline = vest.online === true || vest.status === 'AVAILABLE' || vest.status === 'ACTIVE';
+                                const wifi = getWifiSignalInfo(vest.wifiRssi ?? vest.rssi, isOnline);
+                                return (
+                                  <span
+                                    title={isOnline && (vest.wifiRssi != null || vest.rssi != null) ? `Wi-Fi Signal: ${wifi.text}` : 'Wi-Fi: Disconnected'}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '3px',
+                                      fontSize: '0.7rem',
+                                      fontWeight: 600,
+                                      padding: '1px 6px',
+                                      borderRadius: '4px',
+                                      backgroundColor: wifi.bg,
+                                      color: wifi.color,
+                                    }}
+                                  >
+                                    {wifi.isOnline ? <FiWifi style={{ fontSize: '0.75rem' }} /> : <FiWifiOff style={{ fontSize: '0.75rem' }} />}
+                                    {wifi.isOnline && (vest.wifiRssi != null || vest.rssi != null) ? `${vest.wifiRssi ?? vest.rssi} dBm` : wifi.label}
+                                  </span>
+                                );
+                              })()}
+                            </div>
                           </div>
                         </div>
                       </td>

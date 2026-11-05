@@ -84,18 +84,12 @@ fun SsoArea(
     fallPopup?.let { popup ->
         FallDetectedPopupDialog(
             popup = popup,
-            onRespond = {
+            onOpenAlert = {
                 safetyWatcher.dismissFallPopup(popup.alert)
                 navController.navigate(Routes.withArg(Routes.SSO_ALERT_DETAIL, popup.alert.alertId))
             },
             onAcknowledge = {
                 safetyWatcher.acknowledgeFall(popup.alert, user.uid)
-            },
-            onResolve = {
-                safetyWatcher.resolveFall(popup.alert, user.uid)
-            },
-            onDismiss = {
-                safetyWatcher.dismissFallPopup(popup.alert)
             },
         )
     }
@@ -184,6 +178,7 @@ fun SsoArea(
             VestDetailScreen(
                 vestId = entry.arguments?.getString("vestId").orEmpty(),
                 actorId = user.uid,
+                user = user,
                 onBack = { navController.popBackStack() },
             )
         }
@@ -197,16 +192,14 @@ fun SsoArea(
 @Composable
 private fun FallDetectedPopupDialog(
     popup: FallPopupState,
-    onRespond: () -> Unit,
+    onOpenAlert: () -> Unit,
     onAcknowledge: () -> Unit,
-    onResolve: () -> Unit,
-    onDismiss: () -> Unit,
 ) {
     val red = LocalStatusPalette.current.emergency
     val isEmergency = popup.alert.severity == AlertSeverity.EMERGENCY
 
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = onAcknowledge,
         properties = DialogProperties(
             dismissOnBackPress = true,
             dismissOnClickOutside = false,
@@ -279,24 +272,24 @@ private fun FallDetectedPopupDialog(
             }
             Spacer(Modifier.height(Spacing.xxl))
             Button(
-                onClick = onRespond,
+                onClick = onOpenAlert,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.White,
                     contentColor = red,
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(60.dp),
+                    .height(56.dp),
             ) {
                 Text(
-                    text = "Respond & View Alert",
+                    text = "Open and View Alert",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
             }
             Spacer(Modifier.height(Spacing.md))
             OutlinedButton(
-                onClick = onResolve,
+                onClick = onAcknowledge,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                 border = ButtonDefaults.outlinedButtonBorder.copy(brush = SolidColor(Color.White)),
                 modifier = Modifier
@@ -304,33 +297,10 @@ private fun FallDetectedPopupDialog(
                     .height(52.dp),
             ) {
                 Text(
-                    text = "Mark Resolved",
+                    text = "Acknowledged",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White,
-                )
-            }
-            Spacer(Modifier.height(Spacing.sm))
-            TextButton(
-                onClick = onAcknowledge,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-            ) {
-                Text(
-                    text = "Acknowledge Alert",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                )
-            }
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    text = "Silence & Dismiss",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.85f),
                 )
             }
         }

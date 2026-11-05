@@ -126,6 +126,7 @@ fun DocumentSnapshot.toVest(): Vest {
         macAddress = strOrNull("macAddress"),
         serialNumber = strOrNull("serialNumber") ?: strOrNull("esp32Serial"),
         wifiSsid = strOrNull("wifiSsid"),
+        wifiRssi = int("wifiRssi") ?: int("rssi"),
     )
 }
 

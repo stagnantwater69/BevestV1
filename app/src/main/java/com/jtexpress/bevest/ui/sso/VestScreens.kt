@@ -9,6 +9,8 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.core.content.ContextCompat
 
 import androidx.compose.animation.animateContentSize
@@ -68,6 +70,8 @@ import com.jtexpress.bevest.domain.model.Vest
 import com.jtexpress.bevest.domain.model.VestStatus
 import com.jtexpress.bevest.domain.model.Worker
 import com.jtexpress.bevest.ui.common.BatteryIndicator
+import com.jtexpress.bevest.ui.common.WifiSignalIndicator
+import com.jtexpress.bevest.ui.common.WifiSignalLevel
 import com.jtexpress.bevest.ui.common.BevestScaffold
 import com.jtexpress.bevest.ui.common.ConfirmationDialog
 import com.jtexpress.bevest.ui.common.ConnectionIndicator
@@ -289,6 +293,7 @@ private fun VestRow(vest: Vest, onClick: () -> Unit, modifier: Modifier = Modifi
                         )
                     }
                     BatteryIndicator(vest.batteryPercent)
+                    WifiSignalIndicator(rssi = vest.wifiRssi, online = vest.online, compact = true)
                 }
             }
             Column(
@@ -315,8 +320,14 @@ fun VestDetailScreen(
     vestId: String,
     actorId: String,
     onBack: () -> Unit,
+    user: User? = null,
     viewModel: VestDetailViewModel = hiltViewModel(),
 ) {
+    LaunchedEffect(user) {
+        if (user != null) {
+            viewModel.bind(user)
+        }
+    }
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val palette = LocalStatusPalette.current
     var confirmUnassign by remember { mutableStateOf(false) }
@@ -414,6 +425,7 @@ fun VestDetailScreen(
                                     )
                                 }
                                 BatteryIndicator(vest.batteryPercent)
+                                WifiSignalIndicator(rssi = vest.wifiRssi, online = vest.online, compact = true)
                                 Spacer(Modifier.weight(1f))
                                 Text(
                                     DateTimeUtils.relativeAge(vest.lastSeen),
@@ -473,6 +485,19 @@ fun VestDetailScreen(
                             ?: if (vest.online) "Connected (active stream)" else "Not connected",
                         icon = Icons.Outlined.Wifi,
                         valueColor = if (vest.online) palette.normal else null,
+                    )
+                    val signalLevel = WifiSignalLevel.fromRssi(vest.wifiRssi, vest.online)
+                    DetailRow(
+                        label = "Wi-Fi Signal",
+                        value = if (vest.online && vest.wifiRssi != null) {
+                            "${vest.wifiRssi} dBm (${signalLevel.label})"
+                        } else if (vest.online) {
+                            "Connected"
+                        } else {
+                            "Offline / No Signal"
+                        },
+                        icon = signalLevel.icon(),
+                        valueColor = signalLevel.color(palette),
                     )
                     SecondaryButton(
                         text = "Change Wi-Fi network",
@@ -1527,6 +1552,9 @@ fun PairVestScreen(
 
                     // ── 4. Wi-Fi Provisioning ───────────────────────────────────
                     PairStep.PROVISION_WIFI -> {
+                        val keyboard = LocalSoftwareKeyboardController.current
+                        val focus = LocalFocusManager.current
+
                         state.successMessage?.let { SuccessNote(it) }
 
                         Text(
@@ -1541,6 +1569,7 @@ fun PairVestScreen(
                             label = "Site Wi-Fi Network Name (SSID)",
                             helper = "e.g. Site-Office-WiFi",
                             keyboardType = KeyboardType.Text,
+                            imeAction = ImeAction.Next,
                         )
 
                         FormField(
@@ -1548,6 +1577,13 @@ fun PairVestScreen(
                             onValueChange = viewModel::onWifiPassInput,
                             label = "Wi-Fi Password",
                             keyboardType = KeyboardType.Password,
+                            isPassword = true,
+                            imeAction = ImeAction.Done,
+                            onImeAction = {
+                                keyboard?.hide()
+                                focus.clearFocus()
+                                viewModel.sendWifiCredentials()
+                            },
                         )
 
                         if (state.wifiProvisionSuccess) {
@@ -1565,7 +1601,11 @@ fun PairVestScreen(
                                 )
                                 PrimaryButton(
                                     text = "Send Wi-Fi",
-                                    onClick = viewModel::sendWifiCredentials,
+                                    onClick = {
+                                        keyboard?.hide()
+                                        focus.clearFocus()
+                                        viewModel.sendWifiCredentials()
+                                    },
                                     loading = state.provisioningWifi,
                                     loadingText = "Transmitting…",
                                     modifier = Modifier.weight(1f)
