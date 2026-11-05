@@ -12,6 +12,7 @@ import com.jtexpress.bevest.domain.repository.AlertRepository
 import com.jtexpress.bevest.domain.repository.MonitoringRepository
 import com.jtexpress.bevest.domain.repository.SettingsRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
+import com.jtexpress.bevest.domain.safety.AgeVitalThreshold
 import com.jtexpress.bevest.domain.safety.SafetyStatusEngine
 import com.jtexpress.bevest.utils.Outcome
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -36,6 +37,9 @@ data class WorkerDetailState(
     val worker: Worker? = null,
     val reading: SensorReading? = null,
     val status: SafetyStatus = SafetyStatus.OFFLINE,
+    val hrStatus: SafetyStatus = SafetyStatus.NORMAL,
+    val tempStatus: SafetyStatus = SafetyStatus.NORMAL,
+    val ageBracket: AgeVitalThreshold? = null,
     val stale: Boolean = true,
     val actionMessage: String? = null,
     /** Recent heart-rate samples, oldest first — drawn as an ECG trace on the card. */
@@ -60,6 +64,7 @@ class WorkerDetailViewModel @Inject constructor(
     private val actionMessage = MutableStateFlow<String?>(null)
     private val safetyCountdownSec = MutableStateFlow<Int?>(null)
     private var safetyTimerJob: Job? = null
+    private var ackResetJob: Job? = null
 
     private val heartRateHistory = MutableStateFlow<List<Int>>(emptyList())
 
@@ -69,6 +74,16 @@ class WorkerDetailViewModel @Inject constructor(
         safetyCountdownSec,
     ) { msg, hrHistory, countdown ->
         Triple(msg, hrHistory, countdown)
+    }
+
+    private fun scheduleAckReset() {
+        if (ackResetJob?.isActive == true) return
+        ackResetJob = viewModelScope.launch {
+            delay(5_000L)
+            if (state.value.reading?.safetyResponse == SafetyResponseState.ACKNOWLEDGED) {
+                monitoringRepository.setSafetyResponse(workerId, SafetyResponseState.NONE)
+            }
+        }
     }
 
     val state: StateFlow<WorkerDetailState> =
@@ -82,12 +97,16 @@ class WorkerDetailViewModel @Inject constructor(
                         reading?.heartRate?.let { hr ->
                             heartRateHistory.update { (it + hr).takeLast(HISTORY_SIZE) }
                         }
-                        if (reading?.safetyResponse == SafetyResponseState.ACKNOWLEDGED &&
-                            safetyCountdownSec.value != null
-                        ) {
-                            safetyTimerJob?.cancel()
-                            safetyCountdownSec.value = null
-                            actionMessage.value = null
+                        if (reading?.safetyResponse == SafetyResponseState.ACKNOWLEDGED) {
+                            if (safetyCountdownSec.value != null) {
+                                safetyTimerJob?.cancel()
+                                safetyCountdownSec.value = null
+                                actionMessage.value = null
+                            }
+                            scheduleAckReset()
+                        } else {
+                            ackResetJob?.cancel()
+                            ackResetJob = null
                         }
                     },
                     settingsRepository.observeThresholds(),
@@ -97,16 +116,22 @@ class WorkerDetailViewModel @Inject constructor(
                 ) { reading, thresholds, alertsOutcome, vitalLogs, (message, history, countdown) ->
                     val engine = SafetyStatusEngine(thresholds)
                     val now = System.currentTimeMillis()
+                    val worker = workerOutcome.data
+                    val age = worker.effectiveAge
                     WorkerDetailState(
                         loading = false,
-                        worker = workerOutcome.data,
+                        worker = worker,
                         reading = reading,
                         status = engine.evaluate(
                             reading,
                             (alertsOutcome as? Outcome.Success)?.data.orEmpty(),
                             workerId,
                             now,
+                            age,
                         ),
+                        hrStatus = engine.evaluateHeartRate(reading?.heartRate, age),
+                        tempStatus = engine.evaluateTemperature(reading?.temperature, age),
+                        ageBracket = thresholds.forAge(age),
                         stale = engine.isStale(reading, now),
                         actionMessage = message,
                         heartRateHistory = history,
@@ -119,6 +144,7 @@ class WorkerDetailViewModel @Inject constructor(
 
     fun initiateSafetyResponse(byUserId: String) {
         safetyTimerJob?.cancel()
+        ackResetJob?.cancel()
         safetyTimerJob = viewModelScope.launch {
             when (val r = monitoringRepository.initiateSafetyResponse(workerId, byUserId)) {
                 is Outcome.Success -> {
@@ -129,6 +155,7 @@ class WorkerDetailViewModel @Inject constructor(
                         if (state.value.reading?.safetyResponse == SafetyResponseState.ACKNOWLEDGED) {
                             safetyCountdownSec.value = null
                             actionMessage.value = null
+                            scheduleAckReset()
                             return@launch
                         }
                     }

@@ -10,6 +10,8 @@ data class WorkerLive(
     val reading: SensorReading?,
     val status: SafetyStatus,
     val stale: Boolean,
+    val hrStatus: SafetyStatus = SafetyStatus.NORMAL,
+    val tempStatus: SafetyStatus = SafetyStatus.NORMAL,
 ) {
     val lastUpdate: Long? get() = reading?.timestamp?.takeIf { it > 0 }
 }

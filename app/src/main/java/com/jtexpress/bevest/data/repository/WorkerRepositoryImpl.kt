@@ -9,13 +9,13 @@ import com.jtexpress.bevest.data.firebase.toAppError
 import com.jtexpress.bevest.data.mapper.toWorker
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.model.Worker
+import com.jtexpress.bevest.domain.model.calculateAgeFromBirthdate
 import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.utils.AppError
 import com.jtexpress.bevest.utils.Outcome
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -137,6 +137,7 @@ class WorkerRepositoryImpl @Inject constructor(
                 "lastName" to worker.lastName,
                 "phone" to worker.phone,
                 "birthday" to worker.birthday,
+                "age" to (worker.age ?: calculateAgeFromBirthdate(worker.birthday)),
                 "floorNumber" to worker.floorNumber,
                 "photoUrl" to worker.photoUrl,
                 "siteId" to worker.siteId,
@@ -184,6 +185,7 @@ class WorkerRepositoryImpl @Inject constructor(
         "lastName" to lastName,
         "phone" to phone,
         "birthday" to birthday,
+        "age" to (age ?: calculateAgeFromBirthdate(birthday)),
         "floorNumber" to floorNumber,
         "photoUrl" to photoUrl,
         "contractorId" to contractorId,

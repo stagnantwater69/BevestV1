@@ -213,6 +213,27 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [troubleshootNotes, setTroubleshootNotes] = useState('');
   const [troubleshootSaving, setTroubleshootSaving] = useState(false);
 
+  // Vital Signs Age-Based Thresholds State
+  const DEFAULT_VITAL_BRACKETS = [
+    { id: '18-29', label: '18 – 29 yrs', minAge: 18, maxAge: 29, hrWarning: 100, hrDanger: 120, tempWarning: 37.8, tempDanger: 38.5 },
+    { id: '30-39', label: '30 – 39 yrs', minAge: 30, maxAge: 39, hrWarning: 98,  hrDanger: 118, tempWarning: 37.8, tempDanger: 38.5 },
+    { id: '40-49', label: '40 – 49 yrs', minAge: 40, maxAge: 49, hrWarning: 95,  hrDanger: 115, tempWarning: 37.7, tempDanger: 38.4 },
+    { id: '50-59', label: '50 – 59 yrs', minAge: 50, maxAge: 59, hrWarning: 92,  hrDanger: 110, tempWarning: 37.6, tempDanger: 38.3 },
+    { id: '60+',   label: '60+ yrs',     minAge: 60, maxAge: 120, hrWarning: 88, hrDanger: 105, tempWarning: 37.5, tempDanger: 38.2 }
+  ];
+  const [vitalBrackets, setVitalBrackets] = useState(DEFAULT_VITAL_BRACKETS);
+  const [defaultHrWarning, setDefaultHrWarning] = useState(100);
+  const [defaultHrDanger, setDefaultHrDanger] = useState(120);
+  const [defaultTempWarning, setDefaultTempWarning] = useState(37.8);
+  const [defaultTempDanger, setDefaultTempDanger] = useState(38.5);
+  const [vitalMeta, setVitalMeta] = useState({
+    inactivitySeconds: 180,
+    offlineTimeoutSeconds: 60,
+    responseTimeoutSeconds: 60,
+    lowBatteryPercent: 20
+  });
+  const [savingVitals, setSavingVitals] = useState(false);
+
   const devEmail = user?.email || 'developer@bevest.com';
   const devName = user?.profile?.firstName 
     ? `${user.profile.firstName} ${user.profile.lastName || ''}`.trim()
@@ -417,6 +438,155 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     });
     return () => unsubscribe();
   }, []);
+
+  // 7. Subscribe to Vital Signs Thresholds (settings/thresholds)
+  useEffect(() => {
+    const threshRef = doc(db, 'settings', 'thresholds');
+    const unsubscribe = onSnapshot(threshRef, (snap) => {
+      if (snap.exists()) {
+        const d = snap.data() || {};
+        if (Array.isArray(d.ageBrackets) && d.ageBrackets.length > 0) {
+          setVitalBrackets(d.ageBrackets.map(b => ({
+            id: b.id || `${b.minAge}-${b.maxAge}`,
+            label: b.label || `${b.minAge} – ${b.maxAge} yrs`,
+            minAge: Number(b.minAge) || 18,
+            maxAge: Number(b.maxAge) || 99,
+            hrWarning: Number(b.hrWarning) || 100,
+            hrDanger: Number(b.hrDanger) || 120,
+            tempWarning: Number(b.tempWarning) || 37.8,
+            tempDanger: Number(b.tempDanger) || 38.5
+          })));
+        }
+        if (d.heartRateHigh != null) setDefaultHrWarning(Number(d.heartRateHigh));
+        if (d.heartRateDanger != null) setDefaultHrDanger(Number(d.heartRateDanger));
+        if (d.temperatureHigh != null) setDefaultTempWarning(Number(d.temperatureHigh));
+        if (d.temperatureDanger != null) setDefaultTempDanger(Number(d.temperatureDanger));
+        setVitalMeta({
+          inactivitySeconds: Number(d.inactivitySeconds) || 180,
+          offlineTimeoutSeconds: Number(d.offlineTimeoutSeconds) || 60,
+          responseTimeoutSeconds: Number(d.responseTimeoutSeconds) || 60,
+          lowBatteryPercent: Number(d.lowBatteryPercent) || 20
+        });
+      }
+    }, (err) => {
+      console.warn('Vital thresholds load error:', err.message);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleVitalBracketChange = (index, field, value) => {
+    setVitalBrackets(prev => {
+      const updated = [...prev];
+      const next = { ...updated[index], [field]: value };
+      if (field === 'minAge' || field === 'maxAge') {
+        const min = field === 'minAge' ? Number(value) : Number(next.minAge);
+        const max = field === 'maxAge' ? Number(value) : Number(next.maxAge);
+        next.id = `${min}-${max}`;
+        next.label = max >= 100 ? `${min}+ yrs` : `${min} – ${max} yrs`;
+      }
+      updated[index] = next;
+      return updated;
+    });
+  };
+
+  const handleAddVitalBracket = () => {
+    setVitalBrackets(prev => {
+      const last = prev[prev.length - 1];
+      const minAge = last ? Math.min(100, Number(last.maxAge) + 1) : 18;
+      const maxAge = Math.min(120, minAge + 9);
+      return [
+        ...prev,
+        {
+          id: `${minAge}-${maxAge}`,
+          label: `${minAge} – ${maxAge} yrs`,
+          minAge,
+          maxAge,
+          hrWarning: 95,
+          hrDanger: 115,
+          tempWarning: 37.7,
+          tempDanger: 38.4
+        }
+      ];
+    });
+  };
+
+  const handleRemoveVitalBracket = (index) => {
+    if (vitalBrackets.length <= 1) {
+      showToast('error', 'At least one age threshold bracket must remain.');
+      return;
+    }
+    setVitalBrackets(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSaveVitalThresholds = async () => {
+    setSavingVitals(true);
+    try {
+      const sanitized = vitalBrackets.map(b => ({
+        id: String(b.id || `${b.minAge}-${b.maxAge}`),
+        label: String(b.label || `${b.minAge} – ${b.maxAge} yrs`),
+        minAge: Number(b.minAge) || 18,
+        maxAge: Number(b.maxAge) || 99,
+        hrWarning: Number(b.hrWarning) || 100,
+        hrDanger: Number(b.hrDanger) || 120,
+        tempWarning: Number(b.tempWarning) || 37.8,
+        tempDanger: Number(b.tempDanger) || 38.5
+      }));
+
+      await setDoc(doc(db, 'settings', 'thresholds'), {
+        heartRateHigh: Number(defaultHrWarning) || 100,
+        heartRateDanger: Number(defaultHrDanger) || 120,
+        temperatureHigh: Number(defaultTempWarning) || 37.8,
+        temperatureDanger: Number(defaultTempDanger) || 38.5,
+        inactivitySeconds: Number(vitalMeta.inactivitySeconds) || 180,
+        offlineTimeoutSeconds: Number(vitalMeta.offlineTimeoutSeconds) || 60,
+        responseTimeoutSeconds: Number(vitalMeta.responseTimeoutSeconds) || 60,
+        lowBatteryPercent: Number(vitalMeta.lowBatteryPercent) || 20,
+        ageBrackets: sanitized,
+        updatedAt: new Date(),
+        updatedBy: devEmail
+      }, { merge: true });
+
+      await logActivity('Updated age-based Vital Signs Warning & Danger thresholds for Heart Rate and Body Temperature', devEmail);
+      showToast('success', '✓ Vital Signs age-based Warning & Danger thresholds saved and synced to SSO devices!');
+    } catch (err) {
+      console.error('Failed to save vital thresholds:', err);
+      showToast('error', 'Failed to save Vital Signs thresholds: ' + err.message);
+    } finally {
+      setSavingVitals(false);
+    }
+  };
+
+  const handleResetVitalThresholds = async () => {
+    const ok = window.confirm('Reset all age-based Heart Rate and Body Temperature thresholds back to factory defaults?');
+    if (!ok) return;
+    setVitalBrackets(DEFAULT_VITAL_BRACKETS);
+    setDefaultHrWarning(100);
+    setDefaultHrDanger(120);
+    setDefaultTempWarning(37.8);
+    setDefaultTempDanger(38.5);
+    setSavingVitals(true);
+    try {
+      await setDoc(doc(db, 'settings', 'thresholds'), {
+        heartRateHigh: 100,
+        heartRateDanger: 120,
+        temperatureHigh: 37.8,
+        temperatureDanger: 38.5,
+        inactivitySeconds: 180,
+        offlineTimeoutSeconds: 60,
+        responseTimeoutSeconds: 60,
+        lowBatteryPercent: 20,
+        ageBrackets: DEFAULT_VITAL_BRACKETS,
+        updatedAt: new Date(),
+        updatedBy: devEmail
+      }, { merge: true });
+      await logActivity('Reset Vital Signs thresholds to factory defaults', devEmail);
+      showToast('success', '✓ Reset Vital Signs thresholds to factory defaults!');
+    } catch (err) {
+      showToast('error', 'Failed to reset thresholds: ' + err.message);
+    } finally {
+      setSavingVitals(false);
+    }
+  };
 
   const handleRegenerateId = () => {
     const num = Math.floor(1000 + Math.random() * 9000);
@@ -1112,6 +1282,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             <FiCreditCard /> Subscriptions & Billing
           </button>
           <button 
+            className={`nav-item ${activeTab === 'vitals' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('vitals'); setIsMobileMenuOpen(false); }}
+          >
+            <FiActivity /> Vital Signs
+          </button>
+          <button 
             className={`nav-item ${activeTab === 'troubleshoot' ? 'active' : ''}`}
             onClick={() => { setActiveTab('troubleshoot'); setIsMobileMenuOpen(false); }}
           >
@@ -1136,12 +1312,14 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 {activeTab === 'hardware' && 'Smart Vest Hardware & QR Generator'}
                 {activeTab === 'admins' && 'Admin Account Provisioning & Companies'}
                 {activeTab === 'subscriptions' && 'Subscription & Payment Management'}
+                {activeTab === 'vitals' && 'Vital Signs Threshold Configuration (By Worker Age)'}
                 {activeTab === 'troubleshoot' && 'Subscription Diagnostics & Troubleshooting'}
               </h1>
               <p>
                 {activeTab === 'hardware' && 'Generate official scannable QR codes and upload authentic smart vests to the central Bevest database.'}
                 {activeTab === 'admins' && 'Onboard and manage Admin accounts for client companies and project sites.'}
                 {activeTab === 'subscriptions' && 'Manage contractor subscription tiers, verify manual payments, and monitor subscription expiration dates.'}
+                {activeTab === 'vitals' && 'Adjust and customize Heart Rate (BPM) and Body Temperature (°C) Warning (Yellow) and Danger (Red) thresholds based on worker age.'}
                 {activeTab === 'troubleshoot' && 'Diagnose subscription errors, grant temporary quota boosts, and override account statuses.'}
               </p>
             </div>
@@ -2377,6 +2555,248 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* TAB 5: VITAL SIGNS THRESHOLDS BY WORKER AGE */}
+          {activeTab === 'vitals' && (
+            <div>
+              <div className="dev-card" style={{ marginBottom: '1.5rem' }}>
+                <div className="dev-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <div>
+                    <h3 className="dev-card-title" style={{ marginBottom: '0.25rem' }}>
+                      <FiActivity /> Age-Based Heart Rate & Body Temperature Thresholds
+                    </h3>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      Configure Warning (Yellow) and Danger (Red) thresholds for each worker age group. On the SSO mobile app, readings that reach Warning appear in yellow and readings that reach Danger appear in red.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="dev-btn-secondary"
+                      onClick={handleAddVitalBracket}
+                    >
+                      <FiPlus /> Add Age Bracket
+                    </button>
+                    <button
+                      type="button"
+                      className="dev-btn-secondary"
+                      onClick={handleResetVitalThresholds}
+                      disabled={savingVitals}
+                    >
+                      <FiRefreshCw /> Reset Defaults
+                    </button>
+                    <button
+                      type="button"
+                      className="dev-btn-orange"
+                      onClick={handleSaveVitalThresholds}
+                      disabled={savingVitals}
+                    >
+                      <FiSave /> {savingVitals ? 'Saving...' : 'Save Vital Thresholds'}
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem', marginTop: '1.25rem' }}>
+                  {vitalBrackets.map((bracket, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '12px',
+                        padding: '1.25rem',
+                        boxShadow: '0 2px 8px rgba(15, 23, 42, 0.04)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-color)' }}>
+                        <div>
+                          <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#ea580c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            WORKER AGE GROUP
+                          </span>
+                          <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-main)' }}>
+                            {bracket.minAge} – {bracket.maxAge >= 100 ? `${bracket.minAge}+` : bracket.maxAge} Years Old
+                          </div>
+                        </div>
+                        {vitalBrackets.length > 1 && (
+                          <button
+                            type="button"
+                            className="dev-btn-secondary"
+                            onClick={() => handleRemoveVitalBracket(idx)}
+                            style={{ padding: '0.35rem 0.6rem', color: '#dc2626', borderColor: '#fecaca' }}
+                            title="Remove Age Group"
+                          >
+                            <FiTrash2 />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Age Range Inputs */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', alignItems: 'end', marginBottom: '1rem' }}>
+                        <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                          <label className="dev-form-label" style={{ whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>MIN AGE (YRS)</label>
+                          <input
+                            type="number"
+                            className="dev-input"
+                            min={16}
+                            max={120}
+                            value={bracket.minAge}
+                            onChange={(e) => handleVitalBracketChange(idx, 'minAge', e.target.value)}
+                            style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                          />
+                        </div>
+                        <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                          <label className="dev-form-label" style={{ whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>MAX AGE (YRS)</label>
+                          <input
+                            type="number"
+                            className="dev-input"
+                            min={16}
+                            max={120}
+                            value={bracket.maxAge}
+                            onChange={(e) => handleVitalBracketChange(idx, 'maxAge', e.target.value)}
+                            style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Heart Rate Warning & Danger */}
+                      <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '0.85rem', marginBottom: '0.85rem', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          ❤️ Heart Rate Thresholds (BPM)
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', alignItems: 'end' }}>
+                          <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                            <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>WARNING (YELLOW) ≥</label>
+                            <input
+                              type="number"
+                              className="dev-input"
+                              min={50}
+                              max={220}
+                              value={bracket.hrWarning}
+                              onChange={(e) => handleVitalBracketChange(idx, 'hrWarning', e.target.value)}
+                              style={{ borderColor: '#fcd34d', backgroundColor: '#fffbeb', fontWeight: 700, width: '100%', boxSizing: 'border-box', height: '42px' }}
+                            />
+                          </div>
+                          <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                            <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DANGER (RED) ≥</label>
+                            <input
+                              type="number"
+                              className="dev-input"
+                              min={50}
+                              max={220}
+                              value={bracket.hrDanger}
+                              onChange={(e) => handleVitalBracketChange(idx, 'hrDanger', e.target.value)}
+                              style={{ borderColor: '#fca5a5', backgroundColor: '#fef2f2', fontWeight: 700, width: '100%', boxSizing: 'border-box', height: '42px' }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Body Temperature Warning & Danger */}
+                      <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '0.85rem', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          🌡️ Body Temperature Thresholds (°C)
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', alignItems: 'end' }}>
+                          <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                            <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>WARNING (YELLOW) ≥</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              className="dev-input"
+                              min={35.0}
+                              max={43.0}
+                              value={bracket.tempWarning}
+                              onChange={(e) => handleVitalBracketChange(idx, 'tempWarning', e.target.value)}
+                              style={{ borderColor: '#fcd34d', backgroundColor: '#fffbeb', fontWeight: 700, width: '100%', boxSizing: 'border-box', height: '42px' }}
+                            />
+                          </div>
+                          <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                            <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DANGER (RED) ≥</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              className="dev-input"
+                              min={35.0}
+                              max={43.0}
+                              value={bracket.tempDanger}
+                              onChange={(e) => handleVitalBracketChange(idx, 'tempDanger', e.target.value)}
+                              style={{ borderColor: '#fca5a5', backgroundColor: '#fef2f2', fontWeight: 700, width: '100%', boxSizing: 'border-box', height: '42px' }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Fallback Thresholds (when worker age is not specified) */}
+              <div className="dev-card">
+                <div className="dev-card-header">
+                  <h3 className="dev-card-title">
+                    <FiShield /> Default Fallback Thresholds (When Worker Age is Unspecified)
+                  </h3>
+                </div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 0, marginBottom: '1rem' }}>
+                  Used automatically on the SSO app if a worker profile does not yet have a birthdate or saved age.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', alignItems: 'end' }}>
+                  <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                    <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT HR WARNING (BPM)</label>
+                    <input
+                      type="number"
+                      className="dev-input"
+                      value={defaultHrWarning}
+                      onChange={(e) => setDefaultHrWarning(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                    />
+                  </div>
+                  <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                    <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT HR DANGER (BPM)</label>
+                    <input
+                      type="number"
+                      className="dev-input"
+                      value={defaultHrDanger}
+                      onChange={(e) => setDefaultHrDanger(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                    />
+                  </div>
+                  <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                    <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT TEMP WARNING (°C)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      className="dev-input"
+                      value={defaultTempWarning}
+                      onChange={(e) => setDefaultTempWarning(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                    />
+                  </div>
+                  <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                    <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT TEMP DANGER (°C)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      className="dev-input"
+                      value={defaultTempDanger}
+                      onChange={(e) => setDefaultTempDanger(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.75rem' }}>
+                  <button
+                    type="button"
+                    className="dev-btn-orange"
+                    onClick={handleSaveVitalThresholds}
+                    disabled={savingVitals}
+                  >
+                    <FiSave /> {savingVitals ? 'Saving...' : 'Save All Vital Signs Thresholds'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

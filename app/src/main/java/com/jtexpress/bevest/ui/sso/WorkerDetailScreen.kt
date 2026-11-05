@@ -1,6 +1,7 @@
 package com.jtexpress.bevest.ui.sso
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Apartment
+import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.Cake
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Phone
@@ -41,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,6 +63,7 @@ import com.jtexpress.bevest.domain.model.SafetyResponseState
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.model.SensorReading
 import com.jtexpress.bevest.domain.model.VitalLogEntry
+import com.jtexpress.bevest.domain.safety.AgeVitalThreshold
 import com.jtexpress.bevest.ui.common.BevestScaffold
 import com.jtexpress.bevest.ui.common.ConfirmationDialog
 import com.jtexpress.bevest.ui.common.DangerButton
@@ -71,6 +76,7 @@ import com.jtexpress.bevest.ui.common.LivePulse
 import com.jtexpress.bevest.ui.common.MetricCard
 import com.jtexpress.bevest.ui.common.ReflectiveBand
 import com.jtexpress.bevest.ui.common.SectionHeader
+import com.jtexpress.bevest.ui.common.StatusBadge
 import com.jtexpress.bevest.ui.common.StatusChip
 import com.jtexpress.bevest.ui.common.SuccessNote
 import com.jtexpress.bevest.ui.common.WifiSignalLevel
@@ -85,6 +91,7 @@ import com.jtexpress.bevest.ui.theme.IconSize
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Radius
 import com.jtexpress.bevest.ui.theme.Spacing
+import com.jtexpress.bevest.ui.theme.VitalStyle
 import com.jtexpress.bevest.utils.DateTimeUtils
 
 /**
@@ -122,6 +129,7 @@ fun WorkerDetailScreen(
         }
         VitalLogsSheet(
             workerName = state.worker?.fullName?.ifBlank { workerId } ?: workerId,
+            ageBracket = state.ageBracket,
             logs = logsToShow,
             onDismiss = { showVitalLogs = false },
         )
@@ -149,9 +157,6 @@ fun WorkerDetailScreen(
             else -> {
                 val worker = state.worker
                 val reading = state.reading
-                val elevated = state.status == SafetyStatus.WARNING ||
-                    state.status == SafetyStatus.DANGER ||
-                    state.status == SafetyStatus.EMERGENCY
 
                 Column(
                     Modifier
@@ -175,33 +180,23 @@ fun WorkerDetailScreen(
                     SectionHeader(
                         title = "Live readings",
                         supporting = if (state.stale) {
-                            "Last known values — tap Heart rate or Body temperature for 1-min logs"
+                            "Last known values — tap the card below to view 1-min logs"
                         } else {
-                            "Updating live — tap Heart rate or Body temperature to view 1-min logs"
+                            "Updating live — tap the card below to view 1-min logs"
                         },
                     )
 
-                    MetricCard(
-                        icon = BevestIcons.HeartRate,
-                        label = "Heart rate",
-                        value = reading?.heartRate?.toString() ?: "—",
-                        unit = reading?.heartRate?.let { "BPM" },
-                        accent = if (elevated) palette.warning else palette.normal,
+                    VitalSignsCombinedCard(
+                        heartRate = reading?.heartRate,
+                        temperature = reading?.temperature,
+                        hrStatus = state.hrStatus,
+                        tempStatus = state.tempStatus,
+                        age = worker.effectiveAge,
+                        ageBracket = state.ageBracket,
                         stale = state.stale,
-                        supporting = "Tap to view 1-minute logs",
-                        trace = state.heartRateHistory.takeIf { it.size > 1 },
                         onClick = { showVitalLogs = true },
                     )
-                    MetricCard(
-                        icon = BevestIcons.Temperature,
-                        label = "Body temperature",
-                        value = reading?.temperature?.let { "%.1f".format(it) } ?: "—",
-                        unit = reading?.temperature?.let { "°C" },
-                        accent = if (elevated) palette.warning else palette.normal,
-                        stale = state.stale,
-                        supporting = "Tap to view 1-minute logs",
-                        onClick = { showVitalLogs = true },
-                    )
+
                     MetricCard(
                         icon = BevestIcons.forMotion(reading?.motionState ?: MotionState.UNKNOWN),
                         label = "Motion",
@@ -290,7 +285,7 @@ fun WorkerDetailScreen(
                     )
 
                     // ---- Worker Info ----
-                    if (!worker.birthday.isNullOrBlank() || !worker.floorNumber.isNullOrBlank() || worker.phone.isNotBlank()) {
+                    if (!worker.birthday.isNullOrBlank() || worker.effectiveAge != null || !worker.floorNumber.isNullOrBlank() || worker.phone.isNotBlank()) {
                         SectionHeader(
                             title = "Worker details",
                             supporting = "Profile and work assignment information",
@@ -304,9 +299,16 @@ fun WorkerDetailScreen(
                         }
                         if (!worker.birthday.isNullOrBlank()) {
                             DetailRow(
-                                label = "Birthday",
+                                label = "Birthdate",
                                 value = worker.birthday,
                                 icon = Icons.Outlined.Cake,
+                            )
+                        }
+                        worker.effectiveAge?.let { age ->
+                            DetailRow(
+                                label = "Age",
+                                value = "$age years old",
+                                icon = Icons.Outlined.Badge,
                             )
                         }
                         if (!worker.floorNumber.isNullOrBlank()) {
@@ -359,10 +361,246 @@ fun WorkerDetailScreen(
     }
 }
 
+/**
+ * Combined single card for Heart Rate and Body Temperature.
+ * Shows individual yellow Warning and red Danger highlights based on the worker's age thresholds,
+ * and opens the 1-minute Heart Rate & Body Temperature logs when clicked.
+ */
+@Composable
+private fun VitalSignsCombinedCard(
+    heartRate: Int?,
+    temperature: Double?,
+    hrStatus: SafetyStatus,
+    tempStatus: SafetyStatus,
+    age: Int?,
+    ageBracket: AgeVitalThreshold?,
+    stale: Boolean,
+    onClick: () -> Unit,
+) {
+    val palette = LocalStatusPalette.current
+    val hrColor = when (hrStatus) {
+        SafetyStatus.DANGER, SafetyStatus.EMERGENCY -> palette.danger
+        SafetyStatus.WARNING -> palette.warning
+        else -> palette.normal
+    }
+    val tempColor = when (tempStatus) {
+        SafetyStatus.DANGER, SafetyStatus.EMERGENCY -> palette.danger
+        SafetyStatus.WARNING -> palette.warning
+        else -> palette.normal
+    }
+    val worstVitalStatus = when {
+        hrStatus == SafetyStatus.DANGER || tempStatus == SafetyStatus.DANGER -> SafetyStatus.DANGER
+        hrStatus == SafetyStatus.WARNING || tempStatus == SafetyStatus.WARNING -> SafetyStatus.WARNING
+        else -> SafetyStatus.NORMAL
+    }
+    val borderColor = when {
+        stale -> MaterialTheme.colorScheme.outlineVariant
+        worstVitalStatus == SafetyStatus.DANGER -> palette.danger.copy(alpha = 0.65f)
+        worstVitalStatus == SafetyStatus.WARNING -> palette.warning.copy(alpha = 0.65f)
+        else -> MaterialTheme.colorScheme.outlineVariant
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (stale) 0.55f else 1f)
+            .clip(BevestShapes.card)
+            .clickable(onClick = onClick),
+        shape = BevestShapes.card,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            width = if (!stale && worstVitalStatus != SafetyStatus.NORMAL) 1.5.dp else 1.dp,
+            color = borderColor,
+        ),
+        shadowElevation = Elevation.card,
+    ) {
+        Column(
+            modifier = Modifier.padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "HEART RATE & BODY TEMPERATURE",
+                    style = EyebrowStyle,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!stale && worstVitalStatus != SafetyStatus.NORMAL) {
+                    StatusBadge(
+                        text = if (worstVitalStatus == SafetyStatus.DANGER) "Danger" else "Warning",
+                        color = if (worstVitalStatus == SafetyStatus.DANGER) palette.danger else palette.warning,
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Left column: Heart Rate
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            imageVector = BevestIcons.HeartRate,
+                            contentDescription = null,
+                            tint = if (stale) palette.offline else hrColor,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = "Heart rate",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            text = heartRate?.toString() ?: "—",
+                            style = VitalStyle,
+                            color = if (!stale && hrStatus != SafetyStatus.NORMAL) {
+                                hrColor
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                        if (heartRate != null) {
+                            Text(
+                                text = " BPM",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (!stale && hrStatus != SafetyStatus.NORMAL) {
+                                    hrColor
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.padding(bottom = 3.dp),
+                            )
+                        }
+                    }
+                    if (!stale && hrStatus != SafetyStatus.NORMAL) {
+                        Text(
+                            text = if (hrStatus == SafetyStatus.DANGER) "Danger threshold reached" else "Warning threshold reached",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = hrColor,
+                        )
+                    } else if (ageBracket != null) {
+                        Text(
+                            text = "Warn ≥${ageBracket.hrWarning} · Danger ≥${ageBracket.hrDanger}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                Divider(
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(1.dp),
+                )
+
+                // Right column: Body Temperature
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            imageVector = BevestIcons.Temperature,
+                            contentDescription = null,
+                            tint = if (stale) palette.offline else tempColor,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = "Body temp",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            text = temperature?.let { "%.1f".format(it) } ?: "—",
+                            style = VitalStyle,
+                            color = if (!stale && tempStatus != SafetyStatus.NORMAL) {
+                                tempColor
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                        if (temperature != null) {
+                            Text(
+                                text = " °C",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (!stale && tempStatus != SafetyStatus.NORMAL) {
+                                    tempColor
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.padding(bottom = 3.dp),
+                            )
+                        }
+                    }
+                    if (!stale && tempStatus != SafetyStatus.NORMAL) {
+                        Text(
+                            text = if (tempStatus == SafetyStatus.DANGER) "Danger threshold reached" else "Warning threshold reached",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = tempColor,
+                        )
+                    } else if (ageBracket != null) {
+                        Text(
+                            text = "Warn ≥${"%.1f".format(ageBracket.tempWarning)}° · Danger ≥${"%.1f".format(ageBracket.tempDanger)}°",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            Divider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (stale) "Last known reading · Tap for 1-minute logs" else "Tap to view 1-minute Heart Rate & Body Temp logs",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (age != null) {
+                    Text(
+                        text = "Age $age",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun VitalLogsSheet(
     workerName: String,
+    ageBracket: AgeVitalThreshold?,
     logs: List<VitalLogEntry>,
     onDismiss: () -> Unit,
 ) {
@@ -425,6 +663,18 @@ private fun VitalLogsSheet(
                     contentPadding = PaddingValues(bottom = Spacing.xxl),
                 ) {
                     items(logs, key = { it.timestamp }) { entry ->
+                        val hrTint = when {
+                            entry.heartRate == null || ageBracket == null -> palette.normal
+                            entry.heartRate >= ageBracket.hrDanger -> palette.danger
+                            entry.heartRate >= ageBracket.hrWarning -> palette.warning
+                            else -> palette.normal
+                        }
+                        val tempTint = when {
+                            entry.temperature == null || ageBracket == null -> palette.normal
+                            entry.temperature >= ageBracket.tempDanger -> palette.danger
+                            entry.temperature >= ageBracket.tempWarning -> palette.warning
+                            else -> palette.normal
+                        }
                         Surface(
                             shape = BevestShapes.card,
                             color = MaterialTheme.colorScheme.surface,
@@ -458,13 +708,14 @@ private fun VitalLogsSheet(
                                     Icon(
                                         BevestIcons.HeartRate,
                                         contentDescription = null,
-                                        tint = palette.normal,
+                                        tint = hrTint,
                                         modifier = Modifier.size(16.dp),
                                     )
                                     Text(
                                         entry.heartRate?.let { "$it BPM" } ?: "—",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Medium,
+                                        color = if (hrTint != palette.normal) hrTint else MaterialTheme.colorScheme.onSurface,
                                     )
                                 }
                                 Row(
@@ -475,13 +726,14 @@ private fun VitalLogsSheet(
                                     Icon(
                                         BevestIcons.Temperature,
                                         contentDescription = null,
-                                        tint = palette.normal,
+                                        tint = tempTint,
                                         modifier = Modifier.size(16.dp),
                                     )
                                     Text(
                                         entry.temperature?.let { "%.1f °C".format(it) } ?: "—",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Medium,
+                                        color = if (tempTint != palette.normal) tempTint else MaterialTheme.colorScheme.onSurface,
                                     )
                                 }
                             }

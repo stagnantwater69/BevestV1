@@ -44,18 +44,8 @@ data class FallPopupState(
 )
 
 /**
- * Fall detection, Worker Trigger (3s button press on D15), and escalation, run on the SSO's phone.
- *
- * The project is on Firebase's free plan, so the cloud functions in `functions/` cannot
- * be deployed. This does the part of their job that matters most, from inside the app:
- *
- *  - a fall opens one FALL_DETECTED alert (DANGER) straight away;
- *  - a 3-second hold on the vest button (D15 -> EMERGENCY_REQUESTED) opens a Worker Trigger
- *    alert (AlertType.EMERGENCY_REQUEST) with message "Worker Trigger. Please check with Worker.";
- *  - if nobody responds within the response timeout — the vest's wearer did not
- *    acknowledge and no officer acknowledged the alert — it is upgraded to EMERGENCY,
- *    an incident is opened and the reading's `safetyResponse` set to NO_RESPONSE;
- *  - every new or upgraded alert on the site raises a local notification.
+ * Fall detection, Worker Trigger (3s button press on D15), No Safety Response (15s timeout),
+ * and escalation, run on the SSO's phone.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
@@ -95,6 +85,15 @@ class SafetyWatcher @Inject constructor(
     /** Tracks workerId for each active Worker Trigger alertId. */
     private val activeTriggerAlertWorkers = mutableMapOf<String, String>()
 
+    /** Workers currently in a No Safety Response (15s timeout) burst. */
+    private val currentlyNoResponse = mutableSetOf<String>()
+
+    /** Per-worker cooldown window for No Safety Response alerts. */
+    private val noResponseCooldownUntil = mutableMapOf<String, Long>()
+
+    /** Tracks workerId for each active No Safety Response alertId. */
+    private val activeNoResponseAlertWorkers = mutableMapOf<String, String>()
+
     /** Alert IDs whose pop-up was dismissed at the given severity. */
     private val dismissedPopups = mutableMapOf<String, AlertSeverity>()
 
@@ -120,16 +119,20 @@ class SafetyWatcher @Inject constructor(
         currentlyTriggering.clear()
         triggerCooldownUntil.clear()
         activeTriggerAlertWorkers.clear()
+        currentlyNoResponse.clear()
+        noResponseCooldownUntil.clear()
+        activeNoResponseAlertWorkers.clear()
         dismissedPopups.clear()
         _fallPopup.value = null
     }
 
     fun dismissFallPopup(alert: Alert) {
         dismissedPopups[alert.alertId] = alert.severity
-        if (alert.type == AlertType.EMERGENCY_REQUEST) {
-            triggerCooldownUntil[alert.workerId] = System.currentTimeMillis() + FALL_COOLDOWN_MS
-        } else {
-            fallCooldownUntil[alert.workerId] = System.currentTimeMillis() + FALL_COOLDOWN_MS
+        val cooldown = System.currentTimeMillis() + FALL_COOLDOWN_MS
+        when (alert.type) {
+            AlertType.EMERGENCY_REQUEST -> triggerCooldownUntil[alert.workerId] = cooldown
+            AlertType.NO_SAFETY_RESPONSE -> noResponseCooldownUntil[alert.workerId] = cooldown
+            else -> fallCooldownUntil[alert.workerId] = cooldown
         }
         NotificationHelper.cancel(context, alert.alertId)
         if (_fallPopup.value?.alert?.alertId == alert.alertId) {
@@ -139,30 +142,46 @@ class SafetyWatcher @Inject constructor(
 
     fun acknowledgeFall(alert: Alert, byUserId: String) {
         dismissedPopups[alert.alertId] = AlertSeverity.EMERGENCY
-        if (alert.type == AlertType.EMERGENCY_REQUEST) {
-            triggerCooldownUntil[alert.workerId] = System.currentTimeMillis() + FALL_COOLDOWN_MS
-            currentlyTriggering.add(alert.workerId)
-        } else {
-            fallCooldownUntil[alert.workerId] = System.currentTimeMillis() + FALL_COOLDOWN_MS
-            currentlyFalling.add(alert.workerId)
+        val cooldown = System.currentTimeMillis() + FALL_COOLDOWN_MS
+        when (alert.type) {
+            AlertType.EMERGENCY_REQUEST -> {
+                triggerCooldownUntil[alert.workerId] = cooldown
+                currentlyTriggering.add(alert.workerId)
+            }
+            AlertType.NO_SAFETY_RESPONSE -> {
+                noResponseCooldownUntil[alert.workerId] = cooldown
+                currentlyNoResponse.add(alert.workerId)
+            }
+            else -> {
+                fallCooldownUntil[alert.workerId] = cooldown
+                currentlyFalling.add(alert.workerId)
+            }
         }
         dismissFallPopup(alert)
         scope.launch {
             runCatching {
                 alertRepository.acknowledgeAlert(alert.alertId, byUserId)
-                monitoringRepository.setSafetyResponse(alert.workerId, SafetyResponseState.ACKNOWLEDGED)
+                monitoringRepository.setSafetyResponse(alert.workerId, SafetyResponseState.NONE)
             }
         }
     }
 
     fun resolveFall(alert: Alert, byUserId: String) {
         dismissedPopups[alert.alertId] = AlertSeverity.EMERGENCY
-        if (alert.type == AlertType.EMERGENCY_REQUEST) {
-            triggerCooldownUntil[alert.workerId] = System.currentTimeMillis() + FALL_COOLDOWN_MS
-            currentlyTriggering.add(alert.workerId)
-        } else {
-            fallCooldownUntil[alert.workerId] = System.currentTimeMillis() + FALL_COOLDOWN_MS
-            currentlyFalling.add(alert.workerId)
+        val cooldown = System.currentTimeMillis() + FALL_COOLDOWN_MS
+        when (alert.type) {
+            AlertType.EMERGENCY_REQUEST -> {
+                triggerCooldownUntil[alert.workerId] = cooldown
+                currentlyTriggering.add(alert.workerId)
+            }
+            AlertType.NO_SAFETY_RESPONSE -> {
+                noResponseCooldownUntil[alert.workerId] = cooldown
+                currentlyNoResponse.add(alert.workerId)
+            }
+            else -> {
+                fallCooldownUntil[alert.workerId] = cooldown
+                currentlyFalling.add(alert.workerId)
+            }
         }
         dismissFallPopup(alert)
         scope.launch {
@@ -210,7 +229,7 @@ class SafetyWatcher @Inject constructor(
             if (reading.vestId.isNotBlank() && !reading.vestId.equals(worker.assignedVestId, ignoreCase = true)) {
                 continue
             }
-            val status = engine.evaluate(reading, s.now)
+            val status = engine.evaluate(reading, s.now, worker.effectiveAge)
 
             // 1. Fall Detection
             val fell = (reading.fallDetected || reading.motionState == MotionState.FALL_DETECTED) &&
@@ -267,6 +286,29 @@ class SafetyWatcher @Inject constructor(
                     openWorkerTriggerAlert(worker, reading)
                 } else if (workerTriggered) {
                     currentlyTriggering.add(worker.workerId)
+                }
+            }
+
+            // 3. Function 1 Timeout: No Response to Initiate Safety Response (15-second timeout -> NO_RESPONSE)
+            val noSafetyResponse = reading.safetyResponse == SafetyResponseState.NO_RESPONSE
+            if (!noSafetyResponse) {
+                currentlyNoResponse.remove(worker.workerId)
+            }
+
+            val noResponseAlert = s.alerts.firstOrNull {
+                it.workerId == worker.workerId &&
+                    (it.type == AlertType.NO_SAFETY_RESPONSE ||
+                        (it.type == AlertType.FALL_DETECTED && it.severity == AlertSeverity.EMERGENCY))
+            }
+            if (noResponseAlert == null) {
+                val cooldownUntil = noResponseCooldownUntil[worker.workerId] ?: 0L
+                val inNoRespBurst = worker.workerId in currentlyNoResponse
+                if (noSafetyResponse && !inNoRespBurst && s.now >= cooldownUntil) {
+                    currentlyNoResponse.add(worker.workerId)
+                    noResponseCooldownUntil[worker.workerId] = s.now + FALL_COOLDOWN_MS
+                    openNoSafetyResponseAlert(worker, reading)
+                } else if (noSafetyResponse) {
+                    currentlyNoResponse.add(worker.workerId)
                 }
             }
         }
@@ -349,6 +391,65 @@ class SafetyWatcher @Inject constructor(
         }.await()
     }
 
+    /**
+     * Opens the No Safety Response alert when a worker does not respond within 15 seconds
+     * to an initiated safety response check.
+     */
+    private suspend fun openNoSafetyResponseAlert(worker: Worker, reading: SensorReading) {
+        val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
+        val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
+        val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alertRef.id)
+        val now = System.currentTimeMillis()
+        firestore.runTransaction { tx ->
+            val existingId = tx.get(workerRef).getString("openNoResponseAlertId")
+            if (existingId != null) {
+                val existing = tx.get(firestore.collection(FirebasePaths.ALERTS).document(existingId))
+                if (existing.exists()) {
+                    val status = AlertStatus.fromRaw(existing.getString("status"))
+                    val existingCreatedAt = existing.getLong("createdAt") ?: 0L
+                    if (status != AlertStatus.RESOLVED || (now - existingCreatedAt) < FALL_COOLDOWN_MS) {
+                        return@runTransaction
+                    }
+                }
+            }
+            tx.set(
+                alertRef,
+                mapOf(
+                    "workerId" to worker.workerId,
+                    "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "siteId" to worker.siteId,
+                    "contractorId" to worker.contractorId,
+                    "type" to AlertType.NO_SAFETY_RESPONSE.name,
+                    "severity" to AlertSeverity.EMERGENCY.name,
+                    "status" to AlertStatus.ACTIVE.name,
+                    "message" to "Worker is in danger, please check with worker",
+                    "incidentId" to alertRef.id,
+                    "createdAt" to now,
+                ),
+            )
+            tx.set(
+                incidentRef,
+                mapOf(
+                    "workerId" to worker.workerId,
+                    "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "siteId" to worker.siteId,
+                    "contractorId" to worker.contractorId,
+                    "type" to AlertType.NO_SAFETY_RESPONSE.name,
+                    "severity" to AlertSeverity.EMERGENCY.name,
+                    "alertId" to alertRef.id,
+                    "heartRate" to reading.heartRate,
+                    "temperature" to reading.temperature,
+                    "latitude" to reading.latitude,
+                    "longitude" to reading.longitude,
+                    "createdAt" to now,
+                    "outcome" to null,
+                    "resolutionNotes" to null,
+                ),
+            )
+            tx.update(workerRef, "openNoResponseAlertId", alertRef.id)
+        }.await()
+    }
+
     /** Upgrades the fall alert to EMERGENCY and opens its incident, once. */
     private suspend fun escalate(worker: Worker, alert: Alert, reading: SensorReading) {
         val alertRef = firestore.collection(FirebasePaths.ALERTS).document(alert.alertId)
@@ -417,10 +518,11 @@ class SafetyWatcher @Inject constructor(
                 val workerVests = workerList.associate { it.workerId to it.assignedVestId }
 
                 for (alert in alerts) {
-                    if (alert.type == AlertType.FALL_DETECTED) {
-                        activeFallAlertWorkers[alert.alertId] = alert.workerId
-                    } else if (alert.type == AlertType.EMERGENCY_REQUEST) {
-                        activeTriggerAlertWorkers[alert.alertId] = alert.workerId
+                    when (alert.type) {
+                        AlertType.FALL_DETECTED -> activeFallAlertWorkers[alert.alertId] = alert.workerId
+                        AlertType.EMERGENCY_REQUEST -> activeTriggerAlertWorkers[alert.alertId] = alert.workerId
+                        AlertType.NO_SAFETY_RESPONSE -> activeNoResponseAlertWorkers[alert.alertId] = alert.workerId
+                        else -> Unit
                     }
                     val seen = notified[alert.alertId]
                     notified[alert.alertId] = alert.severity
@@ -447,14 +549,22 @@ class SafetyWatcher @Inject constructor(
                         currentlyTriggering.add(resolvedWorkerId)
                     }
                 }
+                (activeNoResponseAlertWorkers.keys - open).forEach { id ->
+                    activeNoResponseAlertWorkers.remove(id)?.let { resolvedWorkerId ->
+                        noResponseCooldownUntil[resolvedWorkerId] = System.currentTimeMillis() + FALL_COOLDOWN_MS
+                        currentlyNoResponse.add(resolvedWorkerId)
+                    }
+                }
                 (notified.keys - open).forEach { id ->
                     NotificationHelper.cancel(context, id)
                     notified.remove(id)
                 }
 
-                // Update the in-app Alert Pop-Up Screen with the newest unacknowledged Fall or Worker Trigger alert
+                // Update the in-app Alert Pop-Up Screen with the newest unacknowledged Fall, Worker Trigger, or No Safety Response alert
                 val activePopupAlert = alerts.firstOrNull { alert ->
-                    (alert.type == AlertType.FALL_DETECTED || alert.type == AlertType.EMERGENCY_REQUEST) &&
+                    (alert.type == AlertType.FALL_DETECTED ||
+                        alert.type == AlertType.EMERGENCY_REQUEST ||
+                        alert.type == AlertType.NO_SAFETY_RESPONSE) &&
                         alert.status == AlertStatus.ACTIVE &&
                         (dismissedPopups[alert.alertId]?.let { alert.severity.ordinal > it.ordinal } ?: true)
                 }
@@ -475,6 +585,8 @@ class SafetyWatcher @Inject constructor(
         val (title, body) = when {
             alert.type == AlertType.EMERGENCY_REQUEST ->
                 "Worker Trigger" to "$workerName: Worker Trigger. Please check with Worker."
+            alert.type == AlertType.NO_SAFETY_RESPONSE ->
+                "⚠ No Safety Response" to "$workerName: Worker is in danger, please check with worker."
             alert.type == AlertType.FALL_DETECTED && emergency ->
                 "⚠ EMERGENCY" to "$workerName fell and hasn't responded."
             alert.type == AlertType.FALL_DETECTED ->

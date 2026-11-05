@@ -202,6 +202,7 @@ private fun FallDetectedPopupDialog(
 ) {
     val red = LocalStatusPalette.current.emergency
     val isWorkerTrigger = popup.alert.type == AlertType.EMERGENCY_REQUEST
+    val isNoSafetyResponse = popup.alert.type == AlertType.NO_SAFETY_RESPONSE
     val isEmergency = popup.alert.severity == AlertSeverity.EMERGENCY
 
     Dialog(
@@ -230,6 +231,7 @@ private fun FallDetectedPopupDialog(
             Text(
                 text = when {
                     isWorkerTrigger -> "Worker Trigger"
+                    isNoSafetyResponse -> "⚠ NO SAFETY RESPONSE"
                     isEmergency -> "⚠ EMERGENCY: NO RESPONSE"
                     else -> "⚠ WORKER FALL DETECTED"
                 },
@@ -249,10 +251,10 @@ private fun FallDetectedPopupDialog(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = if (isWorkerTrigger) {
-                            popup.workerName
-                        } else {
-                            "${popup.workerName} has fallen!"
+                        text = when {
+                            isWorkerTrigger -> popup.workerName
+                            isNoSafetyResponse -> "${popup.workerName} has not responded!"
+                            else -> "${popup.workerName} has fallen!"
                         },
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
@@ -275,6 +277,7 @@ private fun FallDetectedPopupDialog(
                     Text(
                         text = when {
                             isWorkerTrigger -> "Worker Trigger. Please check with Worker."
+                            isNoSafetyResponse -> "Worker is in danger, please check with worker."
                             isEmergency -> "Worker fell and has not responded within the safety timeout. Immediate action required!"
                             else -> "Impact / fall detected by the smart vest sensor. Check on this worker immediately."
                         },

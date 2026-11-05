@@ -14,7 +14,11 @@ import com.jtexpress.bevest.domain.model.SensorReading
 import com.jtexpress.bevest.domain.model.VitalLogEntry
 import com.jtexpress.bevest.domain.repository.MonitoringRepository
 import com.jtexpress.bevest.utils.Outcome
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
@@ -23,6 +27,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -35,8 +40,13 @@ class MonitoringRepositoryImpl @Inject constructor(
     private val firestore: FirebaseFirestore,
 ) : MonitoringRepository {
 
+    private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     /** Tracks when a 15-second WAITING safety check was started per worker. */
     private val waitingStartedAt = ConcurrentHashMap<String, Long>()
+
+    /** Tracks when an ACKNOWLEDGED ("Worker has Responded") state started so it resets to NONE after 5s. */
+    private val acknowledgedStartedAt = ConcurrentHashMap<String, Long>()
 
     /** Tracks the latest authoritative safety response state set by the app or vest. */
     private val safetyResponseOverride = ConcurrentHashMap<String, SafetyResponseState>()
@@ -105,6 +115,22 @@ class MonitoringRepositoryImpl @Inject constructor(
             database.getReference("vitalLogs/$workerId/$minuteBucket").setValue(payload)
             if (reading.vestId.isNotBlank()) {
                 database.getReference("vitalLogsByVest/${reading.vestId}/$minuteBucket").setValue(payload)
+            }
+        }
+    }
+
+    private fun scheduleAckAutoReset(workerId: String) {
+        val started = acknowledgedStartedAt[workerId] ?: return
+        repoScope.launch {
+            val remaining = 5_000L - (System.currentTimeMillis() - started)
+            if (remaining > 0L) delay(remaining)
+            val currentStart = acknowledgedStartedAt[workerId]
+            if (currentStart == started) {
+                acknowledgedStartedAt.remove(workerId)
+                if (safetyResponseOverride[workerId] == SafetyResponseState.ACKNOWLEDGED) {
+                    safetyResponseOverride[workerId] = SafetyResponseState.NONE
+                }
+                setSafetyResponse(workerId, SafetyResponseState.NONE)
             }
         }
     }
@@ -178,12 +204,26 @@ class MonitoringRepositoryImpl @Inject constructor(
         val waitStart = waitingStartedAt[workerId]
 
         val effectiveResponse = when {
-            cloudResponse == SafetyResponseState.ACKNOWLEDGED ||
-                cloudResponse == SafetyResponseState.EMERGENCY_REQUESTED ||
+            cloudResponse == SafetyResponseState.EMERGENCY_REQUESTED ||
                 cloudResponse == SafetyResponseState.NO_RESPONSE -> {
                 waitingStartedAt.remove(workerId)
+                acknowledgedStartedAt.remove(workerId)
                 safetyResponseOverride[workerId] = cloudResponse
                 cloudResponse
+            }
+            cloudResponse == SafetyResponseState.ACKNOWLEDGED -> {
+                waitingStartedAt.remove(workerId)
+                val ackStart = acknowledgedStartedAt.getOrPut(workerId) {
+                    now.also { repoScope.launch { delay(5_000L); if (acknowledgedStartedAt[workerId] == it) setSafetyResponse(workerId, SafetyResponseState.NONE) } }
+                }
+                if (now - ackStart >= 5_000L) {
+                    acknowledgedStartedAt.remove(workerId)
+                    safetyResponseOverride[workerId] = SafetyResponseState.NONE
+                    SafetyResponseState.NONE
+                } else {
+                    safetyResponseOverride[workerId] = SafetyResponseState.ACKNOWLEDGED
+                    SafetyResponseState.ACKNOWLEDGED
+                }
             }
             waitStart != null && (now - waitStart) < 15_500L -> {
                 SafetyResponseState.WAITING
@@ -192,7 +232,14 @@ class MonitoringRepositoryImpl @Inject constructor(
                 SafetyResponseState.NO_RESPONSE
             }
             safetyResponseOverride[workerId] == SafetyResponseState.ACKNOWLEDGED -> {
-                SafetyResponseState.ACKNOWLEDGED
+                val ackStart = acknowledgedStartedAt[workerId]
+                if (ackStart != null && (now - ackStart) < 5_000L) {
+                    SafetyResponseState.ACKNOWLEDGED
+                } else {
+                    acknowledgedStartedAt.remove(workerId)
+                    safetyResponseOverride[workerId] = SafetyResponseState.NONE
+                    SafetyResponseState.NONE
+                }
             }
             else -> cloudResponse
         }
@@ -348,6 +395,7 @@ class MonitoringRepositoryImpl @Inject constructor(
 
     override suspend fun initiateSafetyResponse(workerId: String, byUserId: String): Outcome<Unit> {
         waitingStartedAt[workerId] = System.currentTimeMillis()
+        acknowledgedStartedAt.remove(workerId)
         safetyResponseOverride[workerId] = SafetyResponseState.WAITING
         return setSafetyResponse(workerId, SafetyResponseState.WAITING)
     }
@@ -356,10 +404,18 @@ class MonitoringRepositoryImpl @Inject constructor(
         workerId: String,
         state: SafetyResponseState,
     ): Outcome<Unit> = try {
+        val now = System.currentTimeMillis()
         if (state == SafetyResponseState.WAITING) {
-            waitingStartedAt[workerId] = System.currentTimeMillis()
+            waitingStartedAt[workerId] = now
+            acknowledgedStartedAt.remove(workerId)
         } else {
             waitingStartedAt.remove(workerId)
+            if (state == SafetyResponseState.ACKNOWLEDGED) {
+                acknowledgedStartedAt[workerId] = now
+                scheduleAckAutoReset(workerId)
+            } else {
+                acknowledgedStartedAt.remove(workerId)
+            }
         }
         safetyResponseOverride[workerId] = state
 

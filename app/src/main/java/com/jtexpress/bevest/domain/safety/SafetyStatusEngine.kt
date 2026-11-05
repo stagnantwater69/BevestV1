@@ -11,13 +11,11 @@ import com.jtexpress.bevest.domain.model.SensorReading
 /**
  * Derives a [SafetyStatus] from a single [SensorReading].
  *
- * IMPORTANT: this is the *client-side view* of safety state. Authoritative detection
- * (timers, escalation, incident creation) runs in Cloud Functions so alerts continue
- * when no phone has the app open (plan section 16 & 31). This engine only decides what
- * to show right now, given the latest reading and how fresh it is.
+ * Evaluates Heart Rate and Body Temperature against the worker's age-based
+ * Warning (yellow) and Danger (red) thresholds configured by the Developer.
  */
 class SafetyStatusEngine(
-    private val config: ThresholdConfig = ThresholdConfig.DEFAULT,
+    val config: ThresholdConfig = ThresholdConfig.DEFAULT,
 ) {
 
     private companion object {
@@ -28,13 +26,36 @@ class SafetyStatusEngine(
         )
     }
 
+    /** Evaluates Heart Rate against the worker's age-adjusted Warning and Danger thresholds. */
+    fun evaluateHeartRate(heartRate: Int?, workerAge: Int? = null): SafetyStatus {
+        if (heartRate == null || heartRate <= 0) return SafetyStatus.NORMAL
+        val bracket = config.forAge(workerAge)
+        return when {
+            heartRate >= bracket.hrDanger -> SafetyStatus.DANGER
+            heartRate >= bracket.hrWarning -> SafetyStatus.WARNING
+            else -> SafetyStatus.NORMAL
+        }
+    }
+
+    /** Evaluates Body Temperature against the worker's age-adjusted Warning and Danger thresholds. */
+    fun evaluateTemperature(temperature: Double?, workerAge: Int? = null): SafetyStatus {
+        if (temperature == null || temperature <= 0.0) return SafetyStatus.NORMAL
+        val bracket = config.forAge(workerAge)
+        return when {
+            temperature >= bracket.tempDanger -> SafetyStatus.DANGER
+            temperature >= bracket.tempWarning -> SafetyStatus.WARNING
+            else -> SafetyStatus.NORMAL
+        }
+    }
+
     fun evaluate(
         reading: SensorReading?,
         nowMillis: Long = System.currentTimeMillis(),
+        workerAge: Int? = null,
     ): SafetyStatus {
         if (reading == null) return SafetyStatus.OFFLINE
 
-        // The escalation flow (manual emergency button, or a DANGER that went
+        // The escalation flow (manual emergency button, or a safety check / fall that went
         // unanswered) is the most severe live state — outrank the vitals checks.
         if (reading.safetyResponse in EMERGENCY_RESPONSES) {
             return SafetyStatus.EMERGENCY
@@ -49,9 +70,17 @@ class SafetyStatusEngine(
             return SafetyStatus.OFFLINE
         }
 
-        val hrHigh = reading.heartRate?.let { it > config.heartRateHigh } ?: false
-        val tempHigh = reading.temperature?.let { it > config.temperatureHigh } ?: false
-        if (hrHigh || tempHigh || reading.motionState == MotionState.INACTIVE) {
+        val hrStatus = evaluateHeartRate(reading.heartRate, workerAge)
+        val tempStatus = evaluateTemperature(reading.temperature, workerAge)
+
+        if (hrStatus == SafetyStatus.DANGER || tempStatus == SafetyStatus.DANGER) {
+            return SafetyStatus.DANGER
+        }
+
+        if (hrStatus == SafetyStatus.WARNING ||
+            tempStatus == SafetyStatus.WARNING ||
+            reading.motionState == MotionState.INACTIVE
+        ) {
             return SafetyStatus.WARNING
         }
 
@@ -74,8 +103,9 @@ class SafetyStatusEngine(
         openAlerts: List<Alert>,
         workerId: String,
         nowMillis: Long = System.currentTimeMillis(),
+        workerAge: Int? = null,
     ): SafetyStatus {
-        val live = evaluate(reading, nowMillis)
+        val live = evaluate(reading, nowMillis, workerAge)
         val mine = openAlerts.filter {
             it.workerId == workerId && it.status != AlertStatus.RESOLVED && it.severity != AlertSeverity.WARNING
         }
@@ -91,6 +121,8 @@ class SafetyStatusEngine(
                 live == SafetyStatus.EMERGENCY
             ) {
                 SafetyStatus.EMERGENCY
+            } else if (live == SafetyStatus.DANGER) {
+                SafetyStatus.DANGER
             } else {
                 SafetyStatus.WARNING
             }

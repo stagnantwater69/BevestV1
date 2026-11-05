@@ -54,7 +54,7 @@ fun AlertType.detail(): String = when (this) {
     AlertType.FALL_DETECTED -> "The vest's motion sensor registered a fall."
     AlertType.INACTIVITY -> "No movement for longer than the inactivity limit."
     AlertType.EMERGENCY_REQUEST -> "Worker Trigger. Please check with Worker."
-    AlertType.NO_SAFETY_RESPONSE -> "The worker did not acknowledge a safety check."
+    AlertType.NO_SAFETY_RESPONSE -> "Worker is in danger, please check with worker."
     AlertType.VEST_OFFLINE -> "The vest stopped sending readings."
     AlertType.LOW_BATTERY -> "The vest battery needs charging to keep monitoring."
 }
@@ -96,7 +96,7 @@ fun VestStatus.detail(): String = when (this) {
 }
 
 fun SafetyResponseState.label(): String = when (this) {
-    SafetyResponseState.NONE -> "No check running"
+    SafetyResponseState.NONE -> "No Actions"
     SafetyResponseState.WAITING -> "Waiting for worker"
     SafetyResponseState.ACKNOWLEDGED -> "Worker has Responded"
     SafetyResponseState.EMERGENCY_REQUESTED -> "Worker Trigger"

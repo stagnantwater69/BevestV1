@@ -1,9 +1,37 @@
 package com.jtexpress.bevest.domain.model
 
+import java.util.Calendar
+
 /**
  * Domain models — clean Kotlin types used by the UI and business logic.
  * Firebase DTOs and their mappers live in the data layer, not here.
  */
+
+fun calculateAgeFromBirthdate(birthdate: String?): Int? {
+    val raw = birthdate?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    val parts = raw.split("-", "/")
+    if (parts.size != 3) return null
+    val (year, month, day) = if (parts[0].length == 4) {
+        Triple(parts[0].toIntOrNull(), parts[1].toIntOrNull(), parts[2].toIntOrNull())
+    } else if (parts[2].length == 4) {
+        Triple(parts[2].toIntOrNull(), parts[0].toIntOrNull(), parts[1].toIntOrNull())
+    } else {
+        return null
+    }
+    if (year == null || month == null || day == null) return null
+    if (year < 1900 || month !in 1..12 || day !in 1..31) return null
+
+    val today = Calendar.getInstance()
+    val currentYear = today.get(Calendar.YEAR)
+    val currentMonth = today.get(Calendar.MONTH) + 1
+    val currentDay = today.get(Calendar.DAY_OF_MONTH)
+
+    var age = currentYear - year
+    if (currentMonth < month || (currentMonth == month && currentDay < day)) {
+        age -= 1
+    }
+    return age.takeIf { it in 0..120 }
+}
 
 data class User(
     val uid: String = "",
@@ -27,6 +55,7 @@ data class Worker(
     val lastName: String = "",
     val phone: String = "",
     val birthday: String? = null,
+    val age: Int? = null,
     val floorNumber: String? = null,
     val photoUrl: String? = null,
     val contractorId: String? = null,
@@ -36,6 +65,7 @@ data class Worker(
     val active: Boolean = true,
 ) {
     val fullName: String get() = listOf(firstName, lastName).filter { it.isNotBlank() }.joinToString(" ")
+    val effectiveAge: Int? get() = age ?: calculateAgeFromBirthdate(birthday)
 }
 
 data class Vest(

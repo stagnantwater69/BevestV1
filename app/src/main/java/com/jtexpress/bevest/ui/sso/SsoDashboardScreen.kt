@@ -16,8 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -35,11 +35,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.jtexpress.bevest.BuildConfig
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.ui.common.BevestScaffold
@@ -54,7 +55,6 @@ import com.jtexpress.bevest.ui.common.SiteCount
 import com.jtexpress.bevest.ui.common.SiteStatusPanel
 import com.jtexpress.bevest.ui.common.StatusChip
 import com.jtexpress.bevest.ui.common.WorkerAvatar
-import com.jtexpress.bevest.ui.common.label
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.BevestShapes
 import com.jtexpress.bevest.ui.theme.ComponentHeight
@@ -65,17 +65,6 @@ import com.jtexpress.bevest.ui.theme.Spacing
 
 /**
  * The officer's home screen.
- *
- * Ordered strictly by the hierarchy in plan section 23 — active emergency, then the
- * site's overall verdict, then anything currently demanding attention, then the roster.
- *
- * Two things were deliberately removed from the previous version. The 2×2 grid of stat
- * tiles is gone, folded into [SiteStatusPanel], which interprets those same numbers
- * instead of just displaying them. The "Live site map" and "Alert history" shortcut
- * cards are gone too: both are bottom-navigation tabs, so the cards were spending the
- * most valuable space on the screen duplicating navigation the user already has. The
- * space they held now shows the active alerts themselves, which are not reachable from
- * anywhere else on this screen.
  */
 @Composable
 fun SsoDashboardScreen(
@@ -114,6 +103,22 @@ fun SsoDashboardScreen(
         title = "Safety dashboard",
         subtitle = user.siteId,
         actions = {
+            IconButton(
+                onClick = viewModel::refreshReadings,
+                enabled = !state.refreshing,
+            ) {
+                if (state.refreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Icon(
+                        imageVector = BevestIcons.Refresh,
+                        contentDescription = "Refresh live readings",
+                    )
+                }
+            }
             ProfileAction(user, onClick = onOpenProfile)
         },
     ) { padding ->
@@ -354,11 +359,6 @@ fun WorkerLiveRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Spacing.md),
                 ) {
-                    // The vitals are measured first at their natural width and the ID
-                    // takes what is left, ellipsising if it must. Without the weight a
-                    // long worker ID starves the vitals instead: they get squeezed to a
-                    // few pixels, wrap one character per line, and blow the row's height
-                    // out while showing nothing.
                     Text(
                         live.worker.workerId,
                         style = MaterialTheme.typography.bodySmall,
@@ -368,10 +368,30 @@ fun WorkerLiveRow(
                         modifier = Modifier.weight(1f, fill = false),
                     )
                     live.reading?.heartRate?.let { hr ->
-                        VitalInline(BevestIcons.HeartRate, "$hr")
+                        val hrTint = when (live.hrStatus) {
+                            SafetyStatus.DANGER, SafetyStatus.EMERGENCY -> palette.danger
+                            SafetyStatus.WARNING -> palette.warning
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        VitalInline(
+                            icon = BevestIcons.HeartRate,
+                            value = "$hr",
+                            tint = hrTint,
+                            bold = live.hrStatus != SafetyStatus.NORMAL,
+                        )
                     }
                     live.reading?.temperature?.let { t ->
-                        VitalInline(BevestIcons.Temperature, "%.1f°".format(t))
+                        val tempTint = when (live.tempStatus) {
+                            SafetyStatus.DANGER, SafetyStatus.EMERGENCY -> palette.danger
+                            SafetyStatus.WARNING -> palette.warning
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        VitalInline(
+                            icon = BevestIcons.Temperature,
+                            value = "%.1f°".format(t),
+                            tint = tempTint,
+                            bold = live.tempStatus != SafetyStatus.NORMAL,
+                        )
                     }
                 }
                 LastUpdatedLabel(live.lastUpdate, live.stale)
@@ -385,6 +405,8 @@ fun WorkerLiveRow(
 private fun VitalInline(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     value: String,
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    bold: Boolean = false,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -393,15 +415,14 @@ private fun VitalInline(
         Icon(
             icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = tint,
             modifier = Modifier.size(IconSize.inline),
         )
         Text(
             value,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            // A vital is short and must never wrap; if space runs out it should be
-            // clipped as a unit rather than stacked one character per line.
+            color = tint,
+            fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
             maxLines = 1,
             softWrap = false,
         )

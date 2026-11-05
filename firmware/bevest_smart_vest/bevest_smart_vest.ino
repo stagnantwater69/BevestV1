@@ -206,6 +206,7 @@ int                batteryPercent      = 95;
 String             currentSafetyResponse     = "NONE";
 bool               safetyCheckActive         = false;
 unsigned long      safetyCheckStartMs        = 0;
+unsigned long      safetyResponseAckMs       = 0;
 volatile bool      pendingSafetyResponseSync = false;
 String             safetyResponseToSync      = "NONE";
 unsigned long      d15PressStart             = 0;
@@ -1224,6 +1225,9 @@ void checkRemoteSafetyResponse() {
   } else if (remoteState == "NONE" || remoteState == "ACKNOWLEDGED") {
     if (!safetyCheckActive && currentSafetyResponse != remoteState) {
       currentSafetyResponse = remoteState;
+      if (remoteState == "ACKNOWLEDGED") {
+        safetyResponseAckMs = millis();
+      }
       sosTriggered = false;
       stopEmergencyAlarm();
       Serial.printf("[SAFETY] 🔄 Cloud updated safetyResponse -> %s\n", remoteState.c_str());
@@ -1467,6 +1471,16 @@ void checkVitalEmergency() {
 void checkSOS() {
   unsigned long now = millis();
 
+  // Auto-reset ACKNOWLEDGED ("Worker has Responded") back to NONE ("No Actions") after 5 seconds
+  if (currentSafetyResponse == "ACKNOWLEDGED" && safetyResponseAckMs > 0 && (now - safetyResponseAckMs >= 5000UL)) {
+    safetyResponseAckMs = 0;
+    currentSafetyResponse = "NONE";
+    safetyResponseToSync = "NONE";
+    pendingSafetyResponseSync = true;
+    pendingImmediatePush = true;
+    Serial.println("\n[SAFETY] 🔄 Auto-reset safetyResponse from ACKNOWLEDGED -> NONE (No Actions).");
+  }
+
   // Function 1 Timeout: 15-second window for worker to 1-click D15
   if (safetyCheckActive && (now - safetyCheckStartMs >= SAFETY_RESPONSE_TIMEOUT_MS)) {
     safetyCheckActive = false;
@@ -1490,6 +1504,7 @@ void checkSOS() {
         stopEmergencyAlarm();
         beepShort(150);
         currentSafetyResponse = "ACKNOWLEDGED";
+        safetyResponseAckMs = now;
         safetyResponseToSync = "ACKNOWLEDGED";
         pendingSafetyResponseSync = true;
         pendingImmediatePush = true;
