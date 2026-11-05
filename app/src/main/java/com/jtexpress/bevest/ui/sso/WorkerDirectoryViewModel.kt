@@ -11,6 +11,8 @@ import com.jtexpress.bevest.domain.safety.SafetyStatusEngine
 import com.jtexpress.bevest.utils.Outcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +27,7 @@ enum class WorkerFilter { ALL, ACTIVE, WARNING, DANGER, OFFLINE, UNASSIGNED }
 
 data class WorkerDirectoryState(
     val loading: Boolean = true,
+    val refreshing: Boolean = false,
     val error: String? = null,
     val noSite: Boolean = false,
     val all: List<WorkerLive> = emptyList(),
@@ -64,6 +67,8 @@ class WorkerDirectoryViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val scope = MutableStateFlow<Pair<String?, String?>?>(null) // contractorId, siteId
+    private val refreshTrigger = MutableStateFlow(0L)
+    private val _refreshing = MutableStateFlow(false)
     private val query = MutableStateFlow("")
     private val filter = MutableStateFlow(WorkerFilter.ALL)
     private var started = false
@@ -77,15 +82,34 @@ class WorkerDirectoryViewModel @Inject constructor(
     fun onQuery(value: String) { query.value = value }
     fun onFilter(value: WorkerFilter) { filter.value = value }
 
-    val state: StateFlow<WorkerDirectoryState> = scope.flatMapLatest { s ->
-        if (s == null) return@flatMapLatest flowOf(WorkerDirectoryState())
+    fun refreshReadings() {
+        if (_refreshing.value) return
+        viewModelScope.launch {
+            _refreshing.value = true
+            try {
+                monitoringRepository.refreshReadings()
+            } catch (_: Exception) {}
+            refreshTrigger.value = System.currentTimeMillis()
+            delay(600)
+            _refreshing.value = false
+        }
+    }
+
+    val state: StateFlow<WorkerDirectoryState> = combine(
+        scope,
+        refreshTrigger,
+        _refreshing,
+    ) { s, _, isRefreshing ->
+        s to isRefreshing
+    }.flatMapLatest { (s, isRefreshing) ->
+        if (s == null) return@flatMapLatest flowOf(WorkerDirectoryState(refreshing = isRefreshing))
         val (contractorId, siteId) = s
         if (contractorId == null && siteId == null) {
-            return@flatMapLatest flowOf(WorkerDirectoryState(loading = false, noSite = true))
+            return@flatMapLatest flowOf(WorkerDirectoryState(loading = false, noSite = true, refreshing = isRefreshing))
         }
         workerRepository.observeWorkers(contractorId, siteId).flatMapLatest { outcome ->
             when (outcome) {
-                is Outcome.Failure -> flowOf(WorkerDirectoryState(loading = false, error = outcome.error.message))
+                is Outcome.Failure -> flowOf(WorkerDirectoryState(loading = false, error = outcome.error.message, refreshing = isRefreshing))
                 is Outcome.Success -> {
                     val workers = outcome.data
                     val alertsFlow = if (siteId != null) {
@@ -107,7 +131,7 @@ class WorkerDirectoryViewModel @Inject constructor(
                             val r = readings[w.workerId]
                             WorkerLive(w, r, engine.evaluate(r, alerts, w.workerId, now), engine.isStale(r, now))
                         }.sortedBy { it.worker.fullName }
-                        WorkerDirectoryState(loading = false, all = live, query = q, filter = f)
+                        WorkerDirectoryState(loading = false, refreshing = isRefreshing, all = live, query = q, filter = f)
                     }
                 }
             }

@@ -16,6 +16,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.Cake
+import androidx.compose.material.icons.outlined.Apartment
+import com.jtexpress.bevest.ui.common.DetailRow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -230,6 +234,35 @@ fun WorkerDetailScreen(
                         },
                         stale = state.stale,
                     )
+
+                    // ---- Worker Info ----
+                    if (!worker.birthday.isNullOrBlank() || !worker.floorNumber.isNullOrBlank() || worker.phone.isNotBlank()) {
+                        SectionHeader(
+                            title = "Worker details",
+                            supporting = "Profile and work assignment information",
+                        )
+                        if (worker.phone.isNotBlank()) {
+                            DetailRow(
+                                label = "Phone",
+                                value = worker.phone,
+                                icon = Icons.Outlined.Phone,
+                            )
+                        }
+                        if (!worker.birthday.isNullOrBlank()) {
+                            DetailRow(
+                                label = "Birthday",
+                                value = worker.birthday,
+                                icon = Icons.Outlined.Cake,
+                            )
+                        }
+                        if (!worker.floorNumber.isNullOrBlank()) {
+                            DetailRow(
+                                label = "Floor number",
+                                value = worker.floorNumber,
+                                icon = Icons.Outlined.Apartment,
+                            )
+                        }
+                    }
 
                     // ---- Location ----
                     SectionHeader("Location")

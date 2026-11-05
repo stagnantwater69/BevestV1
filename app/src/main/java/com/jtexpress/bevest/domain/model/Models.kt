@@ -26,6 +26,8 @@ data class Worker(
     val firstName: String = "",
     val lastName: String = "",
     val phone: String = "",
+    val birthday: String? = null,
+    val floorNumber: String? = null,
     val photoUrl: String? = null,
     val contractorId: String? = null,
     val siteId: String? = null,

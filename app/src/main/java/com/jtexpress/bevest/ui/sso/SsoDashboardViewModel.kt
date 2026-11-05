@@ -14,6 +14,8 @@ import com.jtexpress.bevest.domain.safety.SafetyStatusEngine
 import com.jtexpress.bevest.utils.Outcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +27,7 @@ import javax.inject.Inject
 
 data class SsoDashboardState(
     val loading: Boolean = true,
+    val refreshing: Boolean = false,
     val error: String? = null,
     val noSite: Boolean = false,
     val workers: List<WorkerLive> = emptyList(),
@@ -107,6 +110,8 @@ class SsoDashboardViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val siteId = MutableStateFlow<String?>(null)
+    private val refreshTrigger = MutableStateFlow(0L)
+    private val _refreshing = MutableStateFlow(false)
     private var started = false
 
     fun start(site: String?) {
@@ -115,9 +120,28 @@ class SsoDashboardViewModel @Inject constructor(
         siteId.value = site
     }
 
-    val state: StateFlow<SsoDashboardState> = siteId.flatMapLatest { site ->
+    fun refreshReadings() {
+        if (_refreshing.value) return
+        viewModelScope.launch {
+            _refreshing.value = true
+            try {
+                monitoringRepository.refreshReadings()
+            } catch (_: Exception) {}
+            refreshTrigger.value = System.currentTimeMillis()
+            delay(600)
+            _refreshing.value = false
+        }
+    }
+
+    val state: StateFlow<SsoDashboardState> = combine(
+        siteId,
+        refreshTrigger,
+        _refreshing,
+    ) { site, _, isRefreshing ->
+        site to isRefreshing
+    }.flatMapLatest { (site, isRefreshing) ->
         if (site.isNullOrBlank()) {
-            flowOf(SsoDashboardState(loading = false, noSite = true))
+            flowOf(SsoDashboardState(loading = false, noSite = true, refreshing = isRefreshing))
         } else {
             val workersFlow = workerRepository.observeWorkers(contractorId = null, siteId = site)
             val thresholdsFlow = settingsRepository.observeThresholds()
@@ -126,7 +150,7 @@ class SsoDashboardViewModel @Inject constructor(
             workersFlow.flatMapLatest { workersOutcome ->
                 when (workersOutcome) {
                     is Outcome.Failure -> flowOf(
-                        SsoDashboardState(loading = false, error = workersOutcome.error.message),
+                        SsoDashboardState(loading = false, error = workersOutcome.error.message, refreshing = isRefreshing),
                     )
                     is Outcome.Success -> {
                         val workers = workersOutcome.data
@@ -150,6 +174,7 @@ class SsoDashboardViewModel @Inject constructor(
                             }.sortedByDescending { it.status.ordinal }
                             SsoDashboardState(
                                 loading = false,
+                                refreshing = isRefreshing,
                                 workers = live,
                                 activeAlerts = alerts,
                             )

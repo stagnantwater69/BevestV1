@@ -271,4 +271,12 @@ class MonitoringRepositoryImpl @Inject constructor(
         // Simulations permanently disabled
         return Outcome.Success(Unit)
     }
+
+    override suspend fun refreshReadings(): Outcome<Unit> = try {
+        database.getReference("liveReadingsByVest").get().await()
+        database.getReference("liveReadingsByMac").get().await()
+        Outcome.Success(Unit)
+    } catch (e: Exception) {
+        Outcome.Failure(e.toAppError())
+    }
 }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -113,6 +114,20 @@ fun SsoDashboardScreen(
         title = "Safety dashboard",
         subtitle = user.siteId,
         actions = {
+            IconButton(onClick = viewModel::refreshReadings) {
+                if (state.refreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                } else {
+                    Icon(
+                        imageVector = BevestIcons.Refresh,
+                        contentDescription = "Refresh live readings",
+                    )
+                }
+            }
             ProfileAction(user, onClick = onOpenProfile)
         },
     ) { padding ->
@@ -217,11 +232,34 @@ fun SsoDashboardScreen(
                         title = "Workers",
                         supporting = "Sorted by status",
                     ) {
-                        Text(
-                            "${state.workers.size}",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                        ) {
+                            Text(
+                                "${state.workers.size}",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            IconButton(
+                                onClick = viewModel::refreshReadings,
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                if (state.refreshing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = BevestIcons.Refresh,
+                                        contentDescription = "Refresh live readings",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
