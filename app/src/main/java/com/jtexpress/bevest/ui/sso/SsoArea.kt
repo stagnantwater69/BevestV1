@@ -19,7 +19,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +37,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.jtexpress.bevest.domain.model.AlertSeverity
+import com.jtexpress.bevest.domain.model.AlertType
 import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.domain.safety.FallPopupState
 import com.jtexpress.bevest.navigation.Routes
@@ -89,7 +89,12 @@ fun SsoArea(
                 navController.navigate(Routes.withArg(Routes.SSO_ALERT_DETAIL, popup.alert.alertId))
             },
             onAcknowledge = {
+                val alertId = popup.alert.alertId
+                val isWorkerTrigger = popup.alert.type == AlertType.EMERGENCY_REQUEST
                 safetyWatcher.acknowledgeFall(popup.alert, user.uid)
+                if (isWorkerTrigger) {
+                    navController.navigate(Routes.withArg(Routes.SSO_ALERT_DETAIL, alertId))
+                }
             },
         )
     }
@@ -196,6 +201,7 @@ private fun FallDetectedPopupDialog(
     onAcknowledge: () -> Unit,
 ) {
     val red = LocalStatusPalette.current.emergency
+    val isWorkerTrigger = popup.alert.type == AlertType.EMERGENCY_REQUEST
     val isEmergency = popup.alert.severity == AlertSeverity.EMERGENCY
 
     Dialog(
@@ -222,7 +228,11 @@ private fun FallDetectedPopupDialog(
             )
             Spacer(Modifier.height(Spacing.lg))
             Text(
-                text = if (isEmergency) "⚠ EMERGENCY: NO RESPONSE" else "⚠ WORKER FALL DETECTED",
+                text = when {
+                    isWorkerTrigger -> "Worker Trigger"
+                    isEmergency -> "⚠ EMERGENCY: NO RESPONSE"
+                    else -> "⚠ WORKER FALL DETECTED"
+                },
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
@@ -239,7 +249,11 @@ private fun FallDetectedPopupDialog(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = "${popup.workerName} has fallen!",
+                        text = if (isWorkerTrigger) {
+                            popup.workerName
+                        } else {
+                            "${popup.workerName} has fallen!"
+                        },
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -259,10 +273,10 @@ private fun FallDetectedPopupDialog(
                     )
                     Spacer(Modifier.height(Spacing.sm))
                     Text(
-                        text = if (isEmergency) {
-                            "Worker fell and has not responded within the safety timeout. Immediate action required!"
-                        } else {
-                            "Impact / fall detected by the smart vest sensor. Check on this worker immediately."
+                        text = when {
+                            isWorkerTrigger -> "Worker Trigger. Please check with Worker."
+                            isEmergency -> "Worker fell and has not responded within the safety timeout. Immediate action required!"
+                            else -> "Impact / fall detected by the smart vest sensor. Check on this worker immediately."
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.White,
@@ -271,37 +285,56 @@ private fun FallDetectedPopupDialog(
                 }
             }
             Spacer(Modifier.height(Spacing.xxl))
-            Button(
-                onClick = onOpenAlert,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = red,
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-            ) {
-                Text(
-                    text = "Open and View Alert",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            Spacer(Modifier.height(Spacing.md))
-            OutlinedButton(
-                onClick = onAcknowledge,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                border = ButtonDefaults.outlinedButtonBorder.copy(brush = SolidColor(Color.White)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-            ) {
-                Text(
-                    text = "Acknowledged",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
-                )
+            if (isWorkerTrigger) {
+                Button(
+                    onClick = onAcknowledge,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White,
+                        contentColor = red,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                ) {
+                    Text(
+                        text = "Acknowledge",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            } else {
+                Button(
+                    onClick = onOpenAlert,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White,
+                        contentColor = red,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                ) {
+                    Text(
+                        text = "Open and View Alert",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Spacer(Modifier.height(Spacing.md))
+                OutlinedButton(
+                    onClick = onAcknowledge,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = SolidColor(Color.White)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                ) {
+                    Text(
+                        text = "Acknowledged",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                    )
+                }
             }
         }
     }

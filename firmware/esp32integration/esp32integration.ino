@@ -8,8 +8,8 @@
 //  - MPU6050 6-DoF IMU (I2C: SDA=GPIO21, SCL=GPIO22) -> Fall & Motion Detection
 //  - MAX30102 Pulse Oximeter (I2C: SDA=GPIO21, SCL=GPIO22) -> Heart Rate & SpO2
 //  - DS18B20 Digital Thermometer (OneWire: GPIO4) -> Body Temperature
-//  - SOS Emergency Button (GPIO15 with INPUT_PULLUP)
-//  - On-Board BOOT Button (GPIO0 with INPUT_PULLUP) -> 3-second Reset
+//  - Physical Safety/SOS Button (GPIO15 / D15 with INPUT_PULLUP) -> 1-click Safety Response / 3s Worker Trigger
+//  - On-Board BOOT Button (GPIO0 with INPUT_PULLUP) -> 3-second Reset (Independent of D15)
 //  - Active Buzzer (GPIO25 or GPIO2) -> Siren & Auditory Feedback
 //  - On-Board LED (GPIO2) -> BLE Pairing Blinker / Online Indicator
 //
@@ -111,8 +111,10 @@ RTC_DATA_ATTR int rtcDoubleTapFlag = 0;
 // ── Timing & Intervals ───────────────────────────────────────────────────────
 #define PUSH_INTERVAL_MS       2500   // Telemetry push to Firebase every 2.5s
 #define VESTLIVE_INTERVAL_MS   10000  // Heartbeat to /vestsLive every 10s
-#define FALL_COOLDOWN_MS       6000   // Hold fall status for 6s before resolving
-#define HR_AVG_SIZE            4      // Moving average window for heart rate
+#define FALL_COOLDOWN_MS           6000   // Hold fall status for 6s before resolving
+#define SAFETY_RESPONSE_TIMEOUT_MS 15000  // 15-second buzzer window for worker safety response (D15 1-click)
+#define WORKER_TRIGGER_HOLD_MS     3000   // 3-second hold on D15 to initiate Worker Trigger Alert to SSO
+#define HR_AVG_SIZE                4      // Moving average window for heart rate
 
 // ── Vital Safety Thresholds ──────────────────────────────────────────────────
 #define TEMP_HIGH_ALERT        38.0f  // Heatstroke threshold (°C)
@@ -200,6 +202,16 @@ float              bodyTempC           = 36.6f;
 bool               sosTriggered        = false;
 int                batteryPercent      = 95;
 
+// Safety Response & Physical Button (D15) State
+String             currentSafetyResponse     = "NONE";
+bool               safetyCheckActive         = false;
+unsigned long      safetyCheckStartMs        = 0;
+volatile bool      pendingSafetyResponseSync = false;
+String             safetyResponseToSync      = "NONE";
+unsigned long      d15PressStart             = 0;
+bool               d15LongPressHandled       = false;
+uint64_t           lastVitalLogMinute        = 0;
+
 unsigned long      lastTempRead        = 0;
 unsigned long      lastPush            = 0;
 unsigned long      lastVestLive        = 0;
@@ -236,6 +248,8 @@ void beepShort(unsigned long durationMs);
 void triggerBuzzer(int beeps);
 void pushReadingToFirebase(bool isFallEvent = false);
 void pushVestLiveToFirebase();
+void pushVitalLogToFirebase();
+void checkRemoteSafetyResponse();
 void checkRemoteWifiCommand();
 void syncOnlinePresenceToFirestore(bool isOnline = true);
 void firebaseCloudTask(void* pvParameters);
@@ -845,15 +859,15 @@ void initFirebaseService() {
   }
 }
 
-// ── Reset Triggers (BOOT Button or SOS Button held 3s) ────────────────────────
+// ── Reset Triggers (On-Board BOOT Button GPIO 0 held 3s) ──────────────────────
 void checkResetTriggers() {
   // Disarm EN double-press window after 2.5 seconds of normal boot
   if (rtcDoubleTapFlag == 1 && millis() > 2500) {
     rtcDoubleTapFlag = 0;
   }
 
-  // Check either external SOS button (GPIO 15) OR on-board BOOT button (GPIO 0)
-  bool buttonPressed = (digitalRead(SOS_BUTTON_PIN) == LOW) || (digitalRead(ONBOARD_BOOT_BUTTON) == LOW);
+  // Check ONLY on-board BOOT button (GPIO 0). Physical button on D15 (GPIO 15) is independent!
+  bool buttonPressed = (digitalRead(ONBOARD_BOOT_BUTTON) == LOW);
 
   if (buttonPressed) {
     if (buttonPressStart == 0) {
@@ -861,7 +875,7 @@ void checkResetTriggers() {
       buttonHeld = false;
     } else if (!buttonHeld && (millis() - buttonPressStart >= 3000)) {
       buttonHeld = true;
-      Serial.println("\n[RESET]   ⚠️ Factory Reset Triggered (Button held 3s)!");
+      Serial.println("\n[RESET]   ⚠️ Factory Reset Triggered (BOOT Button GPIO0 held 3s)!");
       triggerBuzzer(4);
 
       syncOnlinePresenceToFirestore(false);
@@ -933,14 +947,40 @@ void firebaseCloudTask(void* pvParameters) {
       pushReadingToFirebase(false);
     }
 
-    // 5. Immediate Vital / SOS Push or Periodic Telemetry Push
+    // 5. Immediate Safety Response / Worker Trigger State Sync
+    if (pendingSafetyResponseSync) {
+      pendingSafetyResponseSync = false;
+      String stateToWrite = safetyResponseToSync;
+      Firebase.setString(fbdo, (String("/vestsLive/") + currentVestId + "/safetyResponse").c_str(), stateToWrite);
+      Firebase.setString(fbdo, (String("/vestsLiveByMac/") + esp32CleanMac + "/safetyResponse").c_str(), stateToWrite);
+      lastPush = now;
+      pendingImmediatePush = false;
+      pushReadingToFirebase(false);
+    }
+
+    // 6. Immediate Vital / SOS Push or Periodic Telemetry Push
     if (pendingImmediatePush || (now - lastPush >= PUSH_INTERVAL_MS)) {
       pendingImmediatePush = false;
       lastPush = now;
       pushReadingToFirebase(false);
     }
 
-    // 6. Periodic Vest Heartbeat Push & Remote Wi-Fi Command Check
+    // 7. Poll Incoming Safety Response Check from SSO App (every 1.5s)
+    static unsigned long lastSafetyCmdCheck = 0;
+    if (now - lastSafetyCmdCheck >= 1500) {
+      lastSafetyCmdCheck = now;
+      checkRemoteSafetyResponse();
+    }
+
+    // 8. Push 1-Minute Heart Rate & Body Temperature Log
+    uint64_t epochMs = getEpochMillis();
+    uint64_t currentMinute = epochMs / 60000ULL;
+    if (currentMinute > 28000000ULL && currentMinute != lastVitalLogMinute) {
+      lastVitalLogMinute = currentMinute;
+      pushVitalLogToFirebase();
+    }
+
+    // 9. Periodic Vest Heartbeat Push & Remote Wi-Fi Command Check
     if (now - lastVestLive >= VESTLIVE_INTERVAL_MS) {
       lastVestLive = now;
       pushVestLiveToFirebase();
@@ -1055,7 +1095,7 @@ void pushReadingToFirebase(bool isFallEvent) {
   json.set("battery", batteryPercent);
   json.set("timestamp", (double)getEpochMillis());
   json.set("timestampServer/.sv", "timestamp");
-  json.set("safetyResponse", "NONE");
+  json.set("safetyResponse", currentSafetyResponse);
 
   // Push to vest path (primary path used by Android App for both Worker Monitoring & Vest Online status)
   String vestPath = String("/liveReadingsByVest/") + currentVestId;
@@ -1101,16 +1141,17 @@ void pushVestLiveToFirebase() {
   json.set("battery", batteryPercent);
   json.set("online", true);
   json.set("fallDetected", fallDetected);
+  json.set("safetyResponse", currentSafetyResponse);
   json.set("lastSeen", (double)getEpochMillis());
   json.set("lastSeenServer/.sv", "timestamp");
 
-  if (Firebase.setJSON(fbdo, path.c_str(), json)) {
+  if (Firebase.updateNode(fbdo, path.c_str(), json)) {
     Serial.printf("[RTDB] 🟢 Vest %s marked ONLINE in /vestsLive\n", currentVestId.c_str());
   } else {
     Serial.printf("[RTDB ERROR] /vestsLive: %s\n", fbdo.errorReason().c_str());
   }
 
-  Firebase.setJSON(fbdo, macPath.c_str(), json);
+  Firebase.updateNode(fbdo, macPath.c_str(), json);
 
   // Only poll MAC-to-Vest and Worker assignment every 30 seconds to keep the loop fast and responsive
   static unsigned long lastAssignmentCheckMs = 0;
@@ -1152,6 +1193,66 @@ void pushVestLiveToFirebase() {
 void syncOnlinePresenceToFirestore(bool isOnline) {
   if (WiFi.status() != WL_CONNECTED || !Firebase.ready()) return;
   Firebase.setBool(fbdo, String("/vestsLive/") + currentVestId + "/online", isOnline);
+}
+
+// ── Poll Incoming Safety Response State from SSO App ─────────────────────────
+void checkRemoteSafetyResponse() {
+  if (WiFi.status() != WL_CONNECTED || !Firebase.ready() || inProvisioningMode || pendingSafetyResponseSync) return;
+
+  String remoteState = "";
+  String vestRespPath = String("/vestsLive/") + currentVestId + "/safetyResponse";
+  if (Firebase.getString(fbdo, vestRespPath.c_str())) {
+    remoteState = fbdo.stringData();
+  }
+  if (remoteState.length() == 0 || remoteState == "null") {
+    String readingRespPath = String("/liveReadingsByVest/") + currentVestId + "/safetyResponse";
+    if (Firebase.getString(fbdo, readingRespPath.c_str())) {
+      remoteState = fbdo.stringData();
+    }
+  }
+  remoteState.trim();
+  if (remoteState.length() == 0 || remoteState == "null") return;
+
+  if (remoteState == "WAITING") {
+    if (!safetyCheckActive && currentSafetyResponse != "WAITING") {
+      safetyCheckActive = true;
+      safetyCheckStartMs = millis();
+      currentSafetyResponse = "WAITING";
+      startEmergencyAlarm(SAFETY_RESPONSE_TIMEOUT_MS);
+      Serial.println("\n[SAFETY] 🔔 SSO initiated Safety Response! Buzzer active for 15s — waiting for 1-click on D15...");
+    }
+  } else if (remoteState == "NONE" || remoteState == "ACKNOWLEDGED") {
+    if (!safetyCheckActive && currentSafetyResponse != remoteState) {
+      currentSafetyResponse = remoteState;
+      sosTriggered = false;
+      stopEmergencyAlarm();
+      Serial.printf("[SAFETY] 🔄 Cloud updated safetyResponse -> %s\n", remoteState.c_str());
+    }
+  }
+}
+
+// ── Push 1-Minute Heart Rate & Body Temperature Log to Firebase ──────────────
+void pushVitalLogToFirebase() {
+  if (WiFi.status() != WL_CONNECTED || !Firebase.ready()) return;
+
+  uint64_t epochMs = getEpochMillis();
+  uint64_t minuteBucket = epochMs / 60000ULL;
+  String minuteKey = String((unsigned long)minuteBucket);
+
+  FirebaseJson logJson;
+  logJson.set("vestId", currentVestId);
+  logJson.set("workerId", currentWorkerId);
+  logJson.set("heartRate", heartBPM);
+  logJson.set("temperature", (double)bodyTempC);
+  logJson.set("timestamp", (double)epochMs);
+  logJson.set("timestampServer/.sv", "timestamp");
+
+  String workerLogPath = String("/vitalLogs/") + currentWorkerId + "/" + minuteKey;
+  String vestLogPath   = String("/vitalLogsByVest/") + currentVestId + "/" + minuteKey;
+  Firebase.setJSON(fbdo, workerLogPath.c_str(), logJson);
+  Firebase.setJSON(fbdo, vestLogPath.c_str(), logJson);
+  Serial.printf("[VITAL-LOG] 📝 1-min log saved (%s): HR=%d BPM, Temp=%.1f°C\n",
+                minuteKey.c_str(), heartBPM, bodyTempC);
 }
 
 // ── MPU6050 Motion & Fall Detection (Runs at 200Hz in non-blocking loop) ────
@@ -1356,17 +1457,59 @@ void checkVitalEmergency() {
   }
 }
 
-// ── SOS Button ───────────────────────────────────────────────────────────────
+// ── Physical Safety Response & Worker Trigger Button (D15 / GPIO 15) ─────────
+//  - Function 1: When SSO initiates Safety Response ("WAITING"), vest buzzer runs
+//    for 15 seconds. 1-click on D15 within 15s responds ("ACKNOWLEDGED") and stops
+//    the buzzer. If no click within 15s, sends "NO_RESPONSE" ("Worker is in danger,
+//    please check with worker").
+//  - Function 2: Worker holds D15 for 3 seconds to initiate "Worker Trigger" alert
+//    to SSO ("EMERGENCY_REQUESTED").
 void checkSOS() {
+  unsigned long now = millis();
+
+  // Function 1 Timeout: 15-second window for worker to 1-click D15
+  if (safetyCheckActive && (now - safetyCheckStartMs >= SAFETY_RESPONSE_TIMEOUT_MS)) {
+    safetyCheckActive = false;
+    stopEmergencyAlarm();
+    currentSafetyResponse = "NO_RESPONSE";
+    safetyResponseToSync = "NO_RESPONSE";
+    pendingSafetyResponseSync = true;
+    pendingImmediatePush = true;
+    Serial.println("\n[SAFETY] ❌ No response from worker within 15s! Status -> NO_RESPONSE (Worker is in danger).");
+  }
+
+  // Read Physical Button on D15 (INPUT_PULLUP: LOW = pressed, HIGH = released)
   if (digitalRead(SOS_BUTTON_PIN) == LOW) {
-    if (!sosTriggered && (millis() - buttonPressStart < 4000)) {
+    if (d15PressStart == 0) {
+      d15PressStart = now;
+      d15LongPressHandled = false;
+
+      // Function 1: 1-click on D15 while Safety Response check is waiting
+      if (safetyCheckActive || currentSafetyResponse == "WAITING") {
+        safetyCheckActive = false;
+        stopEmergencyAlarm();
+        beepShort(150);
+        currentSafetyResponse = "ACKNOWLEDGED";
+        safetyResponseToSync = "ACKNOWLEDGED";
+        pendingSafetyResponseSync = true;
+        pendingImmediatePush = true;
+        Serial.println("\n[SAFETY] ✅ Worker has Responded within 15s (D15 1-click)! Status -> ACKNOWLEDGED.");
+      }
+    } else if (!d15LongPressHandled && (now - d15PressStart >= WORKER_TRIGGER_HOLD_MS)) {
+      // Function 2: Worker held D15 for 3 seconds -> Initiate "Worker Trigger" alert to SSO
+      d15LongPressHandled = true;
+      safetyCheckActive = false;
       sosTriggered = true;
-      Serial.println("\n[SOS] 🚨 SOS EMERGENCY PRESSED! Activating Siren!");
-      startEmergencyAlarm(10000);
+      currentSafetyResponse = "EMERGENCY_REQUESTED";
+      safetyResponseToSync = "EMERGENCY_REQUESTED";
+      pendingSafetyResponseSync = true;
       pendingImmediatePush = true;
+      startEmergencyAlarm(5000);
+      Serial.println("\n[SOS] 🚨 WORKER TRIGGER (D15 held 3 seconds)! Initiating alert to SSO...");
     }
   } else {
-    sosTriggered = false;
+    d15PressStart = 0;
+    d15LongPressHandled = false;
   }
 }
 

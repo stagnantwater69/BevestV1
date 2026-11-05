@@ -58,22 +58,6 @@ fun WorkerDirectoryScreen(
     BevestScaffold(
         title = "Workers",
         subtitle = if (user.role == UserRole.SSO) user.siteId else null,
-        actions = {
-            IconButton(onClick = viewModel::refreshReadings) {
-                if (state.refreshing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                } else {
-                    Icon(
-                        imageVector = BevestIcons.Refresh,
-                        contentDescription = "Refresh live readings",
-                    )
-                }
-            }
-        },
         floatingActionButton = {
             if (canAdd) {
                 ExtendedFloatingActionButton(

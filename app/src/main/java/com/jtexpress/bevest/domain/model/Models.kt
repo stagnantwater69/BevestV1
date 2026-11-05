@@ -69,6 +69,12 @@ data class SensorReading(
     val timestamp: Long = 0L,
 )
 
+data class VitalLogEntry(
+    val timestamp: Long = 0L,
+    val heartRate: Int? = null,
+    val temperature: Double? = null,
+)
+
 data class Alert(
     val alertId: String = "",
     val workerId: String = "",
