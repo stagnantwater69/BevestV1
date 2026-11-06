@@ -192,7 +192,6 @@ fun AddEditWorkerScreen(
                         viewModel::onPhone,
                         "Phone number",
                         error = state.phoneError,
-                        helper = "Optional — used to reach them directly",
                         keyboardType = KeyboardType.Phone,
                         imeAction = ImeAction.Next,
                     )

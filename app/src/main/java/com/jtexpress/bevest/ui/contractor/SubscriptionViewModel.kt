@@ -66,6 +66,13 @@ data class SubscriptionState(
     /** True only when there is no active subscription or the current subscription period has already ended. */
     val canChangePlan: Boolean get() = subscription == null || subscription.hasEnded()
 
+    /** Allows switching when the current subscription has ended OR when upgrading from the Business Plan. */
+    fun canSwitchTo(targetPlanId: String): Boolean =
+        canChangePlan || subscription?.isUpgradeFromBusinessTo(targetPlanId) == true
+
+    fun isUpgradeFromBusiness(targetPlanId: String): Boolean =
+        !canChangePlan && subscription?.isUpgradeFromBusinessTo(targetPlanId) == true
+
     fun isCurrent(planId: String): Boolean = subscription?.planId == planId
 
     /** Already on this plan *and* this billing cycle — nothing to switch to. */
@@ -128,7 +135,7 @@ class SubscriptionViewModel @Inject constructor(
 
     fun selectPlan(plan: SubscriptionPlan) {
         if (state.value.isCurrentSelection(plan.id)) return
-        if (!state.value.canChangePlan) {
+        if (!state.value.canSwitchTo(plan.id)) {
             ui.update { it.copy(saveError = activeLockMessage(plan.id), message = null) }
             return
         }
@@ -136,7 +143,7 @@ class SubscriptionViewModel @Inject constructor(
     }
 
     fun openCustom() {
-        if (!state.value.canChangePlan) {
+        if (!state.value.canSwitchTo(SubscriptionPlans.CUSTOM_ID)) {
             ui.update { it.copy(saveError = activeLockMessage(SubscriptionPlans.CUSTOM_ID), message = null) }
             return
         }
@@ -165,7 +172,7 @@ class SubscriptionViewModel @Inject constructor(
 
     fun confirmPlan() {
         val plan = ui.value.pendingPlan ?: return
-        if (!state.value.canChangePlan) {
+        if (!state.value.canSwitchTo(plan.id)) {
             ui.update { it.copy(pendingPlan = null, saveError = activeLockMessage(plan.id)) }
             return
         }
@@ -192,7 +199,7 @@ class SubscriptionViewModel @Inject constructor(
 
     fun confirmCustom() {
         val form = ui.value.custom ?: return
-        if (!state.value.canChangePlan) {
+        if (!state.value.canSwitchTo(SubscriptionPlans.CUSTOM_ID)) {
             ui.update { it.copy(custom = null, saveError = activeLockMessage(SubscriptionPlans.CUSTOM_ID)) }
             return
         }

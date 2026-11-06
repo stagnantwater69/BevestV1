@@ -80,7 +80,6 @@ const ContractorSubscription = ({ user, profile, data }) => {
     || String(subscription.status || '').toLowerCase() === 'expired'
     || (renewDateMs > 0 && Date.now() >= renewDateMs);
 
-  const canChangeTier = isSubscriptionEnded;
   const currentEndDateLabel = formatDisplayDate(subscription.renewDate);
 
   const TIER_RANK = { NONE: 0, BUSINESS: 1, ENTERPRISE: 2, CUSTOM: 3 };
@@ -88,9 +87,18 @@ const ContractorSubscription = ({ user, profile, data }) => {
     if (!subscription.hasPlan) return false;
     return (TIER_RANK[targetPlanId] || 0) < (TIER_RANK[subscription.planId] || 0);
   };
+  const isUpgradeFromBusiness = (targetPlanId) => (
+    subscription.hasPlan
+    && subscription.planId === 'BUSINESS'
+    && (TIER_RANK[targetPlanId] || 0) > TIER_RANK.BUSINESS
+  );
+  const canSelectTargetTier = (targetPlanId) => (
+    isSubscriptionEnded || isUpgradeFromBusiness(targetPlanId)
+  );
+  const canChangeTier = isSubscriptionEnded;
 
   const handleSelectPlan = (plan) => {
-    if (!canChangeTier) {
+    if (!canSelectTargetTier(plan.id)) {
       alert(
         isDowngrade(plan.id)
           ? `You cannot downgrade from ${subscription.planName} to ${plan.name} while your current subscription is still active. You can change your subscription tier after your current subscription ends on ${currentEndDateLabel}.`
@@ -110,7 +118,7 @@ const ContractorSubscription = ({ user, profile, data }) => {
 
   const handleConfirmUpgrade = async () => {
     if (!selectedPlanModal || !contractorId) return;
-    if (!canChangeTier) {
+    if (!canSelectTargetTier(selectedPlanModal.id)) {
       alert(`You can only change your subscription tier after your current subscription ends on ${currentEndDateLabel}.`);
       setSelectedPlanModal(null);
       return;
@@ -154,7 +162,7 @@ const ContractorSubscription = ({ user, profile, data }) => {
 
   const handleConfirmCustomPlan = async () => {
     if (!contractorId) return;
-    if (!canChangeTier) {
+    if (!canSelectTargetTier('CUSTOM')) {
       alert(`You can only change your subscription tier after your current subscription ends on ${currentEndDateLabel}.`);
       setShowCustomModal(false);
       return;
@@ -421,7 +429,15 @@ const ContractorSubscription = ({ user, profile, data }) => {
           >
             <FiClock style={{ fontSize: '1.25rem', flexShrink: 0, color: '#d97706' }} />
             <span>
-              <strong>Subscription tier locked until current period ends:</strong> You can only change or downgrade your subscription tier after your current <strong>{subscription.planName} Plan</strong> ends on <strong>{currentEndDateLabel}</strong>.
+              {subscription.planId === 'BUSINESS' ? (
+                <>
+                  <strong>Active Business Plan:</strong> You can upgrade to the <strong>Enterprise</strong> or <strong>Custom (Scale)</strong> tier at any time. Other changes to your Business Plan are available after your current period ends on <strong>{currentEndDateLabel}</strong>.
+                </>
+              ) : (
+                <>
+                  <strong>Subscription tier locked until current period ends:</strong> You can only change or downgrade your subscription tier after your current <strong>{subscription.planName} Plan</strong> ends on <strong>{currentEndDateLabel}</strong>.
+                </>
+              )}
             </span>
           </div>
         )}
@@ -511,14 +527,16 @@ const ContractorSubscription = ({ user, profile, data }) => {
             <div className="sub-tier-footer">
               <button
                 type="button"
-                className={`sub-action-pill-btn ${(!canChangeTier || isCurrent('ENTERPRISE')) ? 'btn-current' : 'btn-active'}`}
+                className={`sub-action-pill-btn ${(!canSelectTargetTier('ENTERPRISE') || isCurrent('ENTERPRISE')) ? 'btn-current' : 'btn-active'}`}
                 onClick={() => handleSelectPlan(activePlans.ENTERPRISE)}
-                disabled={!canChangeTier || (isCurrent('ENTERPRISE') && subscription.billingCycle === billingCycle)}
+                disabled={!canSelectTargetTier('ENTERPRISE') || (isCurrent('ENTERPRISE') && subscription.billingCycle === billingCycle)}
               >
                 {isCurrent('ENTERPRISE') && subscription.billingCycle === billingCycle
                   ? 'Current Plan'
-                  : !canChangeTier
+                  : !canSelectTargetTier('ENTERPRISE')
                   ? (isDowngrade('ENTERPRISE') ? 'Downgrade Locked Until Plan Ends' : 'Locked Until Plan Ends')
+                  : isUpgradeFromBusiness('ENTERPRISE')
+                  ? 'Upgrade to Enterprise'
                   : 'Get Enterprise'}
               </button>
             </div>
@@ -571,13 +589,13 @@ const ContractorSubscription = ({ user, profile, data }) => {
             <div className="sub-tier-footer">
               <button
                 type="button"
-                className={`sub-action-pill-btn ${(!canChangeTier || isCurrent('CUSTOM')) ? 'btn-current' : 'btn-active'}`}
+                className={`sub-action-pill-btn ${(!canSelectTargetTier('CUSTOM') || isCurrent('CUSTOM')) ? 'btn-current' : 'btn-active'}`}
                 onClick={() => handleSelectPlan({ id: 'CUSTOM', name: 'Custom' })}
-                disabled={!canChangeTier}
+                disabled={!canSelectTargetTier('CUSTOM')}
               >
                 {isCurrent('CUSTOM')
                   ? (canChangeTier ? 'Adjust Custom Plan' : 'Current Plan')
-                  : (!canChangeTier ? 'Locked Until Plan Ends' : 'Configure Custom Tier')}
+                  : (!canSelectTargetTier('CUSTOM') ? 'Locked Until Plan Ends' : (isUpgradeFromBusiness('CUSTOM') ? 'Upgrade to Custom Tier' : 'Configure Custom Tier'))}
               </button>
             </div>
           </div>

@@ -35,12 +35,16 @@ object Validators {
         val clean = raw?.trim().orEmpty()
         if (clean.isEmpty() || clean.equals("Not set", ignoreCase = true) || clean == "--") return ""
         if (clean.startsWith("+")) {
-            val rest = clean.removePrefix(defaultCode).trim()
-            if (clean.startsWith(defaultCode) && rest.isNotEmpty()) {
+            if (clean.startsWith(defaultCode)) {
+                val rest = clean.removePrefix(defaultCode).trim()
                 val normalizedLocal = if (defaultCode == "+63") rest.trimStart('0').trim() else rest
                 return if (normalizedLocal.isNotEmpty()) "$defaultCode $normalizedLocal" else ""
             }
             return clean
+        }
+        if (defaultCode == "+63" && clean.startsWith("63") && clean.length >= 11) {
+            val rest = clean.removePrefix("63").trim().trimStart('0').trim()
+            return if (rest.isNotEmpty()) "+63 $rest" else ""
         }
         val local = if (defaultCode == "+63") clean.trimStart('0').trim() else clean
         return if (local.isNotEmpty()) "$defaultCode $local" else ""
@@ -56,6 +60,9 @@ object Validators {
         if (clean.startsWith(defaultCode)) {
             val rest = clean.removePrefix(defaultCode).trim()
             return if (defaultCode == "+63") rest.trimStart('0').trim() else rest
+        }
+        if (defaultCode == "+63" && clean.startsWith("63") && clean.length >= 11) {
+            return clean.removePrefix("63").trim().trimStart('0').trim()
         }
         if (clean.startsWith("+")) {
             val spaceIdx = clean.indexOf(' ')

@@ -59,10 +59,16 @@ export function parsePhoneNumber(rawPhone, fallbackCode = '+63') {
   if (matched) {
     const code = matched.codeValue || matched.code;
     let rest = clean.slice(code.length).trim();
-    if (code === '+63' && rest.startsWith('0') && rest.length > 1) {
+    if (code === '+63' && rest.startsWith('0')) {
       rest = rest.replace(/^0+/, '').trim();
     }
     return { countryCode: code, localNumber: rest };
+  }
+
+  // If starts with 63 (without +) and fallback is +63
+  if (clean.startsWith('63') && clean.length >= 11 && fallbackCode === '+63') {
+    const rest = clean.slice(2).trim().replace(/^0+/, '').trim();
+    return { countryCode: '+63', localNumber: rest };
   }
 
   // If starts with 0 and fallback is +63 (standard Philippine mobile syntax like 0917...)
@@ -189,9 +195,14 @@ const PhoneInput = ({
     setSelectedIso(country.iso);
     setIsOpen(false);
     setSearch('');
+    const cleanedLocal =
+      newCode === '+63'
+        ? localNumber.trim().replace(/^0+/, '').trim()
+        : localNumber.trim();
+    setLocalNumber(cleanedLocal);
     if (onChange) {
-      if (localNumber.trim()) {
-        onChange(`${newCode} ${localNumber.trim()}`);
+      if (cleanedLocal) {
+        onChange(`${newCode} ${cleanedLocal}`);
       } else {
         onChange('');
       }
@@ -215,10 +226,10 @@ const PhoneInput = ({
       return;
     }
 
-    // If typing local number starting with 0 in +63, clean leading 0 for mobile standard
+    // If typing local number starting with 0 in +63, remove leading 0 immediately
     let cleanVal = inputVal;
-    if (selectedCode === '+63' && cleanVal.startsWith('0') && cleanVal.length > 1) {
-      cleanVal = cleanVal.replace(/^0+/, '');
+    if (selectedCode === '+63' && cleanVal.trimStart().startsWith('0')) {
+      cleanVal = cleanVal.trimStart().replace(/^0+/, '');
     }
 
     setLocalNumber(cleanVal);
