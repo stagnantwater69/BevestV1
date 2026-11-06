@@ -120,7 +120,7 @@ const exportReportPdf = (report, incidents, nameById, contractorName) => {
       <td>${escapeHtml(ALERT_TYPE_LABEL[i.type] || i.type)}</td>
       <td>${escapeHtml(SEVERITY_LABEL[i.severity] || i.severity)}</td>
       <td>${escapeHtml(nameById[i.workerId] || i.workerId)}</td>
-      <td>${escapeHtml(i.outcome || 'Open')}</td>
+      <td>${escapeHtml(i.resolutionNotes || i.outcome || 'Open')}</td>
     </tr>`).join('');
 
   const html = `<!doctype html><html><head><meta charset="utf-8" />
@@ -146,7 +146,7 @@ const exportReportPdf = (report, incidents, nameById, contractorName) => {
       <div class="tile"><b>${report.warningCount} / ${report.dangerCount} / ${report.emergencyCount}</b><span class="muted">Warning / Danger / Emergency</span></div>
     </div>
     <h3>Incidents this month</h3>
-    ${incidents.length ? `<table><thead><tr><th>Date</th><th>Type</th><th>Severity</th><th>Worker</th><th>Outcome</th></tr></thead><tbody>${rows}</tbody></table>`
+    ${incidents.length ? `<table><thead><tr><th>Date</th><th>Type</th><th>Severity</th><th>Worker</th><th>Resolution Notes</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<p class="muted">Nothing was recorded in this period — a good month.</p>'}
     <script>window.onload=function(){window.print();}</script>
     </body></html>`;
@@ -253,6 +253,9 @@ const IncidentDetailModal = ({ incident, workerName, onClose }) => {
   const color = SEVERITY_COLOR[incident.severity];
   const Icon = ALERT_TYPE_ICON[incident.type] || FiClock;
   const hasLocation = incident.latitude != null && incident.longitude != null;
+  const isClosed = Boolean(incident.resolved || incident.resolutionNotes || incident.outcome);
+  const resolutionNotesText = incident.resolutionNotes || incident.outcome;
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content ct-modal" onClick={(e) => e.stopPropagation()}>
@@ -276,18 +279,14 @@ const IncidentDetailModal = ({ incident, workerName, onClose }) => {
             <DetailItem label="Vest" value={incident.vestId || '—'} />
             <DetailItem label="Heart rate" value={incident.heartRate != null ? `${incident.heartRate} bpm` : '—'} />
             <DetailItem label="Temperature" value={incident.temperature != null ? `${incident.temperature.toFixed(1)} °C` : '—'} />
-            <DetailItem label="Status" value={incident.outcome ? 'Closed' : 'Open'} />
+            <DetailItem label="Status" value={isClosed ? 'Closed' : 'Open'} />
             <DetailItem label="Site" value={incident.siteId || '—'} />
           </div>
           <div className="ct-card ct-card-tight">
-            <h3 className="ct-subheading">Outcome</h3>
-            <p className="ct-muted">{incident.outcome || 'This incident has not been closed yet.'}</p>
-            {incident.resolutionNotes && (
-              <>
-                <h3 className="ct-subheading" style={{ marginTop: '1rem' }}>Resolution notes</h3>
-                <p className="ct-muted">{incident.resolutionNotes}</p>
-              </>
-            )}
+            <h3 className="ct-subheading">Resolution Notes</h3>
+            <p className="ct-muted">
+              {resolutionNotesText || 'This alert has not been resolved yet.'}
+            </p>
           </div>
           {hasLocation && (
             <a
@@ -347,7 +346,7 @@ export const IncidentHistory = ({ data, onBack }) => {
           icon={FiClock}
           title={incidents.length === 0 ? 'No incidents' : 'Nothing at this severity'}
           message={incidents.length === 0
-            ? 'Incidents appear here once an alert is closed with an outcome.'
+            ? 'Incidents appear here once an alert is resolved with resolution notes.'
             : 'No incident on record has this severity.'}
         />
       ) : (

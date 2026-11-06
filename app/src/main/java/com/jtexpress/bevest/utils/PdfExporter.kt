@@ -40,8 +40,9 @@ object PdfExporter {
         canvas.drawText("Incidents", 40f, y, title); y += 20f
 
         incidents.take(30).forEach { incident ->
+            val notes = incident.resolutionNotes?.takeIf { it.isNotBlank() } ?: incident.outcome ?: "open"
             val line = "${DateTimeUtils.formatDate(incident.createdAt)} · ${incident.workerId} · " +
-                "${incident.type.name} · ${incident.severity.name} · ${incident.outcome ?: "open"}"
+                "${incident.type.name} · ${incident.severity.name} · $notes"
             canvas.drawText(line, 40f, y, body)
             y += 16f
         }

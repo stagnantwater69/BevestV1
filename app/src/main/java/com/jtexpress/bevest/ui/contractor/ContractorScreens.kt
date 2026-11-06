@@ -85,13 +85,6 @@ private fun contractorId(user: User) = user.contractorId ?: user.uid
 
 // -------------------------------------------------------------- dashboard
 
-/**
- * The contractor's overview across every site.
- *
- * Where the officer's dashboard is about *now*, this one is about *trend* — a contractor
- * is answering "are we getting safer?", not "who needs help this minute". Each headline
- * figure opens the screen that explains it, the same as on the web dashboard.
- */
 @Composable
 fun ContractorDashboardScreen(
     user: User,
@@ -122,8 +115,6 @@ fun ContractorDashboardScreen(
                     .padding(horizontal = Spacing.gutter, vertical = Spacing.md),
                 verticalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
-                // Same notice as the web overview: everything still works without a plan,
-                // but vest quota and officer slots come from one.
                 if (user.subscription == null) {
                     QuickLink(
                         icon = BevestIcons.Subscription,
@@ -188,8 +179,6 @@ fun ContractorSsosScreen(
     LaunchedEffect(user.uid) { viewModel.start(contractorId(user)) }
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val palette = LocalStatusPalette.current
-    // Disabling an officer cuts off the person monitoring a live site, so it is
-    // confirmed rather than fired straight from the list row.
     var pendingDisable by remember { mutableStateOf<User?>(null) }
 
     BevestScaffold(
@@ -287,13 +276,6 @@ fun ContractorSsosScreen(
     }
 }
 
-/**
- * A person in a management list — officer or contractor.
- *
- * Deliberately identical between the contractor and admin screens: the two lists do the
- * same job for different roles, and there is no reason for an administrator to have to
- * learn a second layout to read the same information.
- */
 @Composable
 fun PersonRow(
     name: String,
@@ -330,7 +312,6 @@ fun PersonRow(
                         style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        // A disabled account is history, and should read that way.
                         color = if (active) {
                             MaterialTheme.colorScheme.onSurface
                         } else {
@@ -362,9 +343,6 @@ fun PersonRow(
             }
             if (action != null) {
                 Spacer(Modifier.height(Spacing.md))
-                // The only thing this slot is ever used for is revoking someone's
-                // access, so it gets the danger treatment rather than reading as a
-                // neutral option in brand orange.
                 DangerButton(text = actionLabel, onClick = action)
             }
         }
@@ -392,8 +370,6 @@ fun AddSsoScreen(
                 .padding(horizontal = Spacing.gutter, vertical = Spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Spacing.xl),
         ) {
-            // Grouped rather than one long stack of inputs: who they are, how to reach
-            // them, and how they first sign in are three separate decisions.
             FormSection(title = "Name") {
                 FormField(
                     state.firstName,
@@ -444,7 +420,6 @@ fun AddSsoScreen(
                     "Temporary password",
                     error = state.errors["tempPassword"],
                     helper = "They change this from their profile after signing in",
-                    // Shown, not masked: the contractor has to pass it on to the officer.
                     required = true,
                     imeAction = ImeAction.Done,
                     onImeAction = viewModel::submit,
@@ -757,7 +732,7 @@ fun ContractorIncidentsScreen(
                             "Nothing at this severity"
                         },
                         message = if (state.incidents.isEmpty()) {
-                            "Incidents appear here once an alert is closed with an outcome."
+                            "Incidents appear here once an alert is resolved with resolution notes."
                         } else {
                             "No incident on record has this severity."
                         },
@@ -788,11 +763,6 @@ fun ContractorIncidentsScreen(
     }
 }
 
-/**
- * An incident in a list. Shares its shape and severity language with the alert rows on
- * the officer's side, because the two describe the same events at different points in
- * their lifecycle and should be recognisable as the same kind of thing.
- */
 @Composable
 private fun IncidentRow(
     incident: Incident,
@@ -806,7 +776,7 @@ private fun IncidentRow(
         AlertSeverity.DANGER -> palette.danger
         AlertSeverity.EMERGENCY -> palette.emergency
     }
-    val open = incident.outcome == null
+    val open = incident.resolutionNotes.isNullOrBlank() && incident.outcome.isNullOrBlank()
 
     Surface(
         modifier = modifier
@@ -866,7 +836,6 @@ private fun IncidentRow(
     }
 }
 
-/** A tappable row that opens another screen: icon, title, one line of context, chevron. */
 @Composable
 private fun QuickLink(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -921,7 +890,6 @@ private fun QuickLink(
     }
 }
 
-/** A month's incidents split by severity, as three small colored counts. */
 @Composable
 private fun SeverityCounts(warning: Int, danger: Int, emergency: Int) {
     val palette = LocalStatusPalette.current

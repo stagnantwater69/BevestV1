@@ -182,7 +182,7 @@ export const FilterChips = ({ options, selected, onSelect }) => (
 export const IncidentRow = ({ incident, onClick, workerName }) => {
   const color = SEVERITY_COLOR[incident.severity] || STATUS_COLOR.WARNING;
   const Icon = ALERT_TYPE_ICON[incident.type] || TbWifiOff;
-  const open = !incident.outcome;
+  const open = !(incident.resolved || incident.resolutionNotes || incident.outcome);
   return (
     <div
       className={`ct-row ${onClick ? 'clickable' : ''}`}

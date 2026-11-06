@@ -117,6 +117,7 @@ data class Alert(
     val acknowledgedAt: Long? = null,
     val resolvedAt: Long? = null,
     val resolvedBy: String? = null,
+    val resolutionNotes: String? = null,
 )
 
 data class Incident(

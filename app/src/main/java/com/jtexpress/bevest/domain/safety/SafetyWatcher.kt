@@ -315,12 +315,14 @@ class SafetyWatcher @Inject constructor(
     }
 
     /**
-     * Opens the fall alert, once. `openFallAlertId` on the worker is claimed in a
-     * transaction so two phones seeing the same fall can't open multiple alerts.
+     * Opens the fall alert and its linked incident record, once. `openFallAlertId` on the
+     * worker is claimed in a transaction so two phones seeing the same fall can't open
+     * multiple alerts.
      */
     private suspend fun openFallAlert(worker: Worker, reading: SensorReading) {
         val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
         val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
+        val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alertRef.id)
         val now = System.currentTimeMillis()
         firestore.runTransaction { tx ->
             val existingId = tx.get(workerRef).getString("openFallAlertId")
@@ -345,7 +347,27 @@ class SafetyWatcher @Inject constructor(
                     "severity" to AlertSeverity.DANGER.name,
                     "status" to AlertStatus.ACTIVE.name,
                     "message" to "Fall detected",
+                    "incidentId" to alertRef.id,
                     "createdAt" to now,
+                ),
+            )
+            tx.set(
+                incidentRef,
+                mapOf(
+                    "workerId" to worker.workerId,
+                    "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "siteId" to worker.siteId,
+                    "contractorId" to worker.contractorId,
+                    "type" to AlertType.FALL_DETECTED.name,
+                    "severity" to AlertSeverity.DANGER.name,
+                    "alertId" to alertRef.id,
+                    "heartRate" to reading.heartRate,
+                    "temperature" to reading.temperature,
+                    "latitude" to reading.latitude,
+                    "longitude" to reading.longitude,
+                    "createdAt" to now,
+                    "outcome" to null,
+                    "resolutionNotes" to null,
                 ),
             )
             tx.update(workerRef, "openFallAlertId", alertRef.id)
@@ -360,6 +382,7 @@ class SafetyWatcher @Inject constructor(
     private suspend fun openWorkerTriggerAlert(worker: Worker, reading: SensorReading) {
         val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
         val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
+        val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alertRef.id)
         val now = System.currentTimeMillis()
         firestore.runTransaction { tx ->
             val existingId = tx.get(workerRef).getString("openTriggerAlertId")
@@ -384,7 +407,27 @@ class SafetyWatcher @Inject constructor(
                     "severity" to AlertSeverity.EMERGENCY.name,
                     "status" to AlertStatus.ACTIVE.name,
                     "message" to "Worker Trigger. Please check with Worker.",
+                    "incidentId" to alertRef.id,
                     "createdAt" to now,
+                ),
+            )
+            tx.set(
+                incidentRef,
+                mapOf(
+                    "workerId" to worker.workerId,
+                    "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "siteId" to worker.siteId,
+                    "contractorId" to worker.contractorId,
+                    "type" to AlertType.EMERGENCY_REQUEST.name,
+                    "severity" to AlertSeverity.EMERGENCY.name,
+                    "alertId" to alertRef.id,
+                    "heartRate" to reading.heartRate,
+                    "temperature" to reading.temperature,
+                    "latitude" to reading.latitude,
+                    "longitude" to reading.longitude,
+                    "createdAt" to now,
+                    "outcome" to null,
+                    "resolutionNotes" to null,
                 ),
             )
             tx.update(workerRef, "openTriggerAlertId", alertRef.id)
@@ -450,7 +493,7 @@ class SafetyWatcher @Inject constructor(
         }.await()
     }
 
-    /** Upgrades the fall alert to EMERGENCY and opens its incident, once. */
+    /** Upgrades the fall alert to EMERGENCY and updates its incident, once. */
     private suspend fun escalate(worker: Worker, alert: Alert, reading: SensorReading) {
         val alertRef = firestore.collection(FirebasePaths.ALERTS).document(alert.alertId)
         val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alert.alertId)

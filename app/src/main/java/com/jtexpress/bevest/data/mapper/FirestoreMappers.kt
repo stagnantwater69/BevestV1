@@ -154,24 +154,33 @@ fun DocumentSnapshot.toAlert(): Alert = Alert(
     acknowledgedAt = millis("acknowledgedAt"),
     resolvedAt = millis("resolvedAt"),
     resolvedBy = strOrNull("resolvedBy"),
+    resolutionNotes = strOrNull("resolutionNotes"),
 )
 
-fun DocumentSnapshot.toIncident(): Incident = Incident(
-    incidentId = id,
-    workerId = str("workerId"),
-    vestId = str("vestId"),
-    alertId = strOrNull("alertId"),
-    type = AlertType.fromRaw(strOrNull("type")),
-    severity = AlertSeverity.fromRaw(strOrNull("severity")),
-    heartRate = int("heartRate"),
-    temperature = dbl("temperature"),
-    latitude = dbl("latitude"),
-    longitude = dbl("longitude"),
-    createdAt = millis("createdAt") ?: 0L,
-    outcome = strOrNull("outcome"),
-    resolutionNotes = strOrNull("resolutionNotes"),
-    resolvedBy = strOrNull("resolvedBy"),
-)
+fun DocumentSnapshot.toIncident(): Incident {
+    val rawNotes = strOrNull("resolutionNotes")?.takeIf { it.isNotBlank() }
+    val rawOutcome = strOrNull("outcome")?.takeIf { it.isNotBlank() }
+    val isResolvedStatus = strOrNull("status")?.equals("RESOLVED", ignoreCase = true) == true || millis("resolvedAt") != null
+    val effectiveNotes = rawNotes ?: rawOutcome ?: if (isResolvedStatus) "Resolved" else null
+    val effectiveOutcome = rawOutcome ?: rawNotes ?: if (isResolvedStatus) "Resolved" else null
+
+    return Incident(
+        incidentId = id,
+        workerId = str("workerId"),
+        vestId = str("vestId"),
+        alertId = strOrNull("alertId"),
+        type = AlertType.fromRaw(strOrNull("type")),
+        severity = AlertSeverity.fromRaw(strOrNull("severity")),
+        heartRate = int("heartRate"),
+        temperature = dbl("temperature"),
+        latitude = dbl("latitude"),
+        longitude = dbl("longitude"),
+        createdAt = millis("createdAt") ?: 0L,
+        outcome = effectiveOutcome,
+        resolutionNotes = effectiveNotes,
+        resolvedBy = strOrNull("resolvedBy"),
+    )
+}
 
 fun DocumentSnapshot.toProjectSite(): ProjectSite = ProjectSite(
     projectId = id,

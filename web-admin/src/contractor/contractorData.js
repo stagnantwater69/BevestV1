@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
-  collection, query, where, orderBy, limit, onSnapshot, doc,
+  collection, query, where, orderBy, limit, onSnapshot, doc, updateDoc,
 } from 'firebase/firestore';
 import { ref, onValue } from 'firebase/database';
 import { db, rtdb } from '../firebase';
@@ -54,7 +54,7 @@ export const ALERT_TYPE_LABEL = {
   TEMPERATURE_WARNING: 'High body temperature',
   FALL_DETECTED: 'Fall detected',
   INACTIVITY: 'No movement',
-  EMERGENCY_REQUEST: 'Help requested',
+  EMERGENCY_REQUEST: 'Worker Trigger',
   NO_SAFETY_RESPONSE: 'No response to check',
   VEST_OFFLINE: 'Vest offline',
   LOW_BATTERY: 'Low vest battery',
@@ -65,7 +65,7 @@ export const ALERT_TYPE_DETAIL = {
   TEMPERATURE_WARNING: 'Body temperature stayed above the safe range.',
   FALL_DETECTED: "The vest's motion sensor registered a fall.",
   INACTIVITY: 'No movement for longer than the inactivity limit.',
-  EMERGENCY_REQUEST: 'The worker pressed the safety button on their vest.',
+  EMERGENCY_REQUEST: 'Worker Trigger. Please check with Worker.',
   NO_SAFETY_RESPONSE: 'The worker did not acknowledge a safety check.',
   VEST_OFFLINE: 'The vest stopped sending readings.',
   LOW_BATTERY: 'The vest battery needs charging to keep monitoring.',
@@ -79,11 +79,11 @@ export const MOTION_LABEL = {
 };
 
 export const RESPONSE_LABEL = {
-  NONE: 'No check running',
+  NONE: 'No Actions',
   WAITING: 'Waiting for worker',
-  ACKNOWLEDGED: 'Worker responded',
+  ACKNOWLEDGED: 'Worker has Responded',
   EMERGENCY_REQUESTED: 'Help requested',
-  NO_RESPONSE: 'No response',
+  NO_RESPONSE: 'Worker is in danger, please check with worker',
   ESCALATED: 'Escalated',
 };
 
@@ -170,6 +170,10 @@ export const toWorker = (snap) => {
 
 export const toIncident = (snap) => {
   const d = snap.data();
+  const rawNotes = (d.resolutionNotes && String(d.resolutionNotes).trim()) || null;
+  const rawOutcome = (d.outcome && String(d.outcome).trim()) || null;
+  const isResolvedStatus = upper(d.status, '') === 'RESOLVED' || Boolean(d.resolvedAt);
+  const effectiveNotes = rawNotes || rawOutcome || (isResolvedStatus ? 'Resolved' : null);
   return {
     id: snap.id,
     workerId: d.workerId || '',
@@ -178,14 +182,39 @@ export const toIncident = (snap) => {
     siteId: d.siteId || null,
     type: upper(d.type, 'VEST_OFFLINE'),
     severity: upper(d.severity, 'WARNING'),
+    status: upper(d.status, effectiveNotes ? 'RESOLVED' : 'ACTIVE'),
+    resolved: Boolean(effectiveNotes || isResolvedStatus),
     heartRate: num(d.heartRate),
     temperature: num(d.temperature),
     latitude: num(d.latitude),
     longitude: num(d.longitude),
     createdAt: toMillis(d.createdAt),
-    outcome: d.outcome || null,
-    resolutionNotes: d.resolutionNotes || null,
+    outcome: effectiveNotes,
+    resolutionNotes: effectiveNotes,
     resolvedBy: d.resolvedBy || null,
+    resolvedAt: toMillis(d.resolvedAt) || null,
+  };
+};
+
+export const toAlertRecord = (snap) => {
+  const d = snap.data();
+  const status = upper(d.status, 'ACTIVE');
+  const rawNotes = (d.resolutionNotes && String(d.resolutionNotes).trim()) || null;
+  const isResolved = status === 'RESOLVED' || Boolean(d.resolvedAt) || Boolean(rawNotes);
+  return {
+    id: snap.id,
+    workerId: d.workerId || '',
+    vestId: d.vestId || '',
+    incidentId: d.incidentId || null,
+    siteId: d.siteId || null,
+    type: upper(d.type, 'VEST_OFFLINE'),
+    severity: upper(d.severity, 'WARNING'),
+    status,
+    resolved: isResolved,
+    resolutionNotes: rawNotes || (isResolved ? 'Resolved' : null),
+    resolvedBy: d.resolvedBy || null,
+    resolvedAt: toMillis(d.resolvedAt) || null,
+    createdAt: toMillis(d.createdAt),
   };
 };
 
@@ -274,7 +303,7 @@ export function buildMonthlyReports(incidents, activeWorkers, months = 6) {
 // ---------------------------------------------------------------------- hooks
 
 /**
- * Live contractor data: workers, their vest readings, incidents and thresholds.
+ * Live contractor data: workers, their vest readings, incidents (merged with alerts) and thresholds.
  * Equivalent to ContractorDashboardViewModel + WorkerDirectoryViewModel combined.
  */
 export function useContractorData(contractorId) {
@@ -286,7 +315,8 @@ export function useContractorData(contractorId) {
   // stale worker.assignedVestId links left behind by deleted / returned vests.
   const [vestOwners, setVestOwners] = useState(null);
 
-  const [incidents, setIncidents] = useState([]);
+  const [rawIncidents, setRawIncidents] = useState([]);
+  const [alertsMap, setAlertsMap] = useState({});
   const [incidentsLoading, setIncidentsLoading] = useState(true);
   const [incidentsError, setIncidentsError] = useState(null);
 
@@ -351,7 +381,7 @@ export function useContractorData(contractorId) {
     return onSnapshot(
       q,
       (qs) => {
-        setIncidents(qs.docs.map(toIncident).sort((a, b) => b.createdAt - a.createdAt));
+        setRawIncidents(qs.docs.map(toIncident));
         setIncidentsLoading(false);
         setIncidentsError(null);
       },
@@ -362,6 +392,59 @@ export function useContractorData(contractorId) {
       },
     );
   }, [contractorId]);
+
+  // Also subscribe to the contractor's alerts so that any alert resolved by an SSO
+  // (with resolutionNotes) immediately marks the linked incident as resolved/closed.
+  useEffect(() => {
+    if (!contractorId) return undefined;
+    const q = query(
+      collection(db, 'alerts'),
+      where('contractorId', '==', contractorId),
+      limit(500),
+    );
+    return onSnapshot(
+      q,
+      (qs) => {
+        const byId = {};
+        qs.docs.forEach((d) => {
+          byId[d.id] = toAlertRecord(d);
+        });
+        setAlertsMap(byId);
+      },
+      (err) => {
+        console.warn('Contractor alerts listener warning:', err.message);
+      },
+    );
+  }, [contractorId]);
+
+  // Merge incidents with alerts so resolved alerts in SSO always show as Closed with Resolution Notes
+  const incidents = useMemo(() => {
+    return rawIncidents.map((inc) => {
+      const linkedAlert = alertsMap[inc.alertId || inc.id] || alertsMap[inc.id];
+      if (linkedAlert && linkedAlert.resolved) {
+        const mergedNotes = inc.resolutionNotes || linkedAlert.resolutionNotes || inc.outcome || 'Resolved';
+        // Backfill Firestore incident doc if it was still unclosed in Firestore
+        if (!inc.resolved) {
+          updateDoc(doc(db, 'incidents', inc.id), {
+            status: 'RESOLVED',
+            outcome: mergedNotes,
+            resolutionNotes: mergedNotes,
+            resolvedBy: inc.resolvedBy || linkedAlert.resolvedBy || null,
+          }).catch(() => {});
+        }
+        return {
+          ...inc,
+          status: 'RESOLVED',
+          resolved: true,
+          outcome: mergedNotes,
+          resolutionNotes: mergedNotes,
+          resolvedBy: inc.resolvedBy || linkedAlert.resolvedBy || null,
+          resolvedAt: inc.resolvedAt || linkedAlert.resolvedAt || null,
+        };
+      }
+      return inc;
+    }).sort((a, b) => b.createdAt - a.createdAt);
+  }, [rawIncidents, alertsMap]);
 
   useEffect(() => onSnapshot(
     doc(db, 'settings', 'thresholds'),

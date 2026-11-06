@@ -5,8 +5,10 @@ import com.google.firebase.firestore.Query
 import com.jtexpress.bevest.data.firebase.FirebasePaths
 import com.jtexpress.bevest.data.firebase.snapshots
 import com.jtexpress.bevest.data.firebase.toAppError
+import com.jtexpress.bevest.data.mapper.toAlert
 import com.jtexpress.bevest.data.mapper.toIncident
 import com.jtexpress.bevest.domain.model.AlertSeverity
+import com.jtexpress.bevest.domain.model.AlertStatus
 import com.jtexpress.bevest.domain.model.Incident
 import com.jtexpress.bevest.domain.repository.MonthlyReport
 import com.jtexpress.bevest.domain.repository.ReportRepository
@@ -14,6 +16,7 @@ import com.jtexpress.bevest.utils.DateTimeUtils
 import com.jtexpress.bevest.utils.Outcome
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import java.util.Calendar
@@ -26,6 +29,7 @@ class ReportRepositoryImpl @Inject constructor(
 ) : ReportRepository {
 
     private val incidents get() = firestore.collection(FirebasePaths.INCIDENTS)
+    private val alerts get() = firestore.collection(FirebasePaths.ALERTS)
     private val workers get() = firestore.collection(FirebasePaths.WORKERS)
 
     override suspend fun monthlyReports(contractorId: String, months: Int): Outcome<List<MonthlyReport>> = try {
@@ -75,11 +79,36 @@ class ReportRepositoryImpl @Inject constructor(
         Outcome.Failure(e.toAppError())
     }
 
-    override fun observeIncidentHistory(contractorId: String, limit: Long): Flow<Outcome<List<Incident>>> =
-        incidents.whereEqualTo("contractorId", contractorId)
+    override fun observeIncidentHistory(contractorId: String, limit: Long): Flow<Outcome<List<Incident>>> {
+        val incFlow = incidents.whereEqualTo("contractorId", contractorId)
             .orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(limit)
             .snapshots()
-            .map { qs -> Outcome.Success(qs.documents.map { it.toIncident() }) as Outcome<List<Incident>> }
-            .catch { emit(Outcome.Failure(it.toAppError())) }
+        val alertsFlow = alerts.whereEqualTo("contractorId", contractorId)
+            .limit(limit)
+            .snapshots()
+            .map { qs -> qs.documents.associate { it.id to it.toAlert() } }
+            .catch { emit(emptyMap()) }
+
+        return combine(incFlow, alertsFlow) { qs, alertsById ->
+            val list = qs.documents.map { doc ->
+                val inc = doc.toIncident()
+                val matchingAlert = alertsById[inc.alertId ?: inc.incidentId] ?: alertsById[inc.incidentId]
+                if (matchingAlert != null && matchingAlert.status == AlertStatus.RESOLVED) {
+                    val mergedNotes = inc.resolutionNotes?.takeIf { it.isNotBlank() }
+                        ?: matchingAlert.resolutionNotes?.takeIf { it.isNotBlank() }
+                        ?: inc.outcome?.takeIf { it.isNotBlank() }
+                        ?: "Resolved"
+                    inc.copy(
+                        outcome = mergedNotes,
+                        resolutionNotes = mergedNotes,
+                        resolvedBy = inc.resolvedBy ?: matchingAlert.resolvedBy,
+                    )
+                } else {
+                    inc
+                }
+            }
+            Outcome.Success(list) as Outcome<List<Incident>>
+        }.catch { emit(Outcome.Failure(it.toAppError())) }
+    }
 }
