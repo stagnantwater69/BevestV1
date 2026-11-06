@@ -63,6 +63,9 @@ data class SubscriptionState(
 ) {
     val hasPlan: Boolean get() = subscription != null
 
+    /** True only when there is no active subscription or the current subscription period has already ended. */
+    val canChangePlan: Boolean get() = subscription == null || subscription.hasEnded()
+
     fun isCurrent(planId: String): Boolean = subscription?.planId == planId
 
     /** Already on this plan *and* this billing cycle — nothing to switch to. */
@@ -113,12 +116,30 @@ class SubscriptionViewModel @Inject constructor(
 
     fun setCycle(cycle: BillingCycle) = ui.update { it.copy(cycle = cycle) }
 
+    private fun activeLockMessage(targetPlanId: String? = null): String {
+        val sub = state.value.subscription ?: return "You can only change your subscription tier after your current subscription ends."
+        val endDate = sub.renewDate?.let(com.jtexpress.bevest.utils.DateTimeUtils::formatDate) ?: "its renewal date"
+        return if (targetPlanId != null && sub.isDowngradeTo(targetPlanId)) {
+            "You cannot downgrade from the ${sub.planName} Plan while your current subscription is still active. You can change your tier after $endDate."
+        } else {
+            "You can only change your subscription tier after your current ${sub.planName} Plan ends on $endDate."
+        }
+    }
+
     fun selectPlan(plan: SubscriptionPlan) {
         if (state.value.isCurrentSelection(plan.id)) return
+        if (!state.value.canChangePlan) {
+            ui.update { it.copy(saveError = activeLockMessage(plan.id), message = null) }
+            return
+        }
         ui.update { it.copy(pendingPlan = plan, saveError = null, message = null) }
     }
 
     fun openCustom() {
+        if (!state.value.canChangePlan) {
+            ui.update { it.copy(saveError = activeLockMessage(SubscriptionPlans.CUSTOM_ID), message = null) }
+            return
+        }
         val current = state.value.subscription?.takeIf { it.isCustom }
         ui.update {
             it.copy(
@@ -144,6 +165,10 @@ class SubscriptionViewModel @Inject constructor(
 
     fun confirmPlan() {
         val plan = ui.value.pendingPlan ?: return
+        if (!state.value.canChangePlan) {
+            ui.update { it.copy(pendingPlan = null, saveError = activeLockMessage(plan.id)) }
+            return
+        }
         val cycle = ui.value.cycle
         val now = System.currentTimeMillis()
         save(
@@ -167,6 +192,10 @@ class SubscriptionViewModel @Inject constructor(
 
     fun confirmCustom() {
         val form = ui.value.custom ?: return
+        if (!state.value.canChangePlan) {
+            ui.update { it.copy(custom = null, saveError = activeLockMessage(SubscriptionPlans.CUSTOM_ID)) }
+            return
+        }
         if (!form.vestsValid || !form.ssosValid) return
         val vests = form.vestCount ?: return
         val ssos = form.ssoCount ?: return

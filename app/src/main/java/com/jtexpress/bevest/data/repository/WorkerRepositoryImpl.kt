@@ -13,6 +13,7 @@ import com.jtexpress.bevest.domain.model.calculateAgeFromBirthdate
 import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.utils.AppError
 import com.jtexpress.bevest.utils.Outcome
+import com.jtexpress.bevest.utils.Validators
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
@@ -135,10 +136,11 @@ class WorkerRepositoryImpl @Inject constructor(
             mapOf(
                 "firstName" to worker.firstName,
                 "lastName" to worker.lastName,
-                "phone" to worker.phone,
+                "phone" to Validators.formatPhoneWithCountryCode(worker.phone),
                 "birthday" to worker.birthday,
                 "age" to (worker.age ?: calculateAgeFromBirthdate(worker.birthday)),
                 "floorNumber" to worker.floorNumber,
+                "jobPosition" to worker.jobPosition,
                 "photoUrl" to worker.photoUrl,
                 "siteId" to worker.siteId,
                 "active" to worker.active,
@@ -183,10 +185,11 @@ class WorkerRepositoryImpl @Inject constructor(
     private fun Worker.toMap() = mapOf(
         "firstName" to firstName,
         "lastName" to lastName,
-        "phone" to phone,
+        "phone" to Validators.formatPhoneWithCountryCode(phone),
         "birthday" to birthday,
         "age" to (age ?: calculateAgeFromBirthdate(birthday)),
         "floorNumber" to floorNumber,
+        "jobPosition" to jobPosition,
         "photoUrl" to photoUrl,
         "contractorId" to contractorId,
         "siteId" to siteId,

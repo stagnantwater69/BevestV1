@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { FiX, FiMapPin, FiChevronRight, FiUsers, FiSearch } from 'react-icons/fi';
+import { FiX, FiMapPin, FiChevronRight, FiUsers, FiSearch, FiPhone, FiBriefcase } from 'react-icons/fi';
 import {
   TbHeartbeat, TbTemperature, TbRun, TbBattery2, TbBellRinging, TbDeviceWatch, TbBuildingFactory2, TbClockHour4,
 } from 'react-icons/tb';
@@ -10,6 +10,7 @@ import {
 import {
   PageHeader, SearchBox, FilterChips, Badge, EmptyState, ErrorState, Skeleton, IncidentRow,
 } from './ui';
+import { formatPhoneWithCountryCode } from '../PhoneInput';
 
 // WorkerFilter from WorkerDirectoryViewModel.kt, labelled as in WorkerDirectoryScreen.kt
 const FILTERS = [
@@ -33,10 +34,13 @@ const WorkerRow = ({ live, onClick }) => {
       <div className="ct-row-main">
         <span className="ct-row-title">{worker.fullName}</span>
         <span className="ct-row-sub">
-          {worker.id}{worker.siteId ? ` · Site ${worker.siteId}` : ''}
+          {worker.id}
+          {worker.jobPosition ? ` · ${worker.jobPosition}` : ''}
+          {worker.siteId ? ` · Site ${worker.siteId}` : ''}
         </span>
         <span className="ct-row-meta">
           {worker.assignedVestId ? `Vest ${worker.assignedVestId}` : 'No vest assigned'}
+          {worker.phone ? ` · ${formatPhoneWithCountryCode(worker.phone)}` : ''}
         </span>
       </div>
       <div className="ct-vitals-inline">
@@ -129,6 +133,22 @@ const WorkerDetailModal = ({ live, incidents, thresholds, now, onClose }) => {
           </div>
 
           <div className="profile-list-card">
+            {worker.jobPosition && (
+              <div className="profile-list-item">
+                <FiBriefcase className="item-icon" />
+                <div className="item-details">
+                  <span className="item-label">Job position</span>
+                  <span className="item-value">{worker.jobPosition}</span>
+                </div>
+              </div>
+            )}
+            <div className="profile-list-item">
+              <FiPhone className="item-icon" />
+              <div className="item-details">
+                <span className="item-label">Phone</span>
+                <span className="item-value">{formatPhoneWithCountryCode(worker.phone) || 'Not set'}</span>
+              </div>
+            </div>
             <div className="profile-list-item">
               <TbDeviceWatch className="item-icon" />
               <div className="item-details">

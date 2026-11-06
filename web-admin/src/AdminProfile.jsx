@@ -11,7 +11,7 @@ const AdminProfile = ({ user }) => {
     firstName: user?.profile?.firstName || 'Web',
     lastName: user?.profile?.lastName || 'Admin',
     email: user?.email || user?.profile?.email || 'testwebadmin@bevest.com',
-    phone: user?.profile?.phone || 'Not set',
+    phone: (user?.profile?.phone && user.profile.phone !== 'Not set' ? formatPhoneWithCountryCode(user.profile.phone) : '') || 'Not set',
     company: user?.profile?.company || user?.profile?.companyName || 'Bevest Enterprise'
   });
 
@@ -25,7 +25,7 @@ const AdminProfile = ({ user }) => {
             firstName: d.firstName || prev.firstName,
             lastName: d.lastName || prev.lastName,
             email: d.email || prev.email,
-            phone: d.phone || prev.phone,
+            phone: (d.phone && d.phone !== 'Not set' ? formatPhoneWithCountryCode(d.phone) : '') || prev.phone,
             company: d.company || d.companyName || prev.company
           }));
         }

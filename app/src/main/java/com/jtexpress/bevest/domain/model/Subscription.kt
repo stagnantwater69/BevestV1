@@ -146,4 +146,16 @@ data class Subscription(
 ) {
     val isCustom: Boolean get() = planId == SubscriptionPlans.CUSTOM_ID
     val currentPrice: Long get() = if (billingCycle == BillingCycle.ANNUAL) annualPrice else monthlyPrice
+
+    fun hasEnded(nowMillis: Long = System.currentTimeMillis()): Boolean =
+        status.equals("Expired", ignoreCase = true) || (renewDate != null && nowMillis >= renewDate)
+
+    fun isDowngradeTo(targetPlanId: String): Boolean = tierRank(targetPlanId) < tierRank(planId)
+
+    private fun tierRank(id: String): Int = when (id) {
+        SubscriptionPlans.BUSINESS_ID -> 1
+        SubscriptionPlans.ENTERPRISE_ID -> 2
+        SubscriptionPlans.CUSTOM_ID -> 3
+        else -> 0
+    }
 }

@@ -107,8 +107,18 @@ fun AlertDetailScreen(
                     Column {
                         DetailRow(
                             label = "Worker",
-                            value = alert.workerId,
+                            value = state.workerName?.let { "$it (${alert.workerId})" } ?: alert.workerId,
                             icon = BevestIcons.Workers,
+                        )
+                        DetailRow(
+                            label = "Site name",
+                            value = state.siteName?.takeIf { it.isNotBlank() } ?: "Not recorded",
+                            icon = BevestIcons.Location,
+                        )
+                        DetailRow(
+                            label = "Floor number",
+                            value = state.floorNumber?.takeIf { it.isNotBlank() } ?: "Not recorded",
+                            icon = BevestIcons.Location,
                         )
                         DetailRow(
                             label = "Vest",
@@ -487,8 +497,16 @@ fun IncidentDetailScreen(
                         )
                         DetailRow(
                             label = "Worker",
-                            value = incident.workerId,
+                            value = state.worker?.fullName?.takeIf { it.isNotBlank() } ?: incident.workerId,
                             icon = BevestIcons.Workers,
+                        )
+                        DetailRow(
+                            label = "Floor number",
+                            value = (incident.floorNumber?.takeIf { it.isNotBlank() }
+                                ?: state.worker?.floorNumber?.takeIf { it.isNotBlank() })
+                                ?.let { "Floor $it" }
+                                ?: "Not recorded",
+                            icon = BevestIcons.Location,
                         )
                         DetailRow(
                             label = "Vest",

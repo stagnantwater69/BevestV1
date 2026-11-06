@@ -236,7 +236,7 @@ fun ContractorSsosScreen(
                         items(state.visible, key = { it.uid }) { sso ->
                             PersonRow(
                                 name = sso.fullName.ifBlank { sso.email },
-                                email = sso.email,
+                                email = sso.email + if (sso.phone.isNotBlank()) " · ${sso.phone}" else "",
                                 supporting = state.siteName(sso.siteId),
                                 active = sso.active,
                                 onClick = { onOpen(sso.uid) },
@@ -645,7 +645,7 @@ fun MonthlyReportDetailScreen(
                     PrimaryButton(
                         text = "Export & share PDF",
                         onClick = {
-                            val file = PdfExporter.monthlyReport(context, report, state.incidents)
+                            val file = PdfExporter.monthlyReport(context, report, state.sortedIncidents)
                             PdfExporter.share(context, file)
                         },
                         icon = BevestIcons.Reports,
@@ -653,9 +653,21 @@ fun MonthlyReportDetailScreen(
 
                     SectionHeader(
                         title = "Incidents this month",
-                        supporting = "Oldest first",
+                        supporting = if (state.sortOrder == IncidentSortOrder.LATEST) {
+                            "Sorted by Latest Alert"
+                        } else {
+                            "Sorted by Oldest Alert"
+                        },
                     )
-                    if (state.incidents.isEmpty()) {
+                    FilterRow(
+                        options = listOf(
+                            FilterOption(IncidentSortOrder.LATEST.name, "Sort: Latest Alert"),
+                            FilterOption(IncidentSortOrder.OLDEST.name, "Sort: Oldest Alert"),
+                        ),
+                        selectedKey = state.sortOrder.name,
+                        onSelect = { key -> viewModel.onSortChange(IncidentSortOrder.valueOf(key)) },
+                    )
+                    if (state.sortedIncidents.isEmpty()) {
                         EmptyState(
                             title = "No incidents",
                             message = "Nothing was recorded in this period — a good month.",
@@ -663,10 +675,11 @@ fun MonthlyReportDetailScreen(
                             modifier = Modifier.heightIn(min = 200.dp),
                         )
                     } else {
-                        state.incidents.forEach { incident ->
+                        state.sortedIncidents.forEach { incident ->
                             IncidentRow(
                                 incident,
                                 workerName = state.workerNames[incident.workerId],
+                                floorNumber = incident.floorNumber ?: state.workerFloors[incident.workerId],
                                 onClick = null,
                             )
                         }
@@ -723,6 +736,14 @@ fun ContractorIncidentsScreen(
                         )
                     },
                 )
+                FilterRow(
+                    options = listOf(
+                        FilterOption(IncidentSortOrder.LATEST.name, "Sort: Latest"),
+                        FilterOption(IncidentSortOrder.OLDEST.name, "Sort: Oldest"),
+                    ),
+                    selectedKey = state.sortOrder.name,
+                    onSelect = { key -> viewModel.onSortChange(IncidentSortOrder.valueOf(key)) },
+                )
 
                 if (state.visible.isEmpty()) {
                     EmptyState(
@@ -753,6 +774,7 @@ fun ContractorIncidentsScreen(
                             IncidentRow(
                                 incident,
                                 workerName = state.workerNames[incident.workerId],
+                                floorNumber = incident.floorNumber ?: state.workerFloors[incident.workerId],
                                 onClick = { onOpenIncident(incident.incidentId) },
                             )
                         }
@@ -769,6 +791,7 @@ private fun IncidentRow(
     workerName: String?,
     onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    floorNumber: String? = incident.floorNumber,
 ) {
     val palette = LocalStatusPalette.current
     val color = when (incident.severity) {
@@ -777,6 +800,13 @@ private fun IncidentRow(
         AlertSeverity.EMERGENCY -> palette.emergency
     }
     val open = incident.resolutionNotes.isNullOrBlank() && incident.outcome.isNullOrBlank()
+    val effectiveFloor = floorNumber?.takeIf { it.isNotBlank() } ?: incident.floorNumber?.takeIf { it.isNotBlank() }
+    val workerLabel = buildString {
+        append(workerName ?: "Worker ${incident.workerId}")
+        if (effectiveFloor != null) {
+            append(" · Floor $effectiveFloor")
+        }
+    }
 
     Surface(
         modifier = modifier
@@ -818,7 +848,7 @@ private fun IncidentRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    workerName ?: "Worker ${incident.workerId}",
+                    workerLabel,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

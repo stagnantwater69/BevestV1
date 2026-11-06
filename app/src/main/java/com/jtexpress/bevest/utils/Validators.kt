@@ -27,6 +27,43 @@ object Validators {
         else -> null
     }
 
+    /**
+     * Formats any non-blank phone number so that it always includes the country code (default +63).
+     * Strips any leading '0' from local numbers when using '+63' (e.g. "09171234567" -> "+63 9171234567").
+     */
+    fun formatPhoneWithCountryCode(raw: String?, defaultCode: String = "+63"): String {
+        val clean = raw?.trim().orEmpty()
+        if (clean.isEmpty() || clean.equals("Not set", ignoreCase = true) || clean == "--") return ""
+        if (clean.startsWith("+")) {
+            val rest = clean.removePrefix(defaultCode).trim()
+            if (clean.startsWith(defaultCode) && rest.isNotEmpty()) {
+                val normalizedLocal = if (defaultCode == "+63") rest.trimStart('0').trim() else rest
+                return if (normalizedLocal.isNotEmpty()) "$defaultCode $normalizedLocal" else ""
+            }
+            return clean
+        }
+        val local = if (defaultCode == "+63") clean.trimStart('0').trim() else clean
+        return if (local.isNotEmpty()) "$defaultCode $local" else ""
+    }
+
+    /**
+     * Extracts the local subscriber number without the country code prefix for display inside
+     * a phone input field that already renders a fixed country code prefix.
+     */
+    fun stripCountryCode(raw: String?, defaultCode: String = "+63"): String {
+        val clean = raw?.trim().orEmpty()
+        if (clean.isEmpty() || clean.equals("Not set", ignoreCase = true) || clean == "--") return ""
+        if (clean.startsWith(defaultCode)) {
+            val rest = clean.removePrefix(defaultCode).trim()
+            return if (defaultCode == "+63") rest.trimStart('0').trim() else rest
+        }
+        if (clean.startsWith("+")) {
+            val spaceIdx = clean.indexOf(' ')
+            if (spaceIdx > 0) return clean.substring(spaceIdx + 1).trim()
+        }
+        return if (defaultCode == "+63") clean.trimStart('0').trim() else clean
+    }
+
     fun workerId(value: String): String? = when {
         value.isBlank() -> "Worker ID is required"
         !Regex("^[A-Za-z0-9-]{3,20}$").matches(value.trim()) -> "3-20 letters, numbers or dashes"

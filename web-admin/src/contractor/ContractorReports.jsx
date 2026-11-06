@@ -16,6 +16,11 @@ const useNameById = (workers) => useMemo(
   [workers],
 );
 
+const useFloorById = (workers) => useMemo(
+  () => Object.fromEntries(workers.filter((w) => w.floorNumber).map((w) => [w.id, w.floorNumber])),
+  [workers],
+);
+
 // ------------------------------------------------------------------- reports
 
 /** Port of ContractorReportsScreen. */
@@ -113,13 +118,14 @@ const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
 }[c]));
 
 /** Web stand-in for PdfExporter.monthlyReport — opens a print-ready page (Save as PDF). */
-const exportReportPdf = (report, incidents, nameById, contractorName) => {
+const exportReportPdf = (report, incidents, nameById, floorById, contractorName) => {
   const rows = incidents.map((i) => `
     <tr>
       <td>${escapeHtml(formatDateTime(i.createdAt))}</td>
       <td>${escapeHtml(ALERT_TYPE_LABEL[i.type] || i.type)}</td>
       <td>${escapeHtml(SEVERITY_LABEL[i.severity] || i.severity)}</td>
       <td>${escapeHtml(nameById[i.workerId] || i.workerId)}</td>
+      <td>${escapeHtml(i.floorNumber || floorById[i.workerId] || '—')}</td>
       <td>${escapeHtml(i.resolutionNotes || i.outcome || 'Open')}</td>
     </tr>`).join('');
 
@@ -146,7 +152,7 @@ const exportReportPdf = (report, incidents, nameById, contractorName) => {
       <div class="tile"><b>${report.warningCount} / ${report.dangerCount} / ${report.emergencyCount}</b><span class="muted">Warning / Danger / Emergency</span></div>
     </div>
     <h3>Incidents this month</h3>
-    ${incidents.length ? `<table><thead><tr><th>Date</th><th>Type</th><th>Severity</th><th>Worker</th><th>Resolution Notes</th></tr></thead><tbody>${rows}</tbody></table>`
+    ${incidents.length ? `<table><thead><tr><th>Date</th><th>Type</th><th>Severity</th><th>Worker</th><th>Floor</th><th>Resolution Notes</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<p class="muted">Nothing was recorded in this period — a good month.</p>'}
     <script>window.onload=function(){window.print();}</script>
     </body></html>`;
@@ -165,6 +171,9 @@ const exportReportPdf = (report, incidents, nameById, contractorName) => {
 export const MonthlyReportDetail = ({ data, monthKey, contractorName, onBack }) => {
   const { loading, error, workers, incidents } = data;
   const nameById = useNameById(workers);
+  const floorById = useFloorById(workers);
+  const [sortBy, setSortBy] = useState('LATEST'); // 'LATEST' | 'OLDEST'
+  const [openId, setOpenId] = useState(null);
 
   const report = useMemo(
     () => buildMonthlyReports(incidents, workers.filter((w) => w.active).length, 12)
@@ -172,9 +181,12 @@ export const MonthlyReportDetail = ({ data, monthKey, contractorName, onBack }) 
     [incidents, workers, monthKey],
   );
   const monthIncidents = useMemo(
-    () => incidents.filter((i) => toMonthKey(i.createdAt) === monthKey).sort((a, b) => a.createdAt - b.createdAt),
-    [incidents, monthKey],
+    () => incidents
+      .filter((i) => toMonthKey(i.createdAt) === monthKey)
+      .sort((a, b) => (sortBy === 'OLDEST' ? a.createdAt - b.createdAt : b.createdAt - a.createdAt)),
+    [incidents, monthKey, sortBy],
   );
+  const openIncident = monthIncidents.find((i) => i.id === openId);
 
   const header = (
     <PageHeader
@@ -185,7 +197,7 @@ export const MonthlyReportDetail = ({ data, monthKey, contractorName, onBack }) 
         <button
           id="ct-export-pdf"
           className="btn-primary"
-          onClick={() => exportReportPdf(report, monthIncidents, nameById, contractorName)}
+          onClick={() => exportReportPdf(report, monthIncidents, nameById, floorById, contractorName)}
         >
           <FiDownload /> Export PDF
         </button>
@@ -228,13 +240,57 @@ export const MonthlyReportDetail = ({ data, monthKey, contractorName, onBack }) 
         />
       </div>
 
-      <SectionHeader title="Incidents this month" supporting="Oldest first" />
+      <SectionHeader
+        title="Incidents this month"
+        supporting={sortBy === 'LATEST' ? 'Sorted by Latest Alert' : 'Sorted by Oldest Alert'}
+        trailing={(
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <label htmlFor="ct-report-sort" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>
+              Sort by:
+            </label>
+            <select
+              id="ct-report-sort"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              style={{
+                padding: '0.4rem 0.75rem',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                backgroundColor: '#ffffff',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                color: '#0f172a',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="LATEST">Latest Alert</option>
+              <option value="OLDEST">Oldest Alert</option>
+            </select>
+          </div>
+        )}
+      />
       {monthIncidents.length === 0 ? (
         <EmptyState icon={FiCheckCircle} title="No incidents" message="Nothing was recorded in this period — a good month." />
       ) : (
         <div className="ct-list">
-          {monthIncidents.map((i) => <IncidentRow key={i.id} incident={i} workerName={nameById[i.workerId]} />)}
+          {monthIncidents.map((i) => (
+            <IncidentRow
+              key={i.id}
+              incident={i}
+              workerName={nameById[i.workerId]}
+              floorNumber={i.floorNumber || floorById[i.workerId]}
+              onClick={() => setOpenId(i.id)}
+            />
+          ))}
         </div>
+      )}
+      {openIncident && (
+        <IncidentDetailModal
+          incident={openIncident}
+          workerName={nameById[openIncident.workerId]}
+          floorNumber={openIncident.floorNumber || floorById[openIncident.workerId]}
+          onClose={() => setOpenId(null)}
+        />
       )}
     </>
   );
@@ -249,12 +305,13 @@ const DetailItem = ({ label, value }) => (
   </div>
 );
 
-const IncidentDetailModal = ({ incident, workerName, onClose }) => {
+const IncidentDetailModal = ({ incident, workerName, floorNumber, onClose }) => {
   const color = SEVERITY_COLOR[incident.severity];
   const Icon = ALERT_TYPE_ICON[incident.type] || FiClock;
   const hasLocation = incident.latitude != null && incident.longitude != null;
   const isClosed = Boolean(incident.resolved || incident.resolutionNotes || incident.outcome);
   const resolutionNotesText = incident.resolutionNotes || incident.outcome;
+  const effectiveFloor = floorNumber || incident.floorNumber;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -276,6 +333,7 @@ const IncidentDetailModal = ({ incident, workerName, onClose }) => {
           </div>
           <div className="ct-detail-grid">
             <DetailItem label="Worker" value={workerName || incident.workerId} />
+            <DetailItem label="Floor number" value={effectiveFloor ? `Floor ${effectiveFloor}` : '—'} />
             <DetailItem label="Vest" value={incident.vestId || '—'} />
             <DetailItem label="Heart rate" value={incident.heartRate != null ? `${incident.heartRate} bpm` : '—'} />
             <DetailItem label="Temperature" value={incident.temperature != null ? `${incident.temperature.toFixed(1)} °C` : '—'} />
@@ -308,17 +366,24 @@ const IncidentDetailModal = ({ incident, workerName, onClose }) => {
 export const IncidentHistory = ({ data, onBack }) => {
   const { loading, error, workers, incidents } = data;
   const nameById = useNameById(workers);
+  const floorById = useFloorById(workers);
   const [severity, setSeverity] = useState('ALL');
+  const [sortBy, setSortBy] = useState('LATEST'); // 'LATEST' | 'OLDEST'
   const [openId, setOpenId] = useState(null);
 
-  const visible = incidents.filter((i) => severity === 'ALL' || i.severity === severity);
+  const visible = useMemo(() => (
+    incidents
+      .filter((i) => severity === 'ALL' || i.severity === severity)
+      .slice()
+      .sort((a, b) => (sortBy === 'OLDEST' ? a.createdAt - b.createdAt : b.createdAt - a.createdAt))
+  ), [incidents, severity, sortBy]);
   const open = incidents.find((i) => i.id === openId);
 
   const header = (
     <PageHeader
       breadcrumb={[{ label: 'Reports', onClick: onBack }, { label: 'Incident history' }]}
       title="Incident history"
-      subtitle="Every recorded incident across your sites, newest first."
+      subtitle={`Every recorded incident across your sites, sorted by ${sortBy === 'LATEST' ? 'latest' : 'oldest'} first.`}
     />
   );
 
@@ -328,19 +393,44 @@ export const IncidentHistory = ({ data, onBack }) => {
   return (
     <>
       {header}
-      <FilterChips
-        options={[
-          { key: 'ALL', label: 'All', count: incidents.length },
-          ...['WARNING', 'DANGER', 'EMERGENCY'].map((s) => ({
-            key: s,
-            label: SEVERITY_LABEL[s],
-            count: incidents.filter((i) => i.severity === s).length,
-            accent: SEVERITY_COLOR[s],
-          })),
-        ]}
-        selected={severity}
-        onSelect={setSeverity}
-      />
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.5rem' }}>
+        <FilterChips
+          options={[
+            { key: 'ALL', label: 'All', count: incidents.length },
+            ...['WARNING', 'DANGER', 'EMERGENCY'].map((s) => ({
+              key: s,
+              label: SEVERITY_LABEL[s],
+              count: incidents.filter((i) => i.severity === s).length,
+              accent: SEVERITY_COLOR[s],
+            })),
+          ]}
+          selected={severity}
+          onSelect={setSeverity}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <label htmlFor="ct-history-sort" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>
+            Sort by:
+          </label>
+          <select
+            id="ct-history-sort"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            style={{
+              padding: '0.4rem 0.75rem',
+              borderRadius: '8px',
+              border: '1px solid #cbd5e1',
+              backgroundColor: '#ffffff',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              color: '#0f172a',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="LATEST">Latest</option>
+            <option value="OLDEST">Oldest</option>
+          </select>
+        </div>
+      </div>
       {visible.length === 0 ? (
         <EmptyState
           icon={FiClock}
@@ -352,11 +442,24 @@ export const IncidentHistory = ({ data, onBack }) => {
       ) : (
         <div className="ct-list">
           {visible.map((i) => (
-            <IncidentRow key={i.id} incident={i} workerName={nameById[i.workerId]} onClick={() => setOpenId(i.id)} />
+            <IncidentRow
+              key={i.id}
+              incident={i}
+              workerName={nameById[i.workerId]}
+              floorNumber={i.floorNumber || floorById[i.workerId]}
+              onClick={() => setOpenId(i.id)}
+            />
           ))}
         </div>
       )}
-      {open && <IncidentDetailModal incident={open} workerName={nameById[open.workerId]} onClose={() => setOpenId(null)} />}
+      {open && (
+        <IncidentDetailModal
+          incident={open}
+          workerName={nameById[open.workerId]}
+          floorNumber={open.floorNumber || floorById[open.workerId]}
+          onClose={() => setOpenId(null)}
+        />
+      )}
     </>
   );
 };

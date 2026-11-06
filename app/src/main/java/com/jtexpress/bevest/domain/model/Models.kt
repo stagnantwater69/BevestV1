@@ -49,6 +49,23 @@ data class User(
     val fullName: String get() = listOf(firstName, lastName).filter { it.isNotBlank() }.joinToString(" ")
 }
 
+val WORKER_JOB_POSITIONS = listOf(
+    "General Laborer",
+    "Carpenter",
+    "Electrician",
+    "Mason",
+    "Plumber",
+    "Welder",
+    "Steelman / Rebar Worker",
+    "Painter",
+    "Heavy Equipment Operator",
+    "Scaffolder",
+    "Foreman",
+    "Site Engineer",
+    "Safety Assistant",
+    "Other",
+)
+
 data class Worker(
     val workerId: String = "",
     val firstName: String = "",
@@ -57,6 +74,7 @@ data class Worker(
     val birthday: String? = null,
     val age: Int? = null,
     val floorNumber: String? = null,
+    val jobPosition: String? = null,
     val photoUrl: String? = null,
     val contractorId: String? = null,
     val siteId: String? = null,
@@ -109,6 +127,9 @@ data class Alert(
     val alertId: String = "",
     val workerId: String = "",
     val vestId: String = "",
+    val siteId: String? = null,
+    val siteName: String? = null,
+    val floorNumber: String? = null,
     val type: AlertType = AlertType.VEST_OFFLINE,
     val severity: AlertSeverity = AlertSeverity.WARNING,
     val status: AlertStatus = AlertStatus.ACTIVE,
@@ -125,6 +146,9 @@ data class Incident(
     val workerId: String = "",
     val vestId: String = "",
     val alertId: String? = null,
+    val siteId: String? = null,
+    val siteName: String? = null,
+    val floorNumber: String? = null,
     val type: AlertType = AlertType.VEST_OFFLINE,
     val severity: AlertSeverity = AlertSeverity.DANGER,
     val heartRate: Int? = null,

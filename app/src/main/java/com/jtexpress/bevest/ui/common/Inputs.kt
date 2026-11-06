@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -41,6 +42,7 @@ import com.jtexpress.bevest.ui.theme.IconSize
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Motion
 import com.jtexpress.bevest.ui.theme.Spacing
+import com.jtexpress.bevest.utils.Validators
 
 /**
  * Search input.
@@ -190,13 +192,39 @@ fun FormField(
     val palette = LocalStatusPalette.current
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val isPhone = keyboardType == KeyboardType.Phone
+    val displayValue = if (isPhone) Validators.stripCountryCode(value) else value
 
     OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
+        value = displayValue,
+        onValueChange = { next ->
+            if (isPhone) {
+                val local = Validators.stripCountryCode(next)
+                onValueChange(if (local.isEmpty()) "" else "+63 $local")
+            } else {
+                onValueChange(next)
+            }
+        },
         enabled = enabled,
         label = {
             Text(if (required) "$label *" else label)
+        },
+        prefix = if (isPhone) {
+            {
+                Text(
+                    text = "+63 ",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            null
+        },
+        placeholder = if (isPhone) {
+            { Text("917 123 4567") }
+        } else {
+            null
         },
         isError = error != null,
         supportingText = when {

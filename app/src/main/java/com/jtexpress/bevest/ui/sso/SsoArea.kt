@@ -262,6 +262,24 @@ private fun FallDetectedPopupDialog(
                         color = Color.White.copy(alpha = 0.9f),
                         textAlign = TextAlign.Center,
                     )
+                    if (!popup.siteName.isNullOrBlank() || !popup.floorNumber.isNullOrBlank()) {
+                        Spacer(Modifier.height(Spacing.xs))
+                        Text(
+                            text = buildString {
+                                if (!popup.siteName.isNullOrBlank()) {
+                                    append("Site: ${popup.siteName}")
+                                }
+                                if (!popup.floorNumber.isNullOrBlank()) {
+                                    if (isNotEmpty()) append(" • ")
+                                    append("Floor: ${popup.floorNumber}")
+                                }
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                     Spacer(Modifier.height(Spacing.sm))
                     Text(
                         text = when {

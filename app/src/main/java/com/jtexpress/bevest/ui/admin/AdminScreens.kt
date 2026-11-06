@@ -382,7 +382,7 @@ fun AdminUsersScreen(
                         items(state.visible, key = { it.uid }) { u ->
                             PersonRow(
                                 name = u.fullName.ifBlank { u.email },
-                                email = u.email,
+                                email = u.email + if (u.phone.isNotBlank()) " · ${u.phone}" else "",
                                 supporting = u.role.label(),
                                 active = u.active,
                                 trailing = {

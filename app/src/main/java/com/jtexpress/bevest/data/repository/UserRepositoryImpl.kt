@@ -12,6 +12,7 @@ import com.jtexpress.bevest.domain.model.UserRole
 import com.jtexpress.bevest.domain.repository.UserRepository
 import com.jtexpress.bevest.utils.AppError
 import com.jtexpress.bevest.utils.Outcome
+import com.jtexpress.bevest.utils.Validators
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -67,7 +68,7 @@ class UserRepositoryImpl @Inject constructor(
                 "firstName" to user.firstName,
                 "lastName" to user.lastName,
                 "email" to user.email,
-                "phone" to user.phone,
+                "phone" to Validators.formatPhoneWithCountryCode(user.phone),
                 "role" to user.role.name,
                 "contractorId" to user.contractorId,
                 "siteId" to user.siteId,
@@ -116,7 +117,11 @@ class UserRepositoryImpl @Inject constructor(
         phone: String,
     ): Outcome<Unit> = try {
         users.document(uid).update(
-            mapOf("firstName" to firstName, "lastName" to lastName, "phone" to phone),
+            mapOf(
+                "firstName" to firstName,
+                "lastName" to lastName,
+                "phone" to Validators.formatPhoneWithCountryCode(phone),
+            ),
         ).await()
         Outcome.Success(Unit)
     } catch (e: Exception) {
@@ -134,7 +139,7 @@ class UserRepositoryImpl @Inject constructor(
             mapOf(
                 "firstName" to firstName,
                 "lastName" to lastName,
-                "phone" to phone,
+                "phone" to Validators.formatPhoneWithCountryCode(phone),
                 "siteId" to siteId,
             ),
         ).await()

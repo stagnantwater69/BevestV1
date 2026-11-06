@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.Cake
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.WorkOutline
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -285,11 +286,18 @@ fun WorkerDetailScreen(
                     )
 
                     // ---- Worker Info ----
-                    if (!worker.birthday.isNullOrBlank() || worker.effectiveAge != null || !worker.floorNumber.isNullOrBlank() || worker.phone.isNotBlank()) {
+                    if (!worker.jobPosition.isNullOrBlank() || !worker.birthday.isNullOrBlank() || worker.effectiveAge != null || !worker.floorNumber.isNullOrBlank() || worker.phone.isNotBlank()) {
                         SectionHeader(
                             title = "Worker details",
                             supporting = "Profile and work assignment information",
                         )
+                        if (!worker.jobPosition.isNullOrBlank()) {
+                            DetailRow(
+                                label = "Job position",
+                                value = worker.jobPosition,
+                                icon = Icons.Outlined.WorkOutline,
+                            )
+                        }
                         if (worker.phone.isNotBlank()) {
                             DetailRow(
                                 label = "Phone",
@@ -583,14 +591,6 @@ private fun VitalSignsCombinedCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (age != null) {
-                    Text(
-                        text = "Age $age",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
             }
         }
     }

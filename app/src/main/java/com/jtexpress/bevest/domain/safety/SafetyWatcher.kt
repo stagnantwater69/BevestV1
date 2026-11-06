@@ -41,6 +41,8 @@ data class FallPopupState(
     val alert: Alert,
     val workerName: String,
     val vestId: String?,
+    val siteName: String? = null,
+    val floorNumber: String? = null,
 )
 
 /**
@@ -97,8 +99,22 @@ class SafetyWatcher @Inject constructor(
     /** Alert IDs whose pop-up was dismissed at the given severity. */
     private val dismissedPopups = mutableMapOf<String, AlertSeverity>()
 
+    /** Cached siteId -> siteName from Firestore `projects` collection. */
+    private val siteNamesCache = mutableMapOf<String, String>()
+
     private val _fallPopup = MutableStateFlow<FallPopupState?>(null)
     val fallPopup: StateFlow<FallPopupState?> = _fallPopup.asStateFlow()
+
+    private suspend fun resolveSiteName(siteId: String?): String? {
+        val clean = siteId?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        siteNamesCache[clean]?.let { return it }
+        val fetched = runCatching {
+            firestore.collection(FirebasePaths.PROJECTS).document(clean).get().await()
+                .getString("name")?.trim()?.takeIf { it.isNotBlank() }
+        }.getOrNull() ?: clean
+        siteNamesCache[clean] = fetched
+        return fetched
+    }
 
     fun start(siteId: String?) {
         if (siteId == watchingSite && jobs.isNotEmpty()) return
@@ -320,6 +336,7 @@ class SafetyWatcher @Inject constructor(
      * multiple alerts.
      */
     private suspend fun openFallAlert(worker: Worker, reading: SensorReading) {
+        val siteName = resolveSiteName(worker.siteId)
         val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
         val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
         val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alertRef.id)
@@ -341,7 +358,9 @@ class SafetyWatcher @Inject constructor(
                 mapOf(
                     "workerId" to worker.workerId,
                     "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
+                    "siteName" to siteName,
                     "contractorId" to worker.contractorId,
                     "type" to AlertType.FALL_DETECTED.name,
                     "severity" to AlertSeverity.DANGER.name,
@@ -356,7 +375,9 @@ class SafetyWatcher @Inject constructor(
                 mapOf(
                     "workerId" to worker.workerId,
                     "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
+                    "siteName" to siteName,
                     "contractorId" to worker.contractorId,
                     "type" to AlertType.FALL_DETECTED.name,
                     "severity" to AlertSeverity.DANGER.name,
@@ -380,6 +401,7 @@ class SafetyWatcher @Inject constructor(
      * Message from the vest: "Worker Trigger. Please check with Worker."
      */
     private suspend fun openWorkerTriggerAlert(worker: Worker, reading: SensorReading) {
+        val siteName = resolveSiteName(worker.siteId)
         val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
         val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
         val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alertRef.id)
@@ -401,7 +423,9 @@ class SafetyWatcher @Inject constructor(
                 mapOf(
                     "workerId" to worker.workerId,
                     "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
+                    "siteName" to siteName,
                     "contractorId" to worker.contractorId,
                     "type" to AlertType.EMERGENCY_REQUEST.name,
                     "severity" to AlertSeverity.EMERGENCY.name,
@@ -416,7 +440,9 @@ class SafetyWatcher @Inject constructor(
                 mapOf(
                     "workerId" to worker.workerId,
                     "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
+                    "siteName" to siteName,
                     "contractorId" to worker.contractorId,
                     "type" to AlertType.EMERGENCY_REQUEST.name,
                     "severity" to AlertSeverity.EMERGENCY.name,
@@ -439,6 +465,7 @@ class SafetyWatcher @Inject constructor(
      * to an initiated safety response check.
      */
     private suspend fun openNoSafetyResponseAlert(worker: Worker, reading: SensorReading) {
+        val siteName = resolveSiteName(worker.siteId)
         val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
         val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
         val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alertRef.id)
@@ -460,7 +487,9 @@ class SafetyWatcher @Inject constructor(
                 mapOf(
                     "workerId" to worker.workerId,
                     "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
+                    "siteName" to siteName,
                     "contractorId" to worker.contractorId,
                     "type" to AlertType.NO_SAFETY_RESPONSE.name,
                     "severity" to AlertSeverity.EMERGENCY.name,
@@ -475,7 +504,9 @@ class SafetyWatcher @Inject constructor(
                 mapOf(
                     "workerId" to worker.workerId,
                     "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
+                    "siteName" to siteName,
                     "contractorId" to worker.contractorId,
                     "type" to AlertType.NO_SAFETY_RESPONSE.name,
                     "severity" to AlertSeverity.EMERGENCY.name,
@@ -510,6 +541,7 @@ class SafetyWatcher @Inject constructor(
                 mapOf(
                     "workerId" to worker.workerId,
                     "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
                     "contractorId" to worker.contractorId,
                     "type" to AlertType.FALL_DETECTED.name,
@@ -557,6 +589,7 @@ class SafetyWatcher @Inject constructor(
             .collect { (alertsOutcome, workersOutcome) ->
                 val alerts = (alertsOutcome as? Outcome.Success)?.data ?: return@collect
                 val workerList = (workersOutcome as? Outcome.Success)?.data.orEmpty()
+                val workersById = workerList.associateBy { it.workerId }
                 val names = workerList.associate { it.workerId to it.fullName.ifBlank { "Worker ${it.workerId}" } }
                 val workerVests = workerList.associate { it.workerId to it.assignedVestId }
 
@@ -612,10 +645,17 @@ class SafetyWatcher @Inject constructor(
                         (dismissedPopups[alert.alertId]?.let { alert.severity.ordinal > it.ordinal } ?: true)
                 }
                 _fallPopup.value = activePopupAlert?.let { alert ->
+                    val w = workersById[alert.workerId]
+                    val resolvedSiteName = alert.siteName?.takeIf { it.isNotBlank() }
+                        ?: resolveSiteName(alert.siteId ?: w?.siteId ?: targetSite)
+                    val resolvedFloor = alert.floorNumber?.takeIf { it.isNotBlank() }
+                        ?: w?.floorNumber?.takeIf { it.isNotBlank() }
                     FallPopupState(
                         alert = alert,
                         workerName = names[alert.workerId] ?: "Worker ${alert.workerId}",
                         vestId = alert.vestId.ifBlank { workerVests[alert.workerId] },
+                        siteName = resolvedSiteName,
+                        floorNumber = resolvedFloor,
                     )
                 }
 

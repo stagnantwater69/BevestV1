@@ -244,10 +244,12 @@ class AddUserViewModel @Inject constructor(
 
     fun submit(actorId: String) {
         val s = state.value
+        val formattedPhone = Validators.formatPhoneWithCountryCode(s.phone)
         val errors = buildMap {
             Validators.required(s.firstName, "First name")?.let { put("firstName", it) }
             Validators.required(s.lastName, "Last name")?.let { put("lastName", it) }
             Validators.email(s.email)?.let { put("email", it) }
+            Validators.phone(formattedPhone, required = false)?.let { put("phone", it) }
             Validators.password(s.tempPassword)?.let { put("tempPassword", it) }
             if (s.role == UserRole.SSO && s.contractorId.isNullOrBlank()) {
                 put("contractorId", "Choose the contractor this officer reports to")
@@ -261,7 +263,7 @@ class AddUserViewModel @Inject constructor(
                 tempPassword = s.tempPassword,
                 firstName = s.firstName,
                 lastName = s.lastName,
-                phone = s.phone,
+                phone = formattedPhone,
                 role = s.role,
                 contractorId = if (s.role == UserRole.SSO) s.contractorId else null,
                 siteId = null,

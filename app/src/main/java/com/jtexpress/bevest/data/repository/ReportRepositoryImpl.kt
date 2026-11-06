@@ -94,18 +94,20 @@ class ReportRepositoryImpl @Inject constructor(
             val list = qs.documents.map { doc ->
                 val inc = doc.toIncident()
                 val matchingAlert = alertsById[inc.alertId ?: inc.incidentId] ?: alertsById[inc.incidentId]
+                val effectiveFloor = inc.floorNumber ?: matchingAlert?.floorNumber
                 if (matchingAlert != null && matchingAlert.status == AlertStatus.RESOLVED) {
                     val mergedNotes = inc.resolutionNotes?.takeIf { it.isNotBlank() }
                         ?: matchingAlert.resolutionNotes?.takeIf { it.isNotBlank() }
                         ?: inc.outcome?.takeIf { it.isNotBlank() }
                         ?: "Resolved"
                     inc.copy(
+                        floorNumber = effectiveFloor,
                         outcome = mergedNotes,
                         resolutionNotes = mergedNotes,
                         resolvedBy = inc.resolvedBy ?: matchingAlert.resolvedBy,
                     )
                 } else {
-                    inc
+                    inc.copy(floorNumber = effectiveFloor)
                 }
             }
             Outcome.Success(list) as Outcome<List<Incident>>

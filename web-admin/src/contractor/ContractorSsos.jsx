@@ -118,7 +118,9 @@ const ContractorSsos = ({ contractorId, onAdd, onOpen, onBack, backLabel = 'Dash
 
               <div className="ct-row-main">
                 <span className="ct-row-title">{sso.fullName || sso.email}</span>
-                <span className="ct-row-sub">{sso.email}</span>
+                <span className="ct-row-sub">
+                  {sso.email}{sso.phone ? ` · ${formatPhoneWithCountryCode(sso.phone)}` : ''}
+                </span>
                 <span className="ct-row-meta">
                   {siteLabel(sites, sso.siteId)}
                 </span>

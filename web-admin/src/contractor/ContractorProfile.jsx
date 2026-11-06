@@ -136,7 +136,7 @@ const ContractorProfile = ({ user, profile, onProfileChange }) => {
               <FiPhone className="item-icon" />
               <div className="item-details">
                 <span className="item-label">Phone</span>
-                <span className="item-value">{profile.phone || 'Not set'}</span>
+                <span className="item-value">{formatPhoneWithCountryCode(profile.phone) || 'Not set'}</span>
               </div>
             </div>
             <div className="profile-list-item">

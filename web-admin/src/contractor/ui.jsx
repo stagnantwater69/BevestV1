@@ -179,10 +179,12 @@ export const FilterChips = ({ options, selected, onSelect }) => (
   </div>
 );
 
-export const IncidentRow = ({ incident, onClick, workerName }) => {
+export const IncidentRow = ({ incident, onClick, workerName, floorNumber }) => {
   const color = SEVERITY_COLOR[incident.severity] || STATUS_COLOR.WARNING;
   const Icon = ALERT_TYPE_ICON[incident.type] || TbWifiOff;
   const open = !(incident.resolved || incident.resolutionNotes || incident.outcome);
+  const floor = floorNumber || incident.floorNumber;
+  const subLabel = `${workerName || `Worker ${incident.workerId}`}${floor ? ` · Floor ${floor}` : ''}`;
   return (
     <div
       className={`ct-row ${onClick ? 'clickable' : ''}`}
@@ -193,7 +195,7 @@ export const IncidentRow = ({ incident, onClick, workerName }) => {
       <div className="ct-row-icon" style={{ '--accent': color }}><Icon /></div>
       <div className="ct-row-main">
         <span className="ct-row-title">{ALERT_TYPE_LABEL[incident.type] || incident.type}</span>
-        <span className="ct-row-sub">{workerName || `Worker ${incident.workerId}`}</span>
+        <span className="ct-row-sub">{subLabel}</span>
         <span className="ct-row-meta">{formatDateTime(incident.createdAt)}</span>
       </div>
       <Badge text={open ? 'Open' : 'Closed'} color={open ? STATUS_COLOR.WARNING : STATUS_COLOR.NORMAL} />

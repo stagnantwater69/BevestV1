@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.WorkOutline
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -56,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.domain.model.UserRole
+import com.jtexpress.bevest.domain.model.WORKER_JOB_POSITIONS
 import com.jtexpress.bevest.ui.common.BevestScaffold
 import com.jtexpress.bevest.ui.common.ConfirmationDialog
 import com.jtexpress.bevest.ui.common.DangerButton
@@ -256,6 +258,11 @@ fun AddEditWorkerScreen(
                         keyboardType = KeyboardType.Text,
                         imeAction = ImeAction.Done,
                     )
+
+                    JobPositionPicker(
+                        selectedPosition = state.jobPosition,
+                        onSelect = viewModel::onJobPosition,
+                    )
                 }
 
                 // ---- Project / site ----
@@ -376,6 +383,56 @@ private fun WorkerIdBadge(id: String, generated: Boolean) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun JobPositionPicker(
+    selectedPosition: String,
+    onSelect: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val options = remember(selectedPosition) {
+        if (selectedPosition.isNotBlank() && selectedPosition !in WORKER_JOB_POSITIONS) {
+            listOf(selectedPosition) + WORKER_JOB_POSITIONS
+        } else {
+            WORKER_JOB_POSITIONS
+        }
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+    ) {
+        OutlinedTextField(
+            value = selectedPosition.ifBlank { "Select job position" },
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Job position") },
+            leadingIcon = { Icon(Icons.Outlined.WorkOutline, contentDescription = null) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            shape = RoundedCornerShape(Radius.md),
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { position ->
+                DropdownMenuItem(
+                    text = { Text(position, style = MaterialTheme.typography.bodyLarge) },
+                    trailingIcon = {
+                        if (position == selectedPosition) {
+                            Icon(Icons.Outlined.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        }
+                    },
+                    onClick = {
+                        onSelect(position)
+                        expanded = false
+                    },
+                )
+            }
         }
     }
 }

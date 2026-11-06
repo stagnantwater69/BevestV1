@@ -128,12 +128,15 @@ class AlertRepositoryImpl @Inject constructor(
                 if (!existingInc.exists() && snap.exists()) {
                     updatePayload["workerId"] = snap.getString("workerId").orEmpty()
                     updatePayload["vestId"] = snap.getString("vestId").orEmpty()
+                    updatePayload["floorNumber"] = snap.getString("floorNumber")
                     updatePayload["siteId"] = snap.getString("siteId")
                     updatePayload["contractorId"] = snap.getString("contractorId")
                     updatePayload["type"] = snap.getString("type") ?: AlertType.FALL_DETECTED.name
                     updatePayload["severity"] = snap.getString("severity") ?: AlertSeverity.DANGER.name
                     updatePayload["alertId"] = alertId
                     updatePayload["createdAt"] = snap.get("createdAt") ?: System.currentTimeMillis()
+                } else if (snap.exists() && !snap.getString("floorNumber").isNullOrBlank()) {
+                    updatePayload["floorNumber"] = snap.getString("floorNumber")
                 }
                 incidentRef.set(updatePayload, SetOptions.merge()).await()
 
@@ -184,18 +187,20 @@ class AlertRepositoryImpl @Inject constructor(
             val list = qs.documents.map { doc ->
                 val inc = doc.toIncident()
                 val matchingAlert = alertsById[inc.alertId ?: inc.incidentId] ?: alertsById[inc.incidentId]
+                val effectiveFloor = inc.floorNumber ?: matchingAlert?.floorNumber
                 if (matchingAlert != null && matchingAlert.status == AlertStatus.RESOLVED) {
                     val mergedNotes = inc.resolutionNotes?.takeIf { it.isNotBlank() }
                         ?: matchingAlert.resolutionNotes?.takeIf { it.isNotBlank() }
                         ?: inc.outcome?.takeIf { it.isNotBlank() }
                         ?: "Resolved"
                     inc.copy(
+                        floorNumber = effectiveFloor,
                         outcome = mergedNotes,
                         resolutionNotes = mergedNotes,
                         resolvedBy = inc.resolvedBy ?: matchingAlert.resolvedBy,
                     )
                 } else {
-                    inc
+                    inc.copy(floorNumber = effectiveFloor)
                 }
             }
             Outcome.Success(list) as Outcome<List<Incident>>
@@ -215,6 +220,7 @@ class AlertRepositoryImpl @Inject constructor(
                 val matchingAlert = directAlert ?: inc.alertId?.takeIf { it.isNotBlank() && it != incidentId }?.let { aId ->
                     runCatching { alerts.document(aId).get().await() }.getOrNull()?.takeIf { it.exists() }?.toAlert()
                 }
+                val effectiveFloor = inc.floorNumber ?: matchingAlert?.floorNumber
                 if (matchingAlert != null && matchingAlert.status == AlertStatus.RESOLVED) {
                     val mergedNotes = inc.resolutionNotes?.takeIf { it.isNotBlank() }
                         ?: matchingAlert.resolutionNotes?.takeIf { it.isNotBlank() }
@@ -222,13 +228,14 @@ class AlertRepositoryImpl @Inject constructor(
                         ?: "Resolved"
                     Outcome.Success(
                         inc.copy(
+                            floorNumber = effectiveFloor,
                             outcome = mergedNotes,
                             resolutionNotes = mergedNotes,
                             resolvedBy = inc.resolvedBy ?: matchingAlert.resolvedBy,
                         ),
                     )
                 } else {
-                    Outcome.Success(inc)
+                    Outcome.Success(inc.copy(floorNumber = effectiveFloor))
                 }
             }
         }.catch { emit(Outcome.Failure(it.toAppError())) }

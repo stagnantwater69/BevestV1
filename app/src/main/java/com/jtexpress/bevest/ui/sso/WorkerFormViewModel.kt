@@ -31,6 +31,7 @@ data class WorkerFormState(
     val birthday: String = "",
     val age: Int? = null,
     val floorNumber: String = "",
+    val jobPosition: String = "",
     val photoUrl: String? = null,
     val active: Boolean = true,
     val projects: List<ProjectSite> = emptyList(),
@@ -96,6 +97,7 @@ class WorkerFormViewModel @Inject constructor(
                                 birthday = bday,
                                 age = computedAge,
                                 floorNumber = r.data.floorNumber.orEmpty(),
+                                jobPosition = r.data.jobPosition.orEmpty(),
                                 photoUrl = r.data.photoUrl,
                                 active = r.data.active,
                                 projects = projects,
@@ -137,6 +139,7 @@ class WorkerFormViewModel @Inject constructor(
         )
     }
     fun onFloorNumber(v: String) = _state.update { it.copy(floorNumber = v) }
+    fun onJobPosition(v: String) = _state.update { it.copy(jobPosition = v) }
     fun onProjectSelected(projectId: String) =
         _state.update { it.copy(selectedProjectId = projectId, projectError = null, formError = null) }
     fun onPhotoPicked(bytes: ByteArray) { pendingPhoto = bytes }
@@ -145,7 +148,8 @@ class WorkerFormViewModel @Inject constructor(
         val s = _state.value
         val fErr = Validators.required(s.firstName, "First name")
         val lErr = Validators.required(s.lastName, "Last name")
-        val pErr = Validators.phone(s.phone, required = false)
+        val formattedPhone = Validators.formatPhoneWithCountryCode(s.phone)
+        val pErr = Validators.phone(formattedPhone, required = false)
         val projErr = if (!s.isEdit && s.selectedProjectId.isNullOrBlank()) "Choose a project site" else null
         if (fErr != null || lErr != null || pErr != null || projErr != null) {
             _state.update {
@@ -175,10 +179,11 @@ class WorkerFormViewModel @Inject constructor(
             workerId = s.workerId,
             firstName = s.firstName.trim(),
             lastName = s.lastName.trim(),
-            phone = s.phone.trim(),
+            phone = Validators.formatPhoneWithCountryCode(s.phone),
             birthday = bday,
             age = computedAge,
             floorNumber = s.floorNumber.trim().takeIf { it.isNotBlank() },
+            jobPosition = s.jobPosition.trim().takeIf { it.isNotBlank() },
             photoUrl = s.photoUrl,
             contractorId = contractorId,
             siteId = siteId,
@@ -202,10 +207,11 @@ class WorkerFormViewModel @Inject constructor(
                 workerId = candidate,
                 firstName = s.firstName.trim(),
                 lastName = s.lastName.trim(),
-                phone = s.phone.trim(),
+                phone = Validators.formatPhoneWithCountryCode(s.phone),
                 birthday = bday,
                 age = computedAge,
                 floorNumber = s.floorNumber.trim().takeIf { it.isNotBlank() },
+                jobPosition = s.jobPosition.trim().takeIf { it.isNotBlank() },
                 photoUrl = s.photoUrl,
                 contractorId = contractorId,
                 siteId = siteId,

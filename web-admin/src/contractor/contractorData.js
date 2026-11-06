@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { ref, onValue } from 'firebase/database';
 import { db, rtdb } from '../firebase';
+import { formatPhoneWithCountryCode } from '../PhoneInput';
 
 // ------------------------------------------------------------------ constants
 
@@ -160,7 +161,9 @@ export const toWorker = (snap) => {
     firstName,
     lastName,
     fullName: `${firstName} ${lastName}`.trim() || snap.id,
-    phone: d.phone || '',
+    phone: formatPhoneWithCountryCode(d.phone || ''),
+    floorNumber: (d.floorNumber && String(d.floorNumber).trim()) || null,
+    jobPosition: (d.jobPosition && String(d.jobPosition).trim()) || null,
     photoUrl: d.photoUrl || null,
     siteId: d.siteId || null,
     assignedVestId: d.assignedVestId || null,
@@ -180,6 +183,7 @@ export const toIncident = (snap) => {
     vestId: d.vestId || '',
     alertId: d.alertId || null,
     siteId: d.siteId || null,
+    floorNumber: (d.floorNumber && String(d.floorNumber).trim()) || null,
     type: upper(d.type, 'VEST_OFFLINE'),
     severity: upper(d.severity, 'WARNING'),
     status: upper(d.status, effectiveNotes ? 'RESOLVED' : 'ACTIVE'),
@@ -207,6 +211,7 @@ export const toAlertRecord = (snap) => {
     vestId: d.vestId || '',
     incidentId: d.incidentId || null,
     siteId: d.siteId || null,
+    floorNumber: (d.floorNumber && String(d.floorNumber).trim()) || null,
     type: upper(d.type, 'VEST_OFFLINE'),
     severity: upper(d.severity, 'WARNING'),
     status,
@@ -228,7 +233,7 @@ export const toUser = (snap) => {
     lastName,
     fullName: `${firstName} ${lastName}`.trim(),
     email: d.email || '',
-    phone: d.phone || '',
+    phone: formatPhoneWithCountryCode(d.phone || ''),
     siteId: d.siteId || null,
     active: d.active !== false,
   };
@@ -417,10 +422,15 @@ export function useContractorData(contractorId) {
     );
   }, [contractorId]);
 
-  // Merge incidents with alerts so resolved alerts in SSO always show as Closed with Resolution Notes
+  // Merge incidents with alerts and worker floor numbers so resolved alerts in SSO always show as Closed with Resolution Notes
   const incidents = useMemo(() => {
+    const workerFloorById = {};
+    workers.forEach((w) => {
+      if (w.floorNumber) workerFloorById[w.id] = w.floorNumber;
+    });
     return rawIncidents.map((inc) => {
       const linkedAlert = alertsMap[inc.alertId || inc.id] || alertsMap[inc.id];
+      const floorNumber = inc.floorNumber || linkedAlert?.floorNumber || workerFloorById[inc.workerId] || null;
       if (linkedAlert && linkedAlert.resolved) {
         const mergedNotes = inc.resolutionNotes || linkedAlert.resolutionNotes || inc.outcome || 'Resolved';
         // Backfill Firestore incident doc if it was still unclosed in Firestore
@@ -430,10 +440,12 @@ export function useContractorData(contractorId) {
             outcome: mergedNotes,
             resolutionNotes: mergedNotes,
             resolvedBy: inc.resolvedBy || linkedAlert.resolvedBy || null,
+            ...(floorNumber ? { floorNumber } : {}),
           }).catch(() => {});
         }
         return {
           ...inc,
+          floorNumber,
           status: 'RESOLVED',
           resolved: true,
           outcome: mergedNotes,
@@ -442,9 +454,12 @@ export function useContractorData(contractorId) {
           resolvedAt: inc.resolvedAt || linkedAlert.resolvedAt || null,
         };
       }
-      return inc;
+      return {
+        ...inc,
+        floorNumber,
+      };
     }).sort((a, b) => b.createdAt - a.createdAt);
-  }, [rawIncidents, alertsMap]);
+  }, [rawIncidents, alertsMap, workers]);
 
   useEffect(() => onSnapshot(
     doc(db, 'settings', 'thresholds'),
