@@ -271,7 +271,7 @@ export const AddSso = ({ contractorId, onDone }) => {
         subtitle="New Site Safety Officer account for your project sites"
       />
 
-      <div className="add-user-card" style={{ maxWidth: '800px', margin: '0 auto' }}>
+      <div className="add-user-card add-sso-card">
         <form onSubmit={handleSubmit}>
           {/* Personal Name */}
           <div className="form-section-container">
@@ -307,13 +307,13 @@ export const AddSso = ({ contractorId, onDone }) => {
 
           <hr className="form-divider" />
 
-          {/* Contact Details */}
+          {/* Contact Details — Linear setup: Email on top, Phone number on bottom */}
           <div className="form-section-container">
             <div className="form-section-info">
               <h3>Contact</h3>
               <p>Used by the officer to sign in and receive critical alerts.</p>
             </div>
-            <div className="form-grid">
+            <div className="form-grid form-grid-linear">
               <div className="form-group-custom">
                 <label className="form-label">Email address *</label>
                 <input
@@ -343,7 +343,7 @@ export const AddSso = ({ contractorId, onDone }) => {
               <h3>Access & Assignment</h3>
               <p>Site assignment and initial login credentials.</p>
             </div>
-            <div className="form-grid">
+            <div className="form-grid form-grid-aligned">
               <div className="form-group-custom">
                 <label className="form-label">Assigned site ID</label>
                 <input
@@ -353,7 +353,7 @@ export const AddSso = ({ contractorId, onDone }) => {
                   value={formData.siteId}
                   onChange={(e) => setFormData({ ...formData, siteId: e.target.value })}
                 />
-                <span className="input-hint" style={{ margin: '0.25rem 0 0' }}>
+                <span className="input-hint" style={{ margin: '0.35rem 0 0' }}>
                   Can also be assigned or updated later
                 </span>
               </div>
@@ -377,7 +377,7 @@ export const AddSso = ({ contractorId, onDone }) => {
                     {formData.tempPassword ? <FiLock /> : <FiRefreshCw />}
                   </button>
                 </div>
-                <span className="input-hint" style={{ margin: '0.25rem 0 0' }}>
+                <span className="input-hint" style={{ margin: '0.35rem 0 0' }}>
                   They change this from their profile after signing in
                 </span>
               </div>
