@@ -13,7 +13,7 @@ import {
   query, where, onSnapshot 
 } from 'firebase/firestore';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { ref, remove, set } from 'firebase/database';
+import { ref, remove, set, onValue } from 'firebase/database';
 import { auth, secondaryAuth, db, rtdb } from './firebase';
 import QRCode from 'qrcode';
 import { logActivity } from './activityLogger';
@@ -439,39 +439,65 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     return () => unsubscribe();
   }, []);
 
-  // 7. Subscribe to Vital Signs Thresholds (settings/thresholds)
+  // 7. Subscribe to Vital Signs Thresholds (settings/thresholds in Firestore & RTDB)
   useEffect(() => {
+    // Ensure developer's users/{uid} document has role='DEVELOPER' and active=true for Firestore security rules
+    if (auth.currentUser?.uid) {
+      setDoc(doc(db, 'users', auth.currentUser.uid), {
+        role: 'DEVELOPER',
+        active: true,
+        status: 'Active',
+        email: auth.currentUser.email || devEmail
+      }, { merge: true }).catch(() => {});
+    }
+
+    const applyThresholdData = (d) => {
+      if (!d) return;
+      if (Array.isArray(d.ageBrackets) && d.ageBrackets.length > 0) {
+        setVitalBrackets(d.ageBrackets.map(b => ({
+          id: b.id || `${b.minAge}-${b.maxAge}`,
+          label: b.label || `${b.minAge} – ${b.maxAge} yrs`,
+          minAge: Number(b.minAge) || 18,
+          maxAge: Number(b.maxAge) || 99,
+          hrWarning: Number(b.hrWarning) || 100,
+          hrDanger: Number(b.hrDanger) || 120,
+          tempWarning: Number(b.tempWarning) || 37.8,
+          tempDanger: Number(b.tempDanger) || 38.5
+        })));
+      }
+      if (d.heartRateHigh != null) setDefaultHrWarning(Number(d.heartRateHigh));
+      if (d.heartRateDanger != null) setDefaultHrDanger(Number(d.heartRateDanger));
+      if (d.temperatureHigh != null) setDefaultTempWarning(Number(d.temperatureHigh));
+      if (d.temperatureDanger != null) setDefaultTempDanger(Number(d.temperatureDanger));
+      setVitalMeta({
+        inactivitySeconds: Number(d.inactivitySeconds) || 180,
+        offlineTimeoutSeconds: Number(d.offlineTimeoutSeconds) || 60,
+        responseTimeoutSeconds: Number(d.responseTimeoutSeconds) || 60,
+        lowBatteryPercent: Number(d.lowBatteryPercent) || 20
+      });
+    };
+
     const threshRef = doc(db, 'settings', 'thresholds');
-    const unsubscribe = onSnapshot(threshRef, (snap) => {
+    const unsubFirestore = onSnapshot(threshRef, (snap) => {
       if (snap.exists()) {
-        const d = snap.data() || {};
-        if (Array.isArray(d.ageBrackets) && d.ageBrackets.length > 0) {
-          setVitalBrackets(d.ageBrackets.map(b => ({
-            id: b.id || `${b.minAge}-${b.maxAge}`,
-            label: b.label || `${b.minAge} – ${b.maxAge} yrs`,
-            minAge: Number(b.minAge) || 18,
-            maxAge: Number(b.maxAge) || 99,
-            hrWarning: Number(b.hrWarning) || 100,
-            hrDanger: Number(b.hrDanger) || 120,
-            tempWarning: Number(b.tempWarning) || 37.8,
-            tempDanger: Number(b.tempDanger) || 38.5
-          })));
-        }
-        if (d.heartRateHigh != null) setDefaultHrWarning(Number(d.heartRateHigh));
-        if (d.heartRateDanger != null) setDefaultHrDanger(Number(d.heartRateDanger));
-        if (d.temperatureHigh != null) setDefaultTempWarning(Number(d.temperatureHigh));
-        if (d.temperatureDanger != null) setDefaultTempDanger(Number(d.temperatureDanger));
-        setVitalMeta({
-          inactivitySeconds: Number(d.inactivitySeconds) || 180,
-          offlineTimeoutSeconds: Number(d.offlineTimeoutSeconds) || 60,
-          responseTimeoutSeconds: Number(d.responseTimeoutSeconds) || 60,
-          lowBatteryPercent: Number(d.lowBatteryPercent) || 20
-        });
+        applyThresholdData(snap.data());
       }
     }, (err) => {
-      console.warn('Vital thresholds load error:', err.message);
+      console.warn('Vital thresholds Firestore load error:', err.message);
     });
-    return () => unsubscribe();
+
+    const unsubRtdb = onValue(ref(rtdb, 'settings/thresholds'), (snap) => {
+      if (snap.exists()) {
+        applyThresholdData(snap.val());
+      }
+    }, (err) => {
+      console.warn('Vital thresholds RTDB load error:', err.message);
+    });
+
+    return () => {
+      unsubFirestore();
+      unsubRtdb();
+    };
   }, []);
 
   const handleVitalBracketChange = (index, field, value) => {
@@ -532,7 +558,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         tempDanger: Number(b.tempDanger) || 38.5
       }));
 
-      await setDoc(doc(db, 'settings', 'thresholds'), {
+      const payload = {
         heartRateHigh: Number(defaultHrWarning) || 100,
         heartRateDanger: Number(defaultHrDanger) || 120,
         temperatureHigh: Number(defaultTempWarning) || 37.8,
@@ -542,9 +568,36 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         responseTimeoutSeconds: Number(vitalMeta.responseTimeoutSeconds) || 60,
         lowBatteryPercent: Number(vitalMeta.lowBatteryPercent) || 20,
         ageBrackets: sanitized,
-        updatedAt: new Date(),
+        updatedAtMs: Date.now(),
         updatedBy: devEmail
-      }, { merge: true });
+      };
+
+      let savedFirestore = false;
+      let savedRtdb = false;
+      let lastError = null;
+
+      try {
+        await setDoc(doc(db, 'settings', 'thresholds'), {
+          ...payload,
+          updatedAt: new Date()
+        }, { merge: true });
+        savedFirestore = true;
+      } catch (err) {
+        lastError = err;
+        console.warn('Firestore saveVitalThresholds warning:', err.message);
+      }
+
+      try {
+        await set(ref(rtdb, 'settings/thresholds'), payload);
+        savedRtdb = true;
+      } catch (err) {
+        if (!lastError) lastError = err;
+        console.warn('RTDB saveVitalThresholds warning:', err.message);
+      }
+
+      if (!savedFirestore && !savedRtdb && lastError) {
+        throw lastError;
+      }
 
       await logActivity('Updated age-based Vital Signs Warning & Danger thresholds for Heart Rate and Body Temperature', devEmail);
       showToast('success', '✓ Vital Signs age-based Warning & Danger thresholds saved and synced to SSO devices!');
@@ -566,7 +619,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     setDefaultTempDanger(38.5);
     setSavingVitals(true);
     try {
-      await setDoc(doc(db, 'settings', 'thresholds'), {
+      const payload = {
         heartRateHigh: 100,
         heartRateDanger: 120,
         temperatureHigh: 37.8,
@@ -576,9 +629,37 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         responseTimeoutSeconds: 60,
         lowBatteryPercent: 20,
         ageBrackets: DEFAULT_VITAL_BRACKETS,
-        updatedAt: new Date(),
+        updatedAtMs: Date.now(),
         updatedBy: devEmail
-      }, { merge: true });
+      };
+
+      let savedFirestore = false;
+      let savedRtdb = false;
+      let lastError = null;
+
+      try {
+        await setDoc(doc(db, 'settings', 'thresholds'), {
+          ...payload,
+          updatedAt: new Date()
+        }, { merge: true });
+        savedFirestore = true;
+      } catch (err) {
+        lastError = err;
+        console.warn('Firestore resetVitalThresholds warning:', err.message);
+      }
+
+      try {
+        await set(ref(rtdb, 'settings/thresholds'), payload);
+        savedRtdb = true;
+      } catch (err) {
+        if (!lastError) lastError = err;
+        console.warn('RTDB resetVitalThresholds warning:', err.message);
+      }
+
+      if (!savedFirestore && !savedRtdb && lastError) {
+        throw lastError;
+      }
+
       await logActivity('Reset Vital Signs thresholds to factory defaults', devEmail);
       showToast('success', '✓ Reset Vital Signs thresholds to factory defaults!');
     } catch (err) {

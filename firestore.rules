@@ -43,9 +43,10 @@ service cloud.firestore {
       return isSignedIn() && (
         (request.auth.token.email != null && (
           request.auth.token.email == 'developer@bevest.com' ||
-          request.auth.token.email == 'dev@bevest.com'
+          request.auth.token.email == 'dev@bevest.com' ||
+          request.auth.token.email.matches('(?i)^dev(eloper)?@.*')
         ))
-        || (hasUserDoc() && (userDoc().role == 'DEVELOPER' || userDoc().role == 'ADMIN'))
+        || (hasUserDoc() && userDoc().role in ['DEVELOPER', 'Developer', 'developer', 'ADMIN', 'Admin', 'admin'])
       );
     }
 
@@ -106,7 +107,7 @@ service cloud.firestore {
       allow create, update: if isAdmin()
                             || isDeveloper()  // developer vest deletion unlinks workers
                             || (isSso() && request.resource.data.siteId == mySiteId());
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || isDeveloper();
     }
 
     // ---- vests ----
@@ -127,47 +128,51 @@ service cloud.firestore {
     // pointing at a vest that no longer exists.
     match /vestAssignments/{id} {
       allow read: if isAdmin() || isSso() || isContractor() || isDeveloper();
-      allow create, update: if isAdmin() || isSso();
-      allow delete: if isDeveloper();
+      allow create, update: if isAdmin() || isSso() || isDeveloper();
+      allow delete: if isDeveloper() || isAdmin();
     }
 
     // ---- alerts ----
     match /alerts/{alertId} {
       allow read: if isAdmin()
+                  || isDeveloper()
                   || (isSso() && resource.data.siteId == mySiteId())
                   || (isContractor() && resource.data.contractorId == myContractorId());
       // Production alerts are created by the cloud safety engine or an SSO. The
       // in-app simulator (no IoT hardware yet) may create/remove alerts flagged
       // `simulated == true` — these never affect real safety data.
-      allow create: if isAdmin() || isSso()
+      allow create: if isAdmin() || isDeveloper() || isSso()
                     || (isSignedIn() && request.resource.data.simulated == true);
-      allow update: if isAdmin()
+      allow update: if isAdmin() || isDeveloper()
                     || (isSso() && resource.data.siteId == mySiteId());
-      allow delete: if isSignedIn() && resource.data.simulated == true;
+      allow delete: if isDeveloper() || isAdmin()
+                    || (isSignedIn() && resource.data.simulated == true);
     }
 
     // ---- incidents ----
     match /incidents/{incidentId} {
       allow read: if isAdmin()
+                  || isDeveloper()
                   || (isSso() && resource.data.siteId == mySiteId())
                   || (isContractor() && resource.data.contractorId == myContractorId());
       // Real incidents come from the cloud engine or, while the project has no
       // cloud functions (free plan), from an SSO's app escalating a fall on their own
       // site. Simulated ones (flagged `simulated == true`) may be created/removed by
       // any signed-in user so the app can be demoed before the IoT layer exists.
-      allow create: if isAdmin()
+      allow create: if isAdmin() || isDeveloper()
                     || (isSso() && request.resource.data.siteId == mySiteId())
                     || (isSignedIn() && request.resource.data.simulated == true);
-      allow update: if isAdmin()
+      allow update: if isAdmin() || isDeveloper()
                     || (isSso() && resource.data.siteId == mySiteId())
                     || (isContractor() && resource.data.contractorId == myContractorId());
-      allow delete: if isSignedIn() && resource.data.simulated == true;
+      allow delete: if isDeveloper() || isAdmin()
+                    || (isSignedIn() && resource.data.simulated == true);
     }
 
     // ---- projects / sites ----
     match /projects/{projectId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin()
+      allow write: if isAdmin() || isDeveloper()
                    || (isContractor() && request.resource.data.contractorId == request.auth.uid);
     }
 

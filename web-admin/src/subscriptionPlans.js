@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { db } from './firebase';
+import { ref, onValue, set } from 'firebase/database';
+import { db, rtdb } from './firebase';
 import { logActivity } from './activityLogger';
 
 /**
@@ -97,68 +98,134 @@ export function useSubscriptionPlans() {
   const [isCustomConfig, setIsCustomConfig] = useState(false);
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'settings', 'subscriptionPlans'), (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setPlans({
-          BUSINESS: {
-            ...DEFAULT_SUBSCRIPTION_PLANS.BUSINESS,
-            ...(data.BUSINESS || {})
-          },
-          ENTERPRISE: {
-            ...DEFAULT_SUBSCRIPTION_PLANS.ENTERPRISE,
-            ...(data.ENTERPRISE || {})
-          },
-          CUSTOM: {
-            ...DEFAULT_SUBSCRIPTION_PLANS.CUSTOM,
-            ...(data.CUSTOM || {})
-          }
-        });
-        if (data.vestMonthlyRate != null) {
-          setVestRate(Number(data.vestMonthlyRate));
+    const applyPlanData = (data) => {
+      if (!data) return;
+      setPlans({
+        BUSINESS: {
+          ...DEFAULT_SUBSCRIPTION_PLANS.BUSINESS,
+          ...(data.BUSINESS || {})
+        },
+        ENTERPRISE: {
+          ...DEFAULT_SUBSCRIPTION_PLANS.ENTERPRISE,
+          ...(data.ENTERPRISE || {})
+        },
+        CUSTOM: {
+          ...DEFAULT_SUBSCRIPTION_PLANS.CUSTOM,
+          ...(data.CUSTOM || {})
         }
-        setIsCustomConfig(true);
-      } else {
-        setPlans(DEFAULT_SUBSCRIPTION_PLANS);
-        setVestRate(VEST_MONTHLY_RATE);
-        setIsCustomConfig(false);
+      });
+      if (data.vestMonthlyRate != null) {
+        setVestRate(Number(data.vestMonthlyRate));
+      }
+      setIsCustomConfig(true);
+    };
+
+    const unsubFirestore = onSnapshot(doc(db, 'settings', 'subscriptionPlans'), (snap) => {
+      if (snap.exists()) {
+        applyPlanData(snap.data());
       }
       setLoading(false);
     }, (err) => {
-      console.warn('Error fetching subscription plans settings:', err);
+      console.warn('Error fetching subscription plans settings from Firestore:', err);
       setLoading(false);
     });
 
-    return () => unsub();
+    const unsubRtdb = onValue(ref(rtdb, 'settings/subscriptionPlans'), (snap) => {
+      if (snap.exists()) {
+        applyPlanData(snap.val());
+      }
+      setLoading(false);
+    }, (err) => {
+      console.warn('Error fetching subscription plans settings from RTDB:', err);
+    });
+
+    return () => {
+      unsubFirestore();
+      unsubRtdb();
+    };
   }, []);
 
   return { plans, vestRate, loading, isCustomConfig };
 }
 
 /**
- * Saves modified subscription tiers, rates, and inclusions to Firestore.
+ * Saves modified subscription tiers, rates, and inclusions to Firestore and RTDB.
  */
 export async function saveSubscriptionPlans(plansData, vestMonthlyRate, userEmail = 'Developer') {
-  await setDoc(doc(db, 'settings', 'subscriptionPlans'), {
+  const payload = {
     ...plansData,
     vestMonthlyRate: Number(vestMonthlyRate) || VEST_MONTHLY_RATE,
-    updatedAt: new Date(),
+    updatedAtMs: Date.now(),
     updatedBy: userEmail
-  }, { merge: true });
+  };
+
+  let savedFirestore = false;
+  let savedRtdb = false;
+  let lastError = null;
+
+  try {
+    await setDoc(doc(db, 'settings', 'subscriptionPlans'), {
+      ...payload,
+      updatedAt: new Date()
+    }, { merge: true });
+    savedFirestore = true;
+  } catch (err) {
+    lastError = err;
+    console.warn('Firestore saveSubscriptionPlans warning:', err.message);
+  }
+
+  try {
+    await set(ref(rtdb, 'settings/subscriptionPlans'), payload);
+    savedRtdb = true;
+  } catch (err) {
+    if (!lastError) lastError = err;
+    console.warn('RTDB saveSubscriptionPlans warning:', err.message);
+  }
+
+  if (!savedFirestore && !savedRtdb && lastError) {
+    throw lastError;
+  }
 
   await logActivity(`Updated subscription tiers, prices, and inclusions configuration`, userEmail);
 }
 
 /**
- * Resets subscription tiers in Firestore back to factory defaults.
+ * Resets subscription tiers in Firestore and RTDB back to factory defaults.
  */
 export async function resetSubscriptionPlans(userEmail = 'Developer') {
-  await setDoc(doc(db, 'settings', 'subscriptionPlans'), {
+  const payload = {
     ...DEFAULT_SUBSCRIPTION_PLANS,
     vestMonthlyRate: VEST_MONTHLY_RATE,
-    updatedAt: new Date(),
+    updatedAtMs: Date.now(),
     updatedBy: userEmail
-  });
+  };
+
+  let savedFirestore = false;
+  let savedRtdb = false;
+  let lastError = null;
+
+  try {
+    await setDoc(doc(db, 'settings', 'subscriptionPlans'), {
+      ...payload,
+      updatedAt: new Date()
+    });
+    savedFirestore = true;
+  } catch (err) {
+    lastError = err;
+    console.warn('Firestore resetSubscriptionPlans warning:', err.message);
+  }
+
+  try {
+    await set(ref(rtdb, 'settings/subscriptionPlans'), payload);
+    savedRtdb = true;
+  } catch (err) {
+    if (!lastError) lastError = err;
+    console.warn('RTDB resetSubscriptionPlans warning:', err.message);
+  }
+
+  if (!savedFirestore && !savedRtdb && lastError) {
+    throw lastError;
+  }
 
   await logActivity(`Reset subscription tiers to factory default pricing and inclusions`, userEmail);
 }
