@@ -41,22 +41,31 @@ private fun DataSnapshot.long(key: String): Long =
 /** Maps the agreed IoT payload (plan section 29). Confirm field names with the firmware team. */
 fun DataSnapshot.toSensorReading(workerId: String): SensorReading? {
     if (!exists()) return null
+    val rawOnline = bool("online")
+    val fall = bool("fallDetected")
+    val motion = MotionState.fromRaw(str("motionState"))
+    val response = SafetyResponseState.fromRaw(str("safetyResponse"))
     val effectiveTimestamp = long("timestampServer").takeIf { it > 1_000_000_000_000L }
         ?: long("timestamp").takeIf { it > 1_000_000_000_000L }
         ?: long("lastSeenServer").takeIf { it > 1_000_000_000_000L }
-        ?: 0L
+        ?: long("lastSeen").takeIf { it > 1_000_000_000_000L }
+        ?: if (rawOnline || fall || motion == MotionState.FALL_DETECTED || response != SafetyResponseState.NONE) {
+            System.currentTimeMillis()
+        } else {
+            0L
+        }
     return SensorReading(
         workerId = workerId,
         vestId = str("vestId").orEmpty(),
         heartRate = int("heartRate"),
         temperature = dbl("temperature"),
-        motionState = MotionState.fromRaw(str("motionState")),
-        fallDetected = bool("fallDetected"),
+        motionState = if (fall && motion != MotionState.FALL_DETECTED) MotionState.FALL_DETECTED else motion,
+        fallDetected = fall || motion == MotionState.FALL_DETECTED,
         latitude = dbl("latitude"),
         longitude = dbl("longitude"),
         batteryPercent = int("battery"),
         wifiRssi = int("wifiRssi") ?: int("rssi"),
-        safetyResponse = SafetyResponseState.fromRaw(str("safetyResponse")),
+        safetyResponse = response,
         timestamp = effectiveTimestamp,
     )
 }

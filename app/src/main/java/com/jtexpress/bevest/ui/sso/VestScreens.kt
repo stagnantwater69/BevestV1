@@ -20,6 +20,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -225,6 +227,7 @@ fun VestListScreen(
  * detail screen. The old version put status, assignment, battery and connectivity into
  * one run-on line of text, which made every row look identical.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun VestRow(vest: Vest, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val color = vestColor(vest.status)
@@ -242,7 +245,9 @@ private fun VestRow(vest: Vest, onClick: () -> Unit, modifier: Modifier = Modifi
         shadowElevation = Elevation.card,
     ) {
         Row(
-            Modifier.padding(Spacing.lg),
+            Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.md),
         ) {
@@ -262,24 +267,49 @@ private fun VestRow(vest: Vest, onClick: () -> Unit, modifier: Modifier = Modifi
             }
             Column(
                 Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(
-                    vest.vestId,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    vest.assignedWorkerId?.let { "Worn by $it" } ?: "Not assigned",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                ) {
+                    Column(
+                        Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            vest.vestId,
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            vest.assignedWorkerId?.let { "Worn by $it" } ?: "Not assigned",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                    ) {
+                        StatusBadge(text = vest.status.label(), color = color)
+                        if (lowBattery) {
+                            StatusBadge(
+                                text = "Charge",
+                                color = LocalStatusPalette.current.warning,
+                                icon = BevestIcons.BatteryLow,
+                            )
+                        }
+                    }
+                }
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -290,23 +320,12 @@ private fun VestRow(vest: Vest, onClick: () -> Unit, modifier: Modifier = Modifi
                             if (vest.online) "Online" else DateTimeUtils.relativeAge(vest.lastSeen),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
                         )
                     }
                     BatteryIndicator(vest.batteryPercent)
                     WifiSignalIndicator(rssi = vest.wifiRssi, online = vest.online, compact = true)
-                }
-            }
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(Spacing.xs),
-            ) {
-                StatusBadge(text = vest.status.label(), color = color)
-                if (lowBattery) {
-                    StatusBadge(
-                        text = "Charge",
-                        color = LocalStatusPalette.current.warning,
-                        icon = BevestIcons.BatteryLow,
-                    )
                 }
             }
         }
@@ -408,10 +427,13 @@ fun VestDetailScreen(
                                 }
                             }
                             ReflectiveBand(thickness = 2.dp, emphasis = 0.7f)
-                            Row(
-                                Modifier.padding(Spacing.lg),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
+                            @OptIn(ExperimentalLayoutApi::class)
+                            FlowRow(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(Spacing.lg),
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                                verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -422,6 +444,8 @@ fun VestDetailScreen(
                                         if (vest.online) "Online" else "Offline",
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        softWrap = false,
                                     )
                                 }
                                 BatteryIndicator(vest.batteryPercent)
@@ -431,6 +455,8 @@ fun VestDetailScreen(
                                     DateTimeUtils.relativeAge(vest.lastSeen),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false,
                                 )
                             }
                         }

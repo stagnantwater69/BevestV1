@@ -34,13 +34,21 @@ class AlertRepositoryImpl @Inject constructor(
     private val incidents get() = firestore.collection(FirebasePaths.INCIDENTS)
 
     override fun observeActiveAlerts(siteId: String?): Flow<Outcome<List<Alert>>> {
-        var query: Query = alerts.whereIn("status", listOf(AlertStatus.ACTIVE.name, AlertStatus.ACKNOWLEDGED.name))
-        if (siteId != null) query = query.whereEqualTo("siteId", siteId)
+        val targetSite = siteId?.trim()?.takeIf { it.isNotBlank() }
+        val query: Query = alerts.whereIn("status", listOf(AlertStatus.ACTIVE.name, AlertStatus.ACKNOWLEDGED.name))
         return query.snapshots()
             .map { qs ->
-                Outcome.Success(
-                    qs.documents.map { it.toAlert() }.sortedByDescending { it.createdAt },
-                ) as Outcome<List<Alert>>
+                val all = qs.documents.map { it.toAlert() }.sortedByDescending { it.createdAt }
+                val filtered = if (targetSite != null) {
+                    val matched = all.filter {
+                        it.siteId.equals(targetSite, ignoreCase = true) ||
+                            it.siteName.equals(targetSite, ignoreCase = true)
+                    }
+                    matched.ifEmpty { all }
+                } else {
+                    all
+                }
+                Outcome.Success(filtered) as Outcome<List<Alert>>
             }
             .catch { emit(Outcome.Failure(it.toAppError())) }
     }
@@ -58,11 +66,21 @@ class AlertRepositoryImpl @Inject constructor(
             .catch { emit(Outcome.Failure(it.toAppError())) }
 
     override fun observeAlertHistory(siteId: String?, limit: Long): Flow<Outcome<List<Alert>>> {
-        var query: Query = alerts.orderBy("createdAt", Query.Direction.DESCENDING).limit(limit)
-        if (siteId != null) query = alerts.whereEqualTo("siteId", siteId)
-            .orderBy("createdAt", Query.Direction.DESCENDING).limit(limit)
-        return query.snapshots()
-            .map { qs -> Outcome.Success(qs.documents.map { it.toAlert() }) as Outcome<List<Alert>> }
+        val targetSite = siteId?.trim()?.takeIf { it.isNotBlank() }
+        return alerts.limit(limit).snapshots()
+            .map { qs ->
+                val all = qs.documents.map { it.toAlert() }.sortedByDescending { it.createdAt }
+                val filtered = if (targetSite != null) {
+                    val matched = all.filter {
+                        it.siteId.equals(targetSite, ignoreCase = true) ||
+                            it.siteName.equals(targetSite, ignoreCase = true)
+                    }
+                    matched.ifEmpty { all }
+                } else {
+                    all
+                }
+                Outcome.Success(filtered) as Outcome<List<Alert>>
+            }
             .catch { emit(Outcome.Failure(it.toAppError())) }
     }
 

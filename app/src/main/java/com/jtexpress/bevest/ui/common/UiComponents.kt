@@ -106,6 +106,9 @@ fun StatusChip(
             text = status.label(),
             style = MaterialTheme.typography.labelMedium,
             color = color,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -133,7 +136,14 @@ fun StatusBadge(
         if (icon != null) {
             Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(IconSize.inline))
         }
-        Text(text, style = MaterialTheme.typography.labelMedium, color = color)
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = color,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -178,6 +188,8 @@ fun LastUpdatedLabel(
             },
             style = MaterialTheme.typography.labelSmall,
             color = if (stale) palette.offline else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -202,6 +214,8 @@ fun BatteryIndicator(percent: Int?, modifier: Modifier = Modifier) {
             text = percent?.let { "$it%" } ?: "—",
             style = MaterialTheme.typography.labelMedium,
             color = if (low) palette.warning else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }
@@ -278,6 +292,9 @@ fun WifiSignalIndicator(
                 text = labelText,
                 style = MaterialTheme.typography.labelSmall,
                 color = color,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -371,6 +388,7 @@ fun MetricCard(
     stale: Boolean = false,
     supporting: String? = null,
     trace: List<Int>? = null,
+    compact: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
     val palette = LocalStatusPalette.current
@@ -382,6 +400,7 @@ fun MetricCard(
     val valueTextStyle = when {
         value.length > 24 -> MaterialTheme.typography.titleMedium
         value.length > 14 -> MaterialTheme.typography.titleLarge
+        compact && value.length >= 6 -> MaterialTheme.typography.headlineSmall
         else -> VitalStyle
     }
     BevestCard(
@@ -389,43 +408,56 @@ fun MetricCard(
         onClick = onClick,
         accent = if (!stale) accent else null,
         shape = BevestShapes.status,
-        contentPadding = PaddingValues(Spacing.lg),
+        contentPadding = PaddingValues(if (compact) Spacing.md else Spacing.lg),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
-        ) {
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .clip(BevestShapes.inner)
-                    .background(tint.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center,
+        if (compact) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
-                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-            }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    label.uppercase(),
-                    style = EyebrowStyle,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                ) {
+                    Box(
+                        Modifier
+                            .size(32.dp)
+                            .clip(BevestShapes.inner)
+                            .background(tint.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+                    }
+                    Text(
+                        label.uppercase(),
+                        style = EyebrowStyle,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     Text(
                         value,
                         style = valueTextStyle,
                         color = tint,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.alignByBaseline(),
                     )
                     if (unit != null) {
                         Text(
                             unit,
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.alignByBaseline(),
                             maxLines = 1,
+                            softWrap = false,
                         )
                     }
                 }
@@ -446,12 +478,69 @@ fun MetricCard(
                     )
                 }
             }
-            if (trace != null && !stale) {
-                EcgTrace(
-                    samples = trace,
-                    color = tint,
-                    modifier = Modifier.width(64.dp).height(36.dp),
-                )
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
+            ) {
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(BevestShapes.inner)
+                        .background(tint.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        label.uppercase(),
+                        style = EyebrowStyle,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            value,
+                            style = valueTextStyle,
+                            color = tint,
+                            modifier = Modifier.alignByBaseline(),
+                        )
+                        if (unit != null) {
+                            Text(
+                                unit,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.alignByBaseline(),
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                    when {
+                        stale -> Text(
+                            "Not live",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.offline,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        supporting != null -> Text(
+                            supporting,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (trace != null && !stale) {
+                    EcgTrace(
+                        samples = trace,
+                        color = tint,
+                        modifier = Modifier.width(64.dp).height(36.dp),
+                    )
+                }
             }
         }
     }

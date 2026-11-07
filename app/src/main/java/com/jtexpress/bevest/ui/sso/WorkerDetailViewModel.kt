@@ -14,6 +14,7 @@ import com.jtexpress.bevest.domain.repository.SettingsRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.domain.safety.AgeVitalThreshold
 import com.jtexpress.bevest.domain.safety.SafetyStatusEngine
+import com.jtexpress.bevest.domain.safety.SafetyWatcher
 import com.jtexpress.bevest.utils.Outcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -58,6 +59,7 @@ class WorkerDetailViewModel @Inject constructor(
     private val monitoringRepository: MonitoringRepository,
     private val settingsRepository: SettingsRepository,
     private val alertRepository: AlertRepository,
+    private val safetyWatcher: SafetyWatcher,
 ) : ViewModel() {
 
     private val workerId: String = savedStateHandle.get<String>("workerId").orEmpty()
@@ -163,6 +165,7 @@ class WorkerDetailViewModel @Inject constructor(
                     actionMessage.value = null
                     if (state.value.reading?.safetyResponse != SafetyResponseState.ACKNOWLEDGED) {
                         monitoringRepository.setSafetyResponse(workerId, SafetyResponseState.NO_RESPONSE)
+                        safetyWatcher.ensureNoSafetyResponseAlert(workerId, state.value.reading)
                     }
                 }
                 is Outcome.Failure -> actionMessage.value = r.error.message

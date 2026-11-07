@@ -31,9 +31,11 @@ class WorkerRepositoryImpl @Inject constructor(
     private val vests get() = firestore.collection(FirebasePaths.VESTS)
 
     override fun observeWorkers(contractorId: String?, siteId: String?): Flow<Outcome<List<Worker>>> {
+        val targetSite = siteId?.trim()?.takeIf { it.isNotBlank() }
         var query: Query = workers
-        if (siteId != null) query = query.whereEqualTo("siteId", siteId)
-        else if (contractorId != null) query = query.whereEqualTo("contractorId", contractorId)
+        if (contractorId != null && targetSite == null) {
+            query = query.whereEqualTo("contractorId", contractorId)
+        }
         return combine(
             query.snapshots(),
             vests.snapshots(),
@@ -52,7 +54,19 @@ class WorkerRepositoryImpl @Inject constructor(
                     w
                 }
             }
-            Outcome.Success(list) as Outcome<List<Worker>>
+            val filtered = if (targetSite != null) {
+                val matched = list.filter { it.siteId.equals(targetSite, ignoreCase = true) }
+                matched.ifEmpty {
+                    if (contractorId != null) {
+                        list.filter { it.contractorId == contractorId }.ifEmpty { list }
+                    } else {
+                        list
+                    }
+                }
+            } else {
+                list
+            }
+            Outcome.Success(filtered) as Outcome<List<Worker>>
         }.catch { emit(Outcome.Failure(it.toAppError())) }
     }
 

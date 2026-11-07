@@ -236,6 +236,7 @@ fun WorkerDetailScreen(
                                 batteryLow -> "Needs charging soon"
                                 else -> "Normal"
                             },
+                            compact = true,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight(),
@@ -249,6 +250,7 @@ fun WorkerDetailScreen(
                             accent = if (!state.stale && reading != null) wifiLevel.color(palette) else null,
                             stale = state.stale,
                             supporting = if (!state.stale && reading != null && reading.wifiRssi != null) wifiLevel.label else null,
+                            compact = true,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight(),
@@ -503,11 +505,22 @@ private fun VitalSignsCombinedCard(
                             color = hrColor,
                         )
                     } else if (ageBracket != null) {
-                        Text(
-                            text = "Warn ≥${ageBracket.hrWarning} · Danger ≥${ageBracket.hrDanger}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text(
+                                text = "Warn ≥${ageBracket.hrWarning}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                            Text(
+                                text = "Danger ≥${ageBracket.hrDanger}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
                     }
                 }
 
@@ -570,11 +583,22 @@ private fun VitalSignsCombinedCard(
                             color = tempColor,
                         )
                     } else if (ageBracket != null) {
-                        Text(
-                            text = "Warn ≥${"%.1f".format(ageBracket.tempWarning)}° · Danger ≥${"%.1f".format(ageBracket.tempDanger)}°",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text(
+                                text = "Warn ≥${"%.1f".format(ageBracket.tempWarning)}°",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                            Text(
+                                text = "Danger ≥${"%.1f".format(ageBracket.tempDanger)}°",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
                     }
                 }
             }
@@ -766,26 +790,37 @@ private fun IdentityHeader(
     ) {
         Column {
             Row(
-                Modifier.padding(Spacing.lg),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(Spacing.lg),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
                 WorkerAvatar(
                     name = name,
                     photoUrl = photoUrl,
                     status = status,
-                    size = 64.dp,
+                    size = 56.dp,
                 )
                 Column(
                     Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    Text(
-                        name,
-                        style = MaterialTheme.typography.titleLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    ) {
+                        Text(
+                            name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatusChip(status, compact = true)
+                    }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -800,6 +835,8 @@ private fun IdentityHeader(
                             vestId ?: "No vest assigned",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     Row(
@@ -810,7 +847,6 @@ private fun IdentityHeader(
                         LastUpdatedLabel(lastUpdate, stale)
                     }
                 }
-                StatusChip(status)
             }
             ReflectiveBand(thickness = 2.dp, emphasis = 0.7f)
             Text(

@@ -50,12 +50,14 @@ class LiveMapViewModel @Inject constructor(
     }
 
     val state: StateFlow<LiveMapState> = siteId.flatMapLatest { site ->
-        if (site.isNullOrBlank()) return@flatMapLatest flowOf(LiveMapState(loading = false, noSite = true))
         workerRepository.observeWorkers(contractorId = null, siteId = site).flatMapLatest { outcome ->
             when (outcome) {
                 is Outcome.Failure -> flowOf(LiveMapState(loading = false, error = outcome.error.message))
                 is Outcome.Success -> {
                     val workers = outcome.data
+                    if (site.isNullOrBlank() && workers.isEmpty()) {
+                        return@flatMapLatest flowOf(LiveMapState(loading = false, noSite = true))
+                    }
                     combine(
                         monitoringRepository.observeReadings(workers.map { it.workerId }),
                         settingsRepository.observeThresholds(),

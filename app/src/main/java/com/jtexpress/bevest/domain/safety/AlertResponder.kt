@@ -14,10 +14,10 @@ import javax.inject.Singleton
 class AlertResponder @Inject constructor(
     private val monitoringRepository: MonitoringRepository,
 ) {
-    /** An officer is on it: the vest stops escalating and the reading says so. */
+    /** An officer is on it: the vest stops escalating and returns to normal ready state. */
     suspend fun acknowledged(workerId: String) {
         if (workerId.isBlank()) return
-        monitoringRepository.setSafetyResponse(workerId, SafetyResponseState.ACKNOWLEDGED)
+        monitoringRepository.setSafetyResponse(workerId, SafetyResponseState.NONE)
     }
 
     /** Over: clear the escalation from the reading so the worker's live vitals decide again. */

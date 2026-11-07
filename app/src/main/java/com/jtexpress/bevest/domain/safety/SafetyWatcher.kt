@@ -3,6 +3,7 @@ package com.jtexpress.bevest.domain.safety
 import android.content.Context
 import com.google.firebase.firestore.FirebaseFirestore
 import com.jtexpress.bevest.data.firebase.FirebasePaths
+import com.jtexpress.bevest.data.mapper.toWorker
 import com.jtexpress.bevest.domain.model.Alert
 import com.jtexpress.bevest.domain.model.AlertSeverity
 import com.jtexpress.bevest.domain.model.AlertStatus
@@ -21,6 +22,7 @@ import com.jtexpress.bevest.notifications.NotificationHelper
 import com.jtexpress.bevest.utils.Outcome
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -33,6 +35,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -59,9 +63,11 @@ class SafetyWatcher @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val alertRepository: AlertRepository,
 ) {
-    private val scope = CoroutineScope(SupervisorJob())
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val alertMutex = Mutex()
     private var jobs: List<Job> = emptyList()
     private var watchingSite: String? = null
+    private var isStarted: Boolean = false
 
     /** Alerts already notified about, keyed by id, with the severity they had then. */
     private val notified = mutableMapOf<String, AlertSeverity>()
@@ -117,8 +123,9 @@ class SafetyWatcher @Inject constructor(
     }
 
     fun start(siteId: String?) {
-        if (siteId == watchingSite && jobs.isNotEmpty()) return
+        if (isStarted && siteId == watchingSite && jobs.isNotEmpty()) return
         stop()
+        isStarted = true
         watchingSite = siteId
         jobs = listOf(watchReadings(siteId), watchAlerts(siteId))
     }
@@ -126,6 +133,7 @@ class SafetyWatcher @Inject constructor(
     fun stop() {
         jobs.forEach { it.cancel() }
         jobs = emptyList()
+        isStarted = false
         watchingSite = null
         notified.clear()
         lastHandledFallTimestamp.clear()
@@ -220,7 +228,7 @@ class SafetyWatcher @Inject constructor(
                 combine(
                     monitoringRepository.observeReadings(workers.map { it.workerId }),
                     settingsRepository.observeThresholds(),
-                    alertRepository.observeActiveAlerts(targetSite),
+                    alertRepository.observeActiveAlerts(null),
                     ticker,
                 ) { readings, thresholds, alerts, now ->
                     Snapshot(workers, readings, thresholds, (alerts as? Outcome.Success)?.data.orEmpty(), now)
@@ -241,22 +249,18 @@ class SafetyWatcher @Inject constructor(
         val engine = SafetyStatusEngine(s.thresholds)
         for (worker in s.workers) {
             val reading = s.readings[worker.workerId] ?: continue
-            // Strictly isolate hardware vest readings to the worker assigned to that specific vest
-            if (reading.vestId.isNotBlank() && !reading.vestId.equals(worker.assignedVestId, ignoreCase = true)) {
-                continue
-            }
-            val status = engine.evaluate(reading, s.now, worker.effectiveAge)
 
             // 1. Fall Detection
-            val fell = (reading.fallDetected || reading.motionState == MotionState.FALL_DETECTED) &&
-                status != SafetyStatus.OFFLINE
+            val fell = reading.fallDetected || reading.motionState == MotionState.FALL_DETECTED
             if (!fell) {
                 currentlyFalling.remove(worker.workerId)
                 lastHandledFallTimestamp.remove(worker.workerId)
             }
 
             val fallAlert = s.alerts.firstOrNull {
-                it.workerId == worker.workerId && it.type == AlertType.FALL_DETECTED
+                it.workerId == worker.workerId &&
+                    it.type == AlertType.FALL_DETECTED &&
+                    it.status == AlertStatus.ACTIVE
             }
             when {
                 fallAlert == null -> {
@@ -264,10 +268,14 @@ class SafetyWatcher @Inject constructor(
                     val cooldownUntil = fallCooldownUntil[worker.workerId] ?: 0L
                     val inBurst = worker.workerId in currentlyFalling
                     if (fell && !inBurst && s.now >= cooldownUntil && (reading.timestamp <= 0L || lastHandled != reading.timestamp)) {
-                        currentlyFalling.add(worker.workerId)
-                        lastHandledFallTimestamp[worker.workerId] = reading.timestamp
-                        fallCooldownUntil[worker.workerId] = s.now + FALL_COOLDOWN_MS
-                        openFallAlert(worker, reading)
+                        val opened = openFallAlert(worker, reading)
+                        if (opened) {
+                            currentlyFalling.add(worker.workerId)
+                            if (reading.timestamp > 0L) {
+                                lastHandledFallTimestamp[worker.workerId] = reading.timestamp
+                            }
+                            fallCooldownUntil[worker.workerId] = s.now + FALL_COOLDOWN_MS
+                        }
                     } else if (fell) {
                         currentlyFalling.add(worker.workerId)
                         if (reading.timestamp > 0L) {
@@ -284,24 +292,37 @@ class SafetyWatcher @Inject constructor(
             }
 
             // 2. Function 2: Worker Trigger (3-second hold on D15 -> safetyResponse == EMERGENCY_REQUESTED)
-            val workerTriggered = reading.safetyResponse == SafetyResponseState.EMERGENCY_REQUESTED &&
-                !engine.isStale(reading, s.now)
+            val workerTriggered = reading.safetyResponse == SafetyResponseState.EMERGENCY_REQUESTED
             if (!workerTriggered) {
                 currentlyTriggering.remove(worker.workerId)
             }
 
             val triggerAlert = s.alerts.firstOrNull {
-                it.workerId == worker.workerId && it.type == AlertType.EMERGENCY_REQUEST
+                it.workerId == worker.workerId &&
+                    it.type == AlertType.EMERGENCY_REQUEST &&
+                    it.status == AlertStatus.ACTIVE
             }
             if (triggerAlert == null) {
                 val cooldownUntil = triggerCooldownUntil[worker.workerId] ?: 0L
                 val inTriggerBurst = worker.workerId in currentlyTriggering
                 if (workerTriggered && !inTriggerBurst && s.now >= cooldownUntil) {
-                    currentlyTriggering.add(worker.workerId)
-                    triggerCooldownUntil[worker.workerId] = s.now + FALL_COOLDOWN_MS
-                    openWorkerTriggerAlert(worker, reading)
+                    val opened = openWorkerTriggerAlert(worker, reading)
+                    if (opened) {
+                        currentlyTriggering.add(worker.workerId)
+                        triggerCooldownUntil[worker.workerId] = s.now + FALL_COOLDOWN_MS
+                    }
                 } else if (workerTriggered) {
                     currentlyTriggering.add(worker.workerId)
+                }
+            } else if (workerTriggered) {
+                val cooldownUntil = triggerCooldownUntil[worker.workerId] ?: 0L
+                val inTriggerBurst = worker.workerId in currentlyTriggering
+                if (!inTriggerBurst && s.now >= cooldownUntil) {
+                    currentlyTriggering.add(worker.workerId)
+                    triggerCooldownUntil[worker.workerId] = s.now + FALL_COOLDOWN_MS
+                    dismissedPopups.remove(triggerAlert.alertId)
+                    showPopupAndNotify(triggerAlert, worker, reading.vestId)
+                    scheduleResetSafetyResponse(worker.workerId)
                 }
             }
 
@@ -313,51 +334,144 @@ class SafetyWatcher @Inject constructor(
 
             val noResponseAlert = s.alerts.firstOrNull {
                 it.workerId == worker.workerId &&
-                    (it.type == AlertType.NO_SAFETY_RESPONSE ||
-                        (it.type == AlertType.FALL_DETECTED && it.severity == AlertSeverity.EMERGENCY))
+                    it.type == AlertType.NO_SAFETY_RESPONSE &&
+                    it.status == AlertStatus.ACTIVE
             }
             if (noResponseAlert == null) {
                 val cooldownUntil = noResponseCooldownUntil[worker.workerId] ?: 0L
                 val inNoRespBurst = worker.workerId in currentlyNoResponse
                 if (noSafetyResponse && !inNoRespBurst && s.now >= cooldownUntil) {
-                    currentlyNoResponse.add(worker.workerId)
-                    noResponseCooldownUntil[worker.workerId] = s.now + FALL_COOLDOWN_MS
-                    openNoSafetyResponseAlert(worker, reading)
+                    val opened = openNoSafetyResponseAlert(worker, reading)
+                    if (opened) {
+                        currentlyNoResponse.add(worker.workerId)
+                        noResponseCooldownUntil[worker.workerId] = s.now + FALL_COOLDOWN_MS
+                    }
                 } else if (noSafetyResponse) {
                     currentlyNoResponse.add(worker.workerId)
+                }
+            } else if (noSafetyResponse) {
+                val cooldownUntil = noResponseCooldownUntil[worker.workerId] ?: 0L
+                val inNoRespBurst = worker.workerId in currentlyNoResponse
+                if (!inNoRespBurst && s.now >= cooldownUntil) {
+                    currentlyNoResponse.add(worker.workerId)
+                    noResponseCooldownUntil[worker.workerId] = s.now + FALL_COOLDOWN_MS
+                    dismissedPopups.remove(noResponseAlert.alertId)
+                    showPopupAndNotify(noResponseAlert, worker, reading.vestId)
+                    scheduleResetSafetyResponse(worker.workerId)
                 }
             }
         }
     }
 
     /**
-     * Opens the fall alert and its linked incident record, once. `openFallAlertId` on the
-     * worker is claimed in a transaction so two phones seeing the same fall can't open
-     * multiple alerts.
+     * Directly ensures a No Safety Response alert is registered and its pop-up shown when the
+     * 15-second Initiate Safety Response countdown expires without worker acknowledgment.
      */
-    private suspend fun openFallAlert(worker: Worker, reading: SensorReading) {
-        val siteName = resolveSiteName(worker.siteId)
-        val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
-        val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
-        val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alertRef.id)
+    suspend fun ensureNoSafetyResponseAlert(workerId: String, currentReading: SensorReading? = null) {
+        val worker = runCatching {
+            val snap = firestore.collection(FirebasePaths.WORKERS).document(workerId).get().await()
+            if (snap.exists()) snap.toWorker() else null
+        }.getOrNull() ?: Worker(
+            workerId = workerId,
+            firstName = "Worker",
+            lastName = workerId,
+            phone = "",
+            birthday = null,
+            age = null,
+            floorNumber = null,
+            jobPosition = null,
+            photoUrl = null,
+            contractorId = null,
+            siteId = watchingSite,
+            assignedVestId = null,
+            currentStatus = SafetyStatus.EMERGENCY,
+            active = true,
+        )
+
+        val reading = currentReading ?: SensorReading(
+            workerId = workerId,
+            vestId = worker.assignedVestId.orEmpty(),
+            heartRate = null,
+            temperature = null,
+            motionState = MotionState.STATIONARY,
+            fallDetected = false,
+            latitude = null,
+            longitude = null,
+            batteryPercent = null,
+            wifiRssi = null,
+            safetyResponse = SafetyResponseState.NO_RESPONSE,
+            timestamp = System.currentTimeMillis(),
+        )
         val now = System.currentTimeMillis()
-        firestore.runTransaction { tx ->
-            val existingId = tx.get(workerRef).getString("openFallAlertId")
-            if (existingId != null) {
-                val existing = tx.get(firestore.collection(FirebasePaths.ALERTS).document(existingId))
-                if (existing.exists()) {
+        val opened = openNoSafetyResponseAlert(worker, reading)
+        if (opened) {
+            currentlyNoResponse.add(workerId)
+            noResponseCooldownUntil[workerId] = now + FALL_COOLDOWN_MS
+        }
+    }
+
+    private fun scheduleResetSafetyResponse(workerId: String) {
+        scope.launch {
+            delay(3_500L)
+            runCatching {
+                monitoringRepository.setSafetyResponse(workerId, SafetyResponseState.NONE)
+            }
+        }
+    }
+
+    private suspend fun showPopupAndNotify(alert: Alert, worker: Worker, fallbackVestId: String?) {
+        val workerName = worker.fullName.ifBlank { "Worker ${worker.workerId}" }
+        val resolvedSiteName = alert.siteName?.takeIf { it.isNotBlank() }
+            ?: resolveSiteName(alert.siteId?.takeIf { it.isNotBlank() } ?: worker.siteId)
+        val resolvedFloor = alert.floorNumber?.takeIf { it.isNotBlank() }
+            ?: worker.floorNumber?.takeIf { it.isNotBlank() }
+        val vestId = alert.vestId.ifBlank { worker.assignedVestId ?: fallbackVestId }
+
+        notified[alert.alertId] = alert.severity
+        dismissedPopups.remove(alert.alertId)
+        _fallPopup.value = FallPopupState(
+            alert = alert,
+            workerName = workerName,
+            vestId = vestId,
+            siteName = resolvedSiteName,
+            floorNumber = resolvedFloor,
+        )
+        runCatching { notify(alert, workerName) }
+    }
+
+    /**
+     * Opens the fall alert and its linked incident record, and immediately triggers the pop-up.
+     */
+    private suspend fun openFallAlert(worker: Worker, reading: SensorReading): Boolean = alertMutex.withLock {
+        runCatching {
+            val siteName = resolveSiteName(worker.siteId)
+            val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
+            val now = System.currentTimeMillis()
+
+            val existingId = runCatching { workerRef.get().await().getString("openFallAlertId") }.getOrNull()
+            if (!existingId.isNullOrBlank()) {
+                val existing = runCatching {
+                    firestore.collection(FirebasePaths.ALERTS).document(existingId).get().await()
+                }.getOrNull()
+                if (existing != null && existing.exists()) {
                     val status = AlertStatus.fromRaw(existing.getString("status"))
-                    val existingCreatedAt = existing.getLong("createdAt") ?: 0L
-                    if (status != AlertStatus.RESOLVED || (now - existingCreatedAt) < FALL_COOLDOWN_MS) {
-                        return@runTransaction
+                    val existingCreatedAt = (existing.get("createdAt") as? Number)?.toLong() ?: 0L
+                    if (status == AlertStatus.ACTIVE && (now - existingCreatedAt) < FALL_COOLDOWN_MS) {
+                        return@withLock false
                     }
                 }
             }
-            tx.set(
+
+            val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
+            val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alertRef.id)
+            val vestId = (worker.assignedVestId ?: reading.vestId).orEmpty()
+
+            val batch = firestore.batch()
+            batch.set(
                 alertRef,
                 mapOf(
                     "workerId" to worker.workerId,
-                    "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "vestId" to vestId,
                     "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
                     "siteName" to siteName,
@@ -370,11 +484,11 @@ class SafetyWatcher @Inject constructor(
                     "createdAt" to now,
                 ),
             )
-            tx.set(
+            batch.set(
                 incidentRef,
                 mapOf(
                     "workerId" to worker.workerId,
-                    "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "vestId" to vestId,
                     "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
                     "siteName" to siteName,
@@ -391,8 +505,30 @@ class SafetyWatcher @Inject constructor(
                     "resolutionNotes" to null,
                 ),
             )
-            tx.update(workerRef, "openFallAlertId", alertRef.id)
-        }.await()
+            batch.commit().await()
+            runCatching { workerRef.update("openFallAlertId", alertRef.id).await() }
+
+            val createdAlert = Alert(
+                alertId = alertRef.id,
+                workerId = worker.workerId,
+                vestId = vestId,
+                siteId = worker.siteId,
+                siteName = siteName,
+                floorNumber = worker.floorNumber,
+                type = AlertType.FALL_DETECTED,
+                severity = AlertSeverity.DANGER,
+                status = AlertStatus.ACTIVE,
+                message = "Fall detected",
+                createdAt = now,
+                acknowledgedAt = null,
+                resolvedAt = null,
+                resolvedBy = null,
+                resolutionNotes = null,
+            )
+            activeFallAlertWorkers[createdAlert.alertId] = worker.workerId
+            showPopupAndNotify(createdAlert, worker, reading.vestId)
+            true
+        }.getOrDefault(false)
     }
 
     /**
@@ -400,29 +536,36 @@ class SafetyWatcher @Inject constructor(
      * Title: "Worker Trigger" (via AlertType.EMERGENCY_REQUEST.label()).
      * Message from the vest: "Worker Trigger. Please check with Worker."
      */
-    private suspend fun openWorkerTriggerAlert(worker: Worker, reading: SensorReading) {
-        val siteName = resolveSiteName(worker.siteId)
-        val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
-        val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
-        val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alertRef.id)
-        val now = System.currentTimeMillis()
-        firestore.runTransaction { tx ->
-            val existingId = tx.get(workerRef).getString("openTriggerAlertId")
-            if (existingId != null) {
-                val existing = tx.get(firestore.collection(FirebasePaths.ALERTS).document(existingId))
-                if (existing.exists()) {
+    private suspend fun openWorkerTriggerAlert(worker: Worker, reading: SensorReading): Boolean = alertMutex.withLock {
+        runCatching {
+            val siteName = resolveSiteName(worker.siteId)
+            val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
+            val now = System.currentTimeMillis()
+
+            val existingId = runCatching { workerRef.get().await().getString("openTriggerAlertId") }.getOrNull()
+            if (!existingId.isNullOrBlank()) {
+                val existing = runCatching {
+                    firestore.collection(FirebasePaths.ALERTS).document(existingId).get().await()
+                }.getOrNull()
+                if (existing != null && existing.exists()) {
                     val status = AlertStatus.fromRaw(existing.getString("status"))
-                    val existingCreatedAt = existing.getLong("createdAt") ?: 0L
-                    if (status != AlertStatus.RESOLVED || (now - existingCreatedAt) < FALL_COOLDOWN_MS) {
-                        return@runTransaction
+                    val existingCreatedAt = (existing.get("createdAt") as? Number)?.toLong() ?: 0L
+                    if (status == AlertStatus.ACTIVE && (now - existingCreatedAt) < FALL_COOLDOWN_MS) {
+                        return@withLock false
                     }
                 }
             }
-            tx.set(
+
+            val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
+            val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alertRef.id)
+            val vestId = (worker.assignedVestId ?: reading.vestId).orEmpty()
+
+            val batch = firestore.batch()
+            batch.set(
                 alertRef,
                 mapOf(
                     "workerId" to worker.workerId,
-                    "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "vestId" to vestId,
                     "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
                     "siteName" to siteName,
@@ -435,11 +578,11 @@ class SafetyWatcher @Inject constructor(
                     "createdAt" to now,
                 ),
             )
-            tx.set(
+            batch.set(
                 incidentRef,
                 mapOf(
                     "workerId" to worker.workerId,
-                    "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "vestId" to vestId,
                     "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
                     "siteName" to siteName,
@@ -456,37 +599,67 @@ class SafetyWatcher @Inject constructor(
                     "resolutionNotes" to null,
                 ),
             )
-            tx.update(workerRef, "openTriggerAlertId", alertRef.id)
-        }.await()
+            batch.commit().await()
+            runCatching { workerRef.update("openTriggerAlertId", alertRef.id).await() }
+
+            val createdAlert = Alert(
+                alertId = alertRef.id,
+                workerId = worker.workerId,
+                vestId = vestId,
+                siteId = worker.siteId,
+                siteName = siteName,
+                floorNumber = worker.floorNumber,
+                type = AlertType.EMERGENCY_REQUEST,
+                severity = AlertSeverity.EMERGENCY,
+                status = AlertStatus.ACTIVE,
+                message = "Worker Trigger. Please check with Worker.",
+                createdAt = now,
+                acknowledgedAt = null,
+                resolvedAt = null,
+                resolvedBy = null,
+                resolutionNotes = null,
+            )
+            activeTriggerAlertWorkers[createdAlert.alertId] = worker.workerId
+            showPopupAndNotify(createdAlert, worker, reading.vestId)
+            scheduleResetSafetyResponse(worker.workerId)
+            true
+        }.getOrDefault(false)
     }
 
     /**
      * Opens the No Safety Response alert when a worker does not respond within 15 seconds
      * to an initiated safety response check.
      */
-    private suspend fun openNoSafetyResponseAlert(worker: Worker, reading: SensorReading) {
-        val siteName = resolveSiteName(worker.siteId)
-        val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
-        val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
-        val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alertRef.id)
-        val now = System.currentTimeMillis()
-        firestore.runTransaction { tx ->
-            val existingId = tx.get(workerRef).getString("openNoResponseAlertId")
-            if (existingId != null) {
-                val existing = tx.get(firestore.collection(FirebasePaths.ALERTS).document(existingId))
-                if (existing.exists()) {
+    private suspend fun openNoSafetyResponseAlert(worker: Worker, reading: SensorReading): Boolean = alertMutex.withLock {
+        runCatching {
+            val siteName = resolveSiteName(worker.siteId)
+            val workerRef = firestore.collection(FirebasePaths.WORKERS).document(worker.workerId)
+            val now = System.currentTimeMillis()
+
+            val existingId = runCatching { workerRef.get().await().getString("openNoResponseAlertId") }.getOrNull()
+            if (!existingId.isNullOrBlank()) {
+                val existing = runCatching {
+                    firestore.collection(FirebasePaths.ALERTS).document(existingId).get().await()
+                }.getOrNull()
+                if (existing != null && existing.exists()) {
                     val status = AlertStatus.fromRaw(existing.getString("status"))
-                    val existingCreatedAt = existing.getLong("createdAt") ?: 0L
-                    if (status != AlertStatus.RESOLVED || (now - existingCreatedAt) < FALL_COOLDOWN_MS) {
-                        return@runTransaction
+                    val existingCreatedAt = (existing.get("createdAt") as? Number)?.toLong() ?: 0L
+                    if (status == AlertStatus.ACTIVE && (now - existingCreatedAt) < FALL_COOLDOWN_MS) {
+                        return@withLock false
                     }
                 }
             }
-            tx.set(
+
+            val alertRef = firestore.collection(FirebasePaths.ALERTS).document()
+            val incidentRef = firestore.collection(FirebasePaths.INCIDENTS).document(alertRef.id)
+            val vestId = (worker.assignedVestId ?: reading.vestId).orEmpty()
+
+            val batch = firestore.batch()
+            batch.set(
                 alertRef,
                 mapOf(
                     "workerId" to worker.workerId,
-                    "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "vestId" to vestId,
                     "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
                     "siteName" to siteName,
@@ -499,11 +672,11 @@ class SafetyWatcher @Inject constructor(
                     "createdAt" to now,
                 ),
             )
-            tx.set(
+            batch.set(
                 incidentRef,
                 mapOf(
                     "workerId" to worker.workerId,
-                    "vestId" to (worker.assignedVestId ?: reading.vestId),
+                    "vestId" to vestId,
                     "floorNumber" to worker.floorNumber,
                     "siteId" to worker.siteId,
                     "siteName" to siteName,
@@ -520,8 +693,31 @@ class SafetyWatcher @Inject constructor(
                     "resolutionNotes" to null,
                 ),
             )
-            tx.update(workerRef, "openNoResponseAlertId", alertRef.id)
-        }.await()
+            batch.commit().await()
+            runCatching { workerRef.update("openNoResponseAlertId", alertRef.id).await() }
+
+            val createdAlert = Alert(
+                alertId = alertRef.id,
+                workerId = worker.workerId,
+                vestId = vestId,
+                siteId = worker.siteId,
+                siteName = siteName,
+                floorNumber = worker.floorNumber,
+                type = AlertType.NO_SAFETY_RESPONSE,
+                severity = AlertSeverity.EMERGENCY,
+                status = AlertStatus.ACTIVE,
+                message = "Worker is in danger, please check with worker",
+                createdAt = now,
+                acknowledgedAt = null,
+                resolvedAt = null,
+                resolvedBy = null,
+                resolutionNotes = null,
+            )
+            activeNoResponseAlertWorkers[createdAlert.alertId] = worker.workerId
+            showPopupAndNotify(createdAlert, worker, reading.vestId)
+            scheduleResetSafetyResponse(worker.workerId)
+            true
+        }.getOrDefault(false)
     }
 
     /** Upgrades the fall alert to EMERGENCY and updates its incident, once. */
@@ -657,6 +853,12 @@ class SafetyWatcher @Inject constructor(
                         siteName = resolvedSiteName,
                         floorNumber = resolvedFloor,
                     )
+                } ?: _fallPopup.value?.takeIf { current ->
+                    val isRecent = System.currentTimeMillis() - current.alert.createdAt < 5_000L
+                    val notDismissed = dismissedPopups[current.alert.alertId]?.let {
+                        current.alert.severity.ordinal > it.ordinal
+                    } ?: true
+                    isRecent && notDismissed && current.alert.status == AlertStatus.ACTIVE
                 }
 
                 first = false

@@ -931,20 +931,18 @@ void firebaseCloudTask(void* pvParameters) {
       continue;
     }
 
-    // 3. Immediate Fall Event Push (Single Fall:1 signal)
+    // 3. Immediate Fall Event Push (Holds fallDetected:true until FALL_COOLDOWN_MS completes)
     if (pendingFallPush) {
       pendingFallPush = false;
       lastPush = now;
       pushReadingToFirebase(true);
-      // Immediately clear fallDetected after sending the 1 fall signal so periodic pushes send Fall:0
-      fallDetected = false;
-      motionState = "STATIONARY";
     }
 
     // 4. Clear Fall Flag on Cooldown Completion
     if (pendingFallClear) {
       pendingFallClear = false;
       Firebase.setBool(fbdo, String("/vestsLive/") + currentVestId + "/fallDetected", false);
+      Firebase.setBool(fbdo, String("/vestsLiveByMac/") + esp32CleanMac + "/fallDetected", false);
       pushReadingToFirebase(false);
     }
 
@@ -1211,6 +1209,12 @@ void checkRemoteSafetyResponse() {
       remoteState = fbdo.stringData();
     }
   }
+  if (remoteState.length() == 0 || remoteState == "null") {
+    String macRespPath = String("/vestsLiveByMac/") + esp32CleanMac + "/safetyResponse";
+    if (Firebase.getString(fbdo, macRespPath.c_str())) {
+      remoteState = fbdo.stringData();
+    }
+  }
   remoteState.trim();
   if (remoteState.length() == 0 || remoteState == "null") return;
 
@@ -1470,6 +1474,7 @@ void checkVitalEmergency() {
 //    to SSO ("EMERGENCY_REQUESTED").
 void checkSOS() {
   unsigned long now = millis();
+  static unsigned long lastEmergencyStateMs = 0;
 
   // Auto-reset ACKNOWLEDGED ("Worker has Responded") back to NONE ("No Actions") after 5 seconds
   if (currentSafetyResponse == "ACKNOWLEDGED" && safetyResponseAckMs > 0 && (now - safetyResponseAckMs >= 5000UL)) {
@@ -1481,11 +1486,24 @@ void checkSOS() {
     Serial.println("\n[SAFETY] 🔄 Auto-reset safetyResponse from ACKNOWLEDGED -> NONE (No Actions).");
   }
 
+  // Auto-reset EMERGENCY_REQUESTED / NO_RESPONSE after 8 seconds so repeated button holds always register
+  if ((currentSafetyResponse == "EMERGENCY_REQUESTED" || currentSafetyResponse == "NO_RESPONSE") &&
+      lastEmergencyStateMs > 0 && (now - lastEmergencyStateMs >= 8000UL)) {
+    lastEmergencyStateMs = 0;
+    sosTriggered = false;
+    currentSafetyResponse = "NONE";
+    safetyResponseToSync = "NONE";
+    pendingSafetyResponseSync = true;
+    pendingImmediatePush = true;
+    Serial.println("\n[SAFETY] 🔄 Auto-reset emergency safetyResponse -> NONE after cloud registration window.");
+  }
+
   // Function 1 Timeout: 15-second window for worker to 1-click D15
   if (safetyCheckActive && (now - safetyCheckStartMs >= SAFETY_RESPONSE_TIMEOUT_MS)) {
     safetyCheckActive = false;
     stopEmergencyAlarm();
     currentSafetyResponse = "NO_RESPONSE";
+    lastEmergencyStateMs = now;
     safetyResponseToSync = "NO_RESPONSE";
     pendingSafetyResponseSync = true;
     pendingImmediatePush = true;
@@ -1516,6 +1534,7 @@ void checkSOS() {
       safetyCheckActive = false;
       sosTriggered = true;
       currentSafetyResponse = "EMERGENCY_REQUESTED";
+      lastEmergencyStateMs = now;
       safetyResponseToSync = "EMERGENCY_REQUESTED";
       pendingSafetyResponseSync = true;
       pendingImmediatePush = true;
