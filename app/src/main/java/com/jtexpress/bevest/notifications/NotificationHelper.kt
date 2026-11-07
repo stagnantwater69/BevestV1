@@ -180,23 +180,7 @@ object NotificationHelper {
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                     ),
                 )
-            val fullScreen = Intent(context, EmergencyAlertActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                putExtra(EmergencyAlertActivity.EXTRA_TITLE, title)
-                putExtra(EmergencyAlertActivity.EXTRA_BODY, body)
-                putExtra(EmergencyAlertActivity.EXTRA_NOTIFICATION_ID, id)
-                putDeepLink(type, targetId, workerId)
-            }
             builder
-                .setFullScreenIntent(
-                    PendingIntent.getActivity(
-                        context,
-                        id,
-                        fullScreen,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-                    ),
-                    true,
-                )
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setDeleteIntent(
                     PendingIntent.getBroadcast(

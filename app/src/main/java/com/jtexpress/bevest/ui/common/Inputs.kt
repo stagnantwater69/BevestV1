@@ -16,6 +16,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -26,6 +28,9 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
@@ -194,6 +199,7 @@ fun FormField(
     val keyboard = LocalSoftwareKeyboardController.current
     val isPhone = keyboardType == KeyboardType.Phone
     val displayValue = if (isPhone) Validators.stripCountryCode(value) else value
+    var passwordVisible by remember { mutableStateOf(false) }
 
     OutlinedTextField(
         value = displayValue,
@@ -226,6 +232,19 @@ fun FormField(
         } else {
             null
         },
+        trailingIcon = if (isPassword) {
+            {
+                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                    Icon(
+                        imageVector = if (passwordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                        contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                        modifier = Modifier.size(IconSize.medium),
+                    )
+                }
+            }
+        } else {
+            null
+        },
         isError = error != null,
         supportingText = when {
             // One slot, two purposes — so validating a field cannot reflow the form.
@@ -238,7 +257,7 @@ fun FormField(
             else -> null
         },
         singleLine = singleLine,
-        visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
+        visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
         keyboardActions = KeyboardActions(
             onNext = { focus.moveFocus(androidx.compose.ui.focus.FocusDirection.Down) },

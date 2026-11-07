@@ -1,4 +1,4 @@
-﻿package com.jtexpress.bevest.ui.vest
+package com.jtexpress.bevest.ui.vest
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -15,12 +15,12 @@ import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.utils.Outcome
 import com.jtexpress.bevest.utils.Validators
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -59,6 +59,8 @@ data class PairVestState(
     val scannedMac: String? = null,
     val wifiSsid: String = "",
     val wifiPass: String = "",
+    val wifiSsidError: String? = null,
+    val wifiPassError: String? = null,
     val provisioningWifi: Boolean = false,
     val wifiProvisionSuccess: Boolean = false,
     val checking: Boolean = false,
@@ -90,13 +92,29 @@ class PairVestViewModel @Inject constructor(
         viewModelScope.launch {
             bleProvisioner.state.collect { bleState ->
                 _state.update { current ->
+                    val wifiFailedOnStep = current.step == PairStep.PROVISION_WIFI &&
+                        bleState.connectionState == BleConnectionState.FAILED
+                    val bleSsidErr = if (wifiFailedOnStep && bleState.errorCode == "WIFI_NOT_FOUND") {
+                        "Wi-Fi network not found (check 2.4 GHz SSID)"
+                    } else current.wifiSsidError
+                    val blePassErr = if (wifiFailedOnStep && bleState.errorCode == "WIFI_INVALID") {
+                        "Invalid Wi-Fi SSID or password"
+                    } else current.wifiPassError
+
                     current.copy(
                         scanningBle = bleState.scanning,
                         discoveredBles = bleState.discoveredVests,
                         connectedBle = bleState.connectedVest ?: current.connectedBle,
                         bleStatusMsg = bleState.statusMessage,
                         wifiProvisionSuccess = bleState.connectionState == BleConnectionState.SUCCESS_CONFIRMED,
-                        provisioningWifi = bleState.connectionState == BleConnectionState.TRANSMITTING_WIFI
+                        provisioningWifi = bleState.connectionState == BleConnectionState.TRANSMITTING_WIFI,
+                        wifiSsidError = bleSsidErr,
+                        wifiPassError = blePassErr,
+                        error = if (wifiFailedOnStep && !bleState.statusMessage.isNullOrBlank()) {
+                            bleState.statusMessage
+                        } else {
+                            current.error
+                        },
                     )
                 }
             }
@@ -135,9 +153,9 @@ class PairVestViewModel @Inject constructor(
 
     fun onVestIdInput(v: String) = _state.update { it.copy(vestIdInput = v, vestIdError = null, error = null) }
 
-    fun onWifiSsidInput(v: String) = _state.update { it.copy(wifiSsid = v, error = null) }
+    fun onWifiSsidInput(v: String) = _state.update { it.copy(wifiSsid = v, wifiSsidError = null, error = null) }
 
-    fun onWifiPassInput(v: String) = _state.update { it.copy(wifiPass = v, error = null) }
+    fun onWifiPassInput(v: String) = _state.update { it.copy(wifiPass = v, wifiPassError = null, error = null) }
 
     // ── QR Scanning & Hardware Validation ────────────────────────────────────
 
@@ -248,12 +266,30 @@ class PairVestViewModel @Inject constructor(
         val pass = _state.value.wifiPass.trim()
         val vestId = _state.value.identifiedVestId ?: _state.value.vestIdInput
 
-        if (ssid.isBlank()) {
-            _state.update { it.copy(error = "Please enter the site Wi-Fi SSID (Network Name).") }
+        val sErr = when {
+            ssid.isBlank() -> "Wi-Fi SSID is required"
+            ssid.length > 32 -> "SSID cannot exceed 32 characters"
+            else -> null
+        }
+        val pErr = when {
+            pass.isBlank() -> "Wi-Fi password is required"
+            pass.length < 8 -> "Password must be at least 8 characters"
+            pass.length > 63 -> "Password cannot exceed 63 characters"
+            else -> null
+        }
+
+        if (sErr != null || pErr != null) {
+            _state.update {
+                it.copy(
+                    wifiSsidError = sErr,
+                    wifiPassError = pErr,
+                    error = sErr ?: pErr ?: "Invalid Wi-Fi credentials.",
+                )
+            }
             return
         }
 
-        _state.update { it.copy(provisioningWifi = true, error = null) }
+        _state.update { it.copy(provisioningWifi = true, wifiSsidError = null, wifiPassError = null, error = null) }
         bleProvisioner.sendWifiConfig(ssid, pass, vestId)
     }
 

@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.jtexpress.bevest.data.ble.BleConnectionState
 import com.jtexpress.bevest.data.ble.DiscoveredBleVest
 import androidx.compose.material3.Icon
@@ -540,7 +542,12 @@ fun VestDetailScreen(
                         title = "Service",
                         supporting = "Take a vest out of use while it is repaired",
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    ) {
                         SecondaryButton(
                             text = "Needs service",
                             onClick = { viewModel.setStatus(VestStatus.MAINTENANCE) },
@@ -619,7 +626,6 @@ fun VestDetailScreen(
             wifiUi = state.wifiUi,
             onSsidChange = viewModel::onWifiSsidInput,
             onPassChange = viewModel::onWifiPassInput,
-            onUpdateViaCloud = viewModel::updateWifiViaCloud,
             onTriggerRemoteBleAndScan = viewModel::triggerRemoteBleModeAndScan,
             onStartBleScan = viewModel::startBleScan,
             onConnectBle = viewModel::connectBleVest,
@@ -651,9 +657,15 @@ private fun AssignWorkerToVestDialog(
         }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.md, vertical = Spacing.lg)
+                .widthIn(max = 520.dp),
             shape = BevestShapes.card,
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
@@ -806,7 +818,6 @@ private fun ChangeVestWifiDialog(
     wifiUi: com.jtexpress.bevest.ui.vest.WifiReprovisionUiState,
     onSsidChange: (String) -> Unit,
     onPassChange: (String) -> Unit,
-    onUpdateViaCloud: () -> Unit,
     onTriggerRemoteBleAndScan: () -> Unit,
     onStartBleScan: () -> Unit,
     onConnectBle: (DiscoveredBleVest) -> Unit,
@@ -814,7 +825,8 @@ private fun ChangeVestWifiDialog(
     onDismiss: () -> Unit,
 ) {
     val palette = LocalStatusPalette.current
-    var selectedTab by remember { mutableStateOf(if (vest.online) 0 else 1) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
 
     val permissionsToRequest = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -831,9 +843,15 @@ private fun ChangeVestWifiDialog(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { onStartBleScan() }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.md, vertical = Spacing.lg)
+                .widthIn(max = 520.dp),
             shape = BevestShapes.card,
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
@@ -850,13 +868,13 @@ private fun ChangeVestWifiDialog(
                     horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                 ) {
                     Icon(
-                        Icons.Outlined.Wifi,
+                        Icons.Outlined.Bluetooth,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                     )
                     Column(Modifier.weight(1f)) {
                         Text(
-                            text = "Change Wi-Fi Network",
+                            text = "Change Wi-Fi via Bluetooth",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
@@ -868,29 +886,17 @@ private fun ChangeVestWifiDialog(
                     }
                 }
 
-                // Mode selector: Cloud (when Online) vs Bluetooth (when at new site / BLE mode)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                ) {
-                    SecondaryButton(
-                        text = "Over Cloud",
-                        onClick = { selectedTab = 0 },
-                        icon = Icons.Outlined.Wifi,
-                        modifier = Modifier.weight(1f),
-                    )
-                    SecondaryButton(
-                        text = "Via Bluetooth",
-                        onClick = { selectedTab = 1 },
-                        icon = Icons.Outlined.Bluetooth,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+                Text(
+                    text = "Connect to the vest via Bluetooth to configure its 2.4 GHz Wi-Fi network. If the vest is currently online, tap below to switch it into Bluetooth Pairing Mode.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
 
                 FormField(
                     label = "New Site Wi-Fi SSID (2.4 GHz)",
                     value = wifiUi.ssid,
                     onValueChange = onSsidChange,
+                    error = wifiUi.ssidError,
                     helper = "e.g. SiteB-Safety-WiFi",
                     imeAction = ImeAction.Next,
                 )
@@ -899,37 +905,22 @@ private fun ChangeVestWifiDialog(
                     label = "New Wi-Fi Password",
                     value = wifiUi.pass,
                     onValueChange = onPassChange,
-                    helper = "Enter Wi-Fi password",
+                    error = wifiUi.passError,
+                    helper = "Minimum 8 characters (WPA/WPA2)",
                     keyboardType = KeyboardType.Password,
                     isPassword = true,
                     imeAction = ImeAction.Done,
+                    onImeAction = {
+                        keyboard?.hide()
+                        focus.clearFocus()
+                        if (wifiUi.connectedBle != null) {
+                            onSendOverBle()
+                        }
+                    },
                 )
 
-                if (selectedTab == 0) {
-                    Text(
-                        text = if (vest.online) {
-                            "Since this vest is currently Online, it will receive the new Wi-Fi credentials immediately over Cloud, save them to Flash, and switch networks (or keep them ready for the next site)."
-                        } else {
-                            "This vest is currently Offline. Sending via Cloud will queue the new Wi-Fi credentials for the next time it connects, or use 'Via Bluetooth' if the vest is nearby."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-
-                    PrimaryButton(
-                        text = if (wifiUi.sendingCloud) "Sending to Vest..." else "Save & Switch Wi-Fi via Cloud",
-                        onClick = onUpdateViaCloud,
-                        loading = wifiUi.sendingCloud,
-                        enabled = !wifiUi.sendingCloud,
-                    )
-                } else {
-                    Text(
-                        text = "Use Bluetooth when the vest is at a new site without Wi-Fi, or switch an online vest into Bluetooth Pairing Mode.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-
-                    if (vest.online && wifiUi.connectedBle == null) {
+                if (wifiUi.connectedBle == null) {
+                    if (vest.online) {
                         SecondaryButton(
                             text = "Switch Online Vest to Bluetooth Mode",
                             onClick = {
@@ -941,102 +932,115 @@ private fun ChangeVestWifiDialog(
                         )
                     }
 
-                    if (wifiUi.connectedBle == null) {
-                        SecondaryButton(
-                            text = if (wifiUi.scanningBle) "Scanning for Vest..." else "Scan Nearby Bluetooth Vests",
-                            onClick = { permissionLauncher.launch(permissionsToRequest) },
-                            icon = Icons.Outlined.Bluetooth,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                    SecondaryButton(
+                        text = if (wifiUi.scanningBle) "Scanning for Vest..." else "Scan Nearby Bluetooth Vests",
+                        onClick = { permissionLauncher.launch(permissionsToRequest) },
+                        icon = Icons.Outlined.Bluetooth,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
 
-                        val cleanTargetMac = vest.macAddress?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()
-                        wifiUi.discoveredBles.forEach { dev ->
-                            val isThisVest = !cleanTargetMac.isNullOrBlank() && dev.cleanMac.equals(cleanTargetMac, ignoreCase = true)
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(BevestShapes.inner)
-                                    .clickable { onConnectBle(dev) },
-                                shape = BevestShapes.inner,
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (isThisVest) palette.normal else MaterialTheme.colorScheme.outlineVariant,
-                                ),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(Spacing.md),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                                ) {
-                                    Icon(
-                                        Icons.Outlined.Bluetooth,
-                                        contentDescription = null,
-                                        tint = if (isThisVest) palette.normal else MaterialTheme.colorScheme.primary,
-                                    )
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            text = if (isThisVest) "${dev.name} (Matches ${vest.vestId})" else dev.name,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                        Text(
-                                            text = "MAC: ${dev.address} · RSSI: ${dev.rssi} dBm",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    Text(
-                                        text = "Connect",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
-                            }
-                        }
-                    } else {
+                    val cleanTargetMac = vest.macAddress?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()
+                    wifiUi.discoveredBles.forEach { dev ->
+                        val isThisVest = !cleanTargetMac.isNullOrBlank() && dev.cleanMac.equals(cleanTargetMac, ignoreCase = true)
                         Surface(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(BevestShapes.inner)
+                                .clickable { onConnectBle(dev) },
                             shape = BevestShapes.inner,
-                            color = palette.normal.copy(alpha = 0.1f),
-                            border = BorderStroke(1.dp, palette.normal),
+                            border = BorderStroke(
+                                1.dp,
+                                if (isThisVest) palette.normal else MaterialTheme.colorScheme.outlineVariant,
+                            ),
                         ) {
                             Row(
-                                modifier = Modifier.padding(Spacing.md),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(Spacing.md),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                             ) {
-                                Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = palette.normal)
+                                Icon(
+                                    Icons.Outlined.Bluetooth,
+                                    contentDescription = null,
+                                    tint = if (isThisVest) palette.normal else MaterialTheme.colorScheme.primary,
+                                )
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        text = "Connected to ${wifiUi.connectedBle.name}",
+                                        text = if (isThisVest) "${dev.name} (Matches ${vest.vestId})" else dev.name,
                                         style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
-                                    wifiUi.bleStatusMsg?.let {
-                                        Text(
-                                            text = it,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
+                                    Text(
+                                        text = "MAC: ${dev.address} · RSSI: ${dev.rssi} dBm",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Text(
+                                    text = "Connect",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = BevestShapes.inner,
+                        color = palette.normal.copy(alpha = 0.1f),
+                        border = BorderStroke(1.dp, palette.normal),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(Spacing.md),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        ) {
+                            Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = palette.normal)
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = "Connected to ${wifiUi.connectedBle.name}",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                wifiUi.bleStatusMsg?.let {
+                                    Text(
+                                        text = it,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                             }
                         }
-
-                        PrimaryButton(
-                            text = if (wifiUi.bleConnectionState == BleConnectionState.TRANSMITTING_WIFI) {
-                                "Transmitting over BLE..."
-                            } else {
-                                "Send New Wi-Fi over Bluetooth"
-                            },
-                            onClick = onSendOverBle,
-                            loading = wifiUi.bleConnectionState == BleConnectionState.TRANSMITTING_WIFI,
-                            enabled = wifiUi.bleConnectionState != BleConnectionState.TRANSMITTING_WIFI,
-                        )
                     }
+
+                    PrimaryButton(
+                        text = if (wifiUi.bleConnectionState == BleConnectionState.TRANSMITTING_WIFI) {
+                            "Verifying Wi-Fi on Vest..."
+                        } else {
+                            "Send New Wi-Fi over Bluetooth"
+                        },
+                        onClick = {
+                            keyboard?.hide()
+                            focus.clearFocus()
+                            onSendOverBle()
+                        },
+                        loading = wifiUi.bleConnectionState == BleConnectionState.TRANSMITTING_WIFI,
+                        enabled = wifiUi.bleConnectionState != BleConnectionState.TRANSMITTING_WIFI,
+                    )
                 }
 
-                wifiUi.bleStatusMsg?.takeIf { selectedTab == 1 && wifiUi.connectedBle == null }?.let {
+                wifiUi.bleStatusMsg?.takeIf {
+                    wifiUi.connectedBle == null && wifiUi.bleConnectionState != BleConnectionState.FAILED
+                }?.let {
                     Text(
                         text = it,
                         style = MaterialTheme.typography.bodySmall,
@@ -1046,7 +1050,7 @@ private fun ChangeVestWifiDialog(
 
                 wifiUi.cloudSuccessMsg?.let { SuccessNote(it) }
                 if (wifiUi.bleConnectionState == BleConnectionState.SUCCESS_CONFIRMED) {
-                    SuccessNote("Vest confirmed new Wi-Fi connection and resumed live streaming!")
+                    SuccessNote("✓ Vest verified the Wi-Fi credentials, connected to \"${wifiUi.ssid.trim()}\", and resumed live streaming!")
                 }
                 wifiUi.errorMsg?.let { ErrorNote(it) }
 
@@ -1593,7 +1597,8 @@ fun PairVestScreen(
                             value = state.wifiSsid,
                             onValueChange = viewModel::onWifiSsidInput,
                             label = "Site Wi-Fi Network Name (SSID)",
-                            helper = "e.g. Site-Office-WiFi",
+                            error = state.wifiSsidError,
+                            helper = "2.4 GHz network (e.g. Site-Office-WiFi)",
                             keyboardType = KeyboardType.Text,
                             imeAction = ImeAction.Next,
                         )
@@ -1602,6 +1607,8 @@ fun PairVestScreen(
                             value = state.wifiPass,
                             onValueChange = viewModel::onWifiPassInput,
                             label = "Wi-Fi Password",
+                            error = state.wifiPassError,
+                            helper = "Minimum 8 characters (WPA/WPA2)",
                             keyboardType = KeyboardType.Password,
                             isPassword = true,
                             imeAction = ImeAction.Done,
@@ -1612,29 +1619,40 @@ fun PairVestScreen(
                             },
                         )
 
+                        state.bleStatusMsg?.takeIf { state.provisioningWifi }?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
                         if (state.wifiProvisionSuccess) {
-                            SuccessNote("✓ Wi-Fi credentials sent! Vest confirmed connection.")
+                            SuccessNote("✓ Wi-Fi credentials verified! Vest connected to \"${state.wifiSsid.trim()}\".")
                             PrimaryButton(
                                 text = "Continue to Worker Assignment",
                                 onClick = viewModel::skipWifiAndProceed
                             )
                         } else {
-                            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
-                                SecondaryButton(
-                                    text = "Skip Wi-Fi Setup",
-                                    onClick = viewModel::skipWifiAndProceed,
-                                    modifier = Modifier.weight(1f)
-                                )
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+                            ) {
                                 PrimaryButton(
-                                    text = "Send Wi-Fi",
+                                    text = "Send Wi-Fi over Bluetooth",
                                     onClick = {
                                         keyboard?.hide()
                                         focus.clearFocus()
                                         viewModel.sendWifiCredentials()
                                     },
                                     loading = state.provisioningWifi,
-                                    loadingText = "Transmitting…",
-                                    modifier = Modifier.weight(1f)
+                                    loadingText = "Verifying Wi-Fi on Vest…",
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                SecondaryButton(
+                                    text = "Skip Wi-Fi Setup",
+                                    onClick = viewModel::skipWifiAndProceed,
+                                    modifier = Modifier.fillMaxWidth(),
                                 )
                             }
                         }

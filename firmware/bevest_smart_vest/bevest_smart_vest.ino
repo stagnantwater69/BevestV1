@@ -156,6 +156,8 @@ BLEServer*         pBleServer          = nullptr;
 BLECharacteristic* pStatusChar         = nullptr;
 bool               bleDeviceConnected  = false;
 volatile bool      newConfigReceived   = false;
+volatile bool      pendingBlePairingMode = false;
+int                lastWifiFailReason  = 0; // 3 = Auth Failed, 4 = SSID Not Found
 String             rxSsid              = "";
 String             rxPass              = "";
 String             rxVestId            = "";
@@ -355,6 +357,7 @@ void updateLedIndicator() {
 class ServerCallbacks: public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) {
     bleDeviceConnected = true;
+    stopEmergencyAlarm();
     digitalWrite(BUZZER_PIN, LOW); // Ensure D25 buzzer stays completely silent on BLE connection
     buzzerOffTime = 0;
     Serial.println("\n[BLE] >>> Mobile App connected over Bluetooth! <<<");
@@ -362,7 +365,9 @@ class ServerCallbacks: public BLEServerCallbacks {
 
   void onDisconnect(BLEServer* pServer) {
     bleDeviceConnected = false;
+    stopEmergencyAlarm();
     digitalWrite(BUZZER_PIN, LOW);
+    buzzerOffTime = 0;
     Serial.println("[BLE] Mobile App disconnected.");
     if (inProvisioningMode && pServer) {
       delay(100);
@@ -437,7 +442,6 @@ void setup() {
     preferences.begin("bevest", false);
     preferences.clear();
     preferences.end();
-    triggerBuzzer(3);
   } else {
     // Arm double-tap window for 2.5 seconds
     rtcDoubleTapFlag = 1;
@@ -508,14 +512,17 @@ void setup() {
   // 5. Connect to Saved Wi-Fi or Start In-App BLE Pairing Mode
   if (isConfigured && currentWifiSSID.length() > 0) {
     Serial.printf("[WiFi]    Saved network found: \"%s\". Connecting...\n", currentWifiSSID.c_str());
-    bool connected = attemptWiFiConnection(currentWifiSSID, currentWifiPassword, 12);
+    bool connected = attemptWiFiConnection(currentWifiSSID, currentWifiPassword, 10);
     if (connected) {
       setLedPattern(LED_FAST_BLINK); // Fast Blinking = Connected to Wi-Fi
       initFirebaseService();
     } else {
       Serial.println("[WiFi]    ⚠️ Could not connect to saved network on power-up.");
-      Serial.println("[WiFi]    Broadcasting BLE & retrying saved Wi-Fi in background...");
-      setLedPattern(LED_ERR_WIFI_2_BLINKS); // 2 blinks per 2 sec = Wi-Fi issue
+      Serial.println("[BLE]     Automatically turning ON Bluetooth Pairing Mode so Wi-Fi can be changed...");
+      WiFi.setAutoReconnect(false);
+      WiFi.disconnect(false, true);
+      delay(100);
+      setLedPattern(LED_ERR_WIFI_2_BLINKS); // 2 blinks per 2 sec = Wi-Fi issue + BLE active
       startBleProvisioning();
     }
   } else {
@@ -538,36 +545,48 @@ void setup() {
 
 // ── Main Loop ────────────────────────────────────────────────────────────────
 void loop() {
-  // Check for button reset triggers (BOOT button or SOS button held for 3s)
+  // Check for button reset triggers (BOOT button held for 3s)
   checkResetTriggers();
 
-  // Always service non-blocking Blue LED and Buzzer timers (including during BLE provisioning mode)
-  updateLedIndicator();
-  updateBuzzerAndLeds();
+  // Check if Cloud or Wi-Fi failure requested switching into BLE Pairing Mode
+  if (pendingBlePairingMode) {
+    pendingBlePairingMode = false;
+    stopEmergencyAlarm();
+    digitalWrite(BUZZER_PIN, LOW);
+    buzzerOffTime = 0;
+    WiFi.setAutoReconnect(false);
+    WiFi.disconnect(false, true);
+    delay(150);
+    setLedPattern(LED_SLOW_BLINK);
+    startBleProvisioning();
+  }
 
-  // ── Provisioning Mode Handler ──
+  // Always service non-blocking Blue LED indicator
+  updateLedIndicator();
+
+  // ── Provisioning Mode Handler (No time limit, silent buzzer) ──
   if (inProvisioningMode) {
-    // If vest was previously configured with saved Wi-Fi, retry connecting in background every 8 seconds
-    if (isConfigured && currentWifiSSID.length() > 0 && !bleDeviceConnected) {
-      if (millis() - lastWifiRetryMs > 8000) {
-        lastWifiRetryMs = millis();
-        Serial.printf("[WiFi] Background retry connecting to: \"%s\"...\n", currentWifiSSID.c_str());
-        if (attemptWiFiConnection(currentWifiSSID, currentWifiPassword, 6)) {
-          Serial.println("[WiFi] ✅ Reconnected to site Wi-Fi!");
-          stopBleProvisioning();
-          setLedPattern(LED_FAST_BLINK);
-          beepShort(200);
-          initFirebaseService();
-          return;
-        } else {
-          setLedPattern(LED_ERR_WIFI_2_BLINKS); // 2 blinks per 2 sec
-        }
-      }
-    }
+    // Guarantee buzzer never beeps while in or connected to Bluetooth mode
+    stopEmergencyAlarm();
+    digitalWrite(BUZZER_PIN, LOW);
+    buzzerOffTime = 0;
 
     if (newConfigReceived) {
       newConfigReceived = false;
-      Serial.printf("[PROV] Attempting connection to \"%s\"...\n", rxSsid.c_str());
+      Serial.printf("[PROV] Validating & attempting connection to \"%s\"...\n", rxSsid.c_str());
+
+      // Validate SSID & WPA password length before attempting connection
+      if (rxSsid.length() == 0 || rxSsid.length() > 32 ||
+          (rxPass.length() > 0 && (rxPass.length() < 8 || rxPass.length() > 63))) {
+        Serial.println("[PROV] ❌ Invalid Wi-Fi credentials format (SSID or password length invalid).");
+        setLedPattern(LED_ERR_WIFI_2_BLINKS);
+        if (pStatusChar) {
+          pStatusChar->setValue("3");
+          pStatusChar->notify();
+        }
+        delay(10);
+        return;
+      }
 
       // Notify App: 1 = Connecting
       if (pStatusChar) {
@@ -575,7 +594,7 @@ void loop() {
         pStatusChar->notify();
       }
 
-      bool success = attemptWiFiConnection(rxSsid, rxPass, 20);
+      bool success = attemptWiFiConnection(rxSsid, rxPass, 14);
 
       if (success) {
         Serial.println("[PROV] ✅ Connected to site Wi-Fi successfully!");
@@ -597,33 +616,47 @@ void loop() {
 
         // Notify App: 2 = Success (Confirmed)
         if (pStatusChar) {
-          pStatusChar->setValue("2");
-          pStatusChar->notify();
+          for (int i = 0; i < 3; i++) {
+            pStatusChar->setValue("2");
+            pStatusChar->notify();
+            delay(200);
+          }
         }
 
-        delay(1000); // Allow BLE notification packet to be transmitted
+        delay(400); // Allow BLE notification packet to be transmitted
 
         // Shut down Bluetooth radio to release heap memory for Firebase TLS
         stopBleProvisioning();
         setLedPattern(LED_FAST_BLINK);
-        beepShort(300);
 
         // Start Firebase Telemetry Service
         initFirebaseService();
       } else {
-        Serial.println("[PROV] ❌ Failed to connect with provided credentials.");
+        Serial.println("[PROV] ❌ Failed to connect with provided Wi-Fi credentials.");
+        WiFi.setAutoReconnect(false);
+        WiFi.disconnect(false, true);
+        delay(150);
         setLedPattern(LED_ERR_WIFI_2_BLINKS);
-        // Notify App: 3 = Authentication Failed
+
+        // Notify App: 4 = SSID Not Found, 3 = Invalid Password / Auth Failed
+        const char* errCode = (lastWifiFailReason == 4) ? "4" : "3";
         if (pStatusChar) {
-          pStatusChar->setValue("3");
-          pStatusChar->notify();
+          for (int i = 0; i < 3; i++) {
+            pStatusChar->setValue(errCode);
+            pStatusChar->notify();
+            delay(150);
+          }
         }
-        WiFi.disconnect();
+        if (!bleDeviceConnected && pBleServer) {
+          BLEDevice::startAdvertising();
+        }
       }
     }
     delay(10);
     return; // Do not execute telemetry loop while in provisioning mode
   }
+
+  updateBuzzerAndLeds();
 
   // ── Normal Telemetry Operation ──
   // 1. Process GPS stream
@@ -694,6 +727,15 @@ void loadStoredConfiguration() {
 // ── Start BLE Provisioning Server ────────────────────────────────────────────
 void startBleProvisioning() {
   inProvisioningMode = true;
+  stopEmergencyAlarm();
+  digitalWrite(BUZZER_PIN, LOW);
+  buzzerOffTime = 0;
+
+  if (pBleServer != nullptr) {
+    BLEDevice::startAdvertising();
+    Serial.println("[BLE]     Re-advertising existing BLE Provisioning Service...");
+    return;
+  }
 
   // Advertised Name: BEVEST-<CLEAN_MAC> (e.g. BEVEST-246F28B49C12)
   String bleName = String("BEVEST-") + esp32CleanMac;
@@ -740,6 +782,7 @@ void startBleProvisioning() {
 // ── Stop BLE Provisioning Server ─────────────────────────────────────────────
 void stopBleProvisioning() {
   inProvisioningMode = false;
+  bleDeviceConnected = false;
   Serial.println("[BLE]     De-initializing BLE radio to reclaim heap memory...");
   BLEDevice::deinit(true); // Reclaims ~60KB of heap
   pBleServer = nullptr;
@@ -748,17 +791,35 @@ void stopBleProvisioning() {
 
 // ── Attempt Wi-Fi Connection ─────────────────────────────────────────────────
 bool attemptWiFiConnection(const String& ssid, const String& pass, int timeoutSec) {
+  lastWifiFailReason = 3;
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(false);
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
-  WiFi.setAutoReconnect(true);
+
+  // Cleanly stop any ongoing STA connection attempt to prevent "wifi:sta is connecting, return error"
+  WiFi.disconnect(false, true);
+  delay(200);
+
   WiFi.begin(ssid.c_str(), pass.c_str());
 
   Serial.printf("[WiFi]    Connecting to \"%s\"", ssid.c_str());
   int waited = 0;
-  while (WiFi.status() != WL_CONNECTED && waited < (timeoutSec * 2)) {
-    delay(500);
-    Serial.print(".");
+  int maxSlices = timeoutSec * 4; // 250ms per slice
+  bool sawNoSsid = false;
+  while (WiFi.status() != WL_CONNECTED && waited < maxSlices) {
+    delay(250);
+    wl_status_t st = WiFi.status();
+    if (st == WL_NO_SSID_AVAIL) {
+      sawNoSsid = true;
+      // If SSID is not found after 5 seconds of scanning all channels, fail fast
+      if (waited >= 20) break;
+    } else if (st == WL_CONNECT_FAILED) {
+      lastWifiFailReason = 3;
+      break;
+    }
+    if (waited % 2 == 0) Serial.print(".");
     waited++;
   }
   Serial.println();
@@ -766,6 +827,17 @@ bool attemptWiFiConnection(const String& ssid, const String& pass, int timeoutSe
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("[WiFi]    ✅ Connected! IP: %s\n", WiFi.localIP().toString().c_str());
     return true;
+  }
+
+  // Stop STA connection attempts immediately so radio is free for BLE
+  WiFi.setAutoReconnect(false);
+  WiFi.disconnect(false, true);
+  delay(150);
+
+  if (sawNoSsid) {
+    lastWifiFailReason = 4; // SSID Not Found
+  } else {
+    lastWifiFailReason = 3; // Invalid Password / Auth Failed
   }
   return false;
 }
@@ -806,7 +878,7 @@ void initFirebaseService() {
   }
 
   Firebase.begin(&config, &auth);
-  Firebase.reconnectWiFi(true);
+  Firebase.reconnectWiFi(false); // Managed explicitly to avoid "wifi:sta is connecting" conflicts and allow BLE fallback
   fbdo.setBSSLBufferSize(4096, 2048);
   fbdo.setResponseSize(2048);
 
@@ -821,7 +893,6 @@ void initFirebaseService() {
   if (Firebase.ready()) {
     firebaseReady = true;
     Serial.println("[Firebase] ✅ Cloud Connected & Ready to Stream!");
-    beepShort(250);
 
     // Auto-detect vest ID mapped to this ESP32 hardware MAC address
     String macMappingPath = String("/macToVest/") + esp32CleanMac;
@@ -877,7 +948,8 @@ void checkResetTriggers() {
     } else if (!buttonHeld && (millis() - buttonPressStart >= 3000)) {
       buttonHeld = true;
       Serial.println("\n[RESET]   ⚠️ Factory Reset Triggered (BOOT Button GPIO0 held 3s)!");
-      triggerBuzzer(4);
+      stopEmergencyAlarm();
+      digitalWrite(BUZZER_PIN, LOW);
 
       syncOnlinePresenceToFirestore(false);
       Firebase.setBool(fbdo, String("/vestsLive/") + currentVestId + "/online", false);
@@ -908,13 +980,16 @@ void firebaseCloudTask(void* pvParameters) {
 
     unsigned long now = millis();
 
-    // 1. Wi-Fi Auto-Reconnect
+    // 1. Wi-Fi Connection Loss / Error -> Try 1 clean reconnect, then automatically turn ON BLE Mode
     if (WiFi.status() != WL_CONNECTED) {
-      if (now - lastWifiRetry > 8000) {
-        lastWifiRetry = now;
-        Serial.println("[WiFi] Reconnecting to Wi-Fi...");
-        WiFi.disconnect();
-        WiFi.begin(currentWifiSSID.c_str(), currentWifiPassword.c_str());
+      Serial.printf("\n[WiFi] ⚠️ Wi-Fi connection lost or error. Attempting quick reconnect to \"%s\"...\n", currentWifiSSID.c_str());
+      if (attemptWiFiConnection(currentWifiSSID, currentWifiPassword, 8)) {
+        Serial.println("[WiFi] ✅ Reconnected to Wi-Fi!");
+        setLedPattern(LED_FAST_BLINK);
+      } else {
+        Serial.println("[WiFi] ❌ Could not connect to Wi-Fi. Automatically turning ON BLE Pairing Mode so Wi-Fi can be changed via Bluetooth!");
+        inProvisioningMode = true;
+        pendingBlePairingMode = true;
       }
       vTaskDelay(pdMS_TO_TICKS(200));
       continue;
@@ -957,18 +1032,18 @@ void firebaseCloudTask(void* pvParameters) {
       pushReadingToFirebase(false);
     }
 
-    // 6. Immediate Vital / SOS Push or Periodic Telemetry Push
+    // 6. Poll Incoming Safety Response Check from SSO App BEFORE pushing telemetry (every 1.2s)
+    static unsigned long lastSafetyCmdCheck = 0;
+    if (!pendingSafetyResponseSync && (now - lastSafetyCmdCheck >= 1200)) {
+      lastSafetyCmdCheck = now;
+      checkRemoteSafetyResponse();
+    }
+
+    // 7. Immediate Vital / SOS Push or Periodic Telemetry Push
     if (pendingImmediatePush || (now - lastPush >= PUSH_INTERVAL_MS)) {
       pendingImmediatePush = false;
       lastPush = now;
       pushReadingToFirebase(false);
-    }
-
-    // 7. Poll Incoming Safety Response Check from SSO App (every 1.5s)
-    static unsigned long lastSafetyCmdCheck = 0;
-    if (now - lastSafetyCmdCheck >= 1500) {
-      lastSafetyCmdCheck = now;
-      checkRemoteSafetyResponse();
     }
 
     // 8. Push 1-Minute Heart Rate & Body Temperature Log
@@ -1025,10 +1100,12 @@ void checkRemoteWifiCommand() {
 
   if (mode == "BLE_PAIRING") {
     Serial.println("\n[WIFI-CMD] 🔵 App requested Bluetooth Pairing Mode for Wi-Fi reconfiguration!");
+    stopEmergencyAlarm();
+    digitalWrite(BUZZER_PIN, LOW);
+    buzzerOffTime = 0;
     Firebase.setBool(fbdo, String("/vestsLive/") + currentVestId + "/online", false);
-    WiFi.disconnect();
-    setLedPattern(LED_SLOW_BLINK);
-    startBleProvisioning();
+    inProvisioningMode = true;
+    pendingBlePairingMode = true;
     return;
   }
 
@@ -1202,20 +1279,28 @@ void checkRemoteSafetyResponse() {
   String vestRespPath = String("/vestsLive/") + currentVestId + "/safetyResponse";
   if (Firebase.getString(fbdo, vestRespPath.c_str())) {
     remoteState = fbdo.stringData();
+    remoteState.trim();
   }
-  if (remoteState.length() == 0 || remoteState == "null") {
+  if (remoteState.length() == 0 || remoteState == "null" || (remoteState == "NONE" && !safetyCheckActive)) {
     String readingRespPath = String("/liveReadingsByVest/") + currentVestId + "/safetyResponse";
     if (Firebase.getString(fbdo, readingRespPath.c_str())) {
-      remoteState = fbdo.stringData();
+      String cand = fbdo.stringData();
+      cand.trim();
+      if (cand == "WAITING" || remoteState.length() == 0 || remoteState == "null") {
+        remoteState = cand;
+      }
     }
   }
-  if (remoteState.length() == 0 || remoteState == "null") {
+  if (remoteState.length() == 0 || remoteState == "null" || (remoteState == "NONE" && !safetyCheckActive)) {
     String macRespPath = String("/vestsLiveByMac/") + esp32CleanMac + "/safetyResponse";
     if (Firebase.getString(fbdo, macRespPath.c_str())) {
-      remoteState = fbdo.stringData();
+      String cand = fbdo.stringData();
+      cand.trim();
+      if (cand == "WAITING" || remoteState.length() == 0 || remoteState == "null") {
+        remoteState = cand;
+      }
     }
   }
-  remoteState.trim();
   if (remoteState.length() == 0 || remoteState == "null") return;
 
   if (remoteState == "WAITING") {
@@ -1549,6 +1634,10 @@ void checkSOS() {
 
 // ── Buzzer & LED Helpers ─────────────────────────────────────────────────────
 void startEmergencyAlarm(unsigned long durationMs) {
+  if (inProvisioningMode || bleDeviceConnected) {
+    stopEmergencyAlarm();
+    return;
+  }
   alarmActive = true;
   alarmEndTime = millis() + durationMs;
   alarmBuzzerState = false;
@@ -1562,12 +1651,23 @@ void stopEmergencyAlarm() {
 }
 
 void beepShort(unsigned long durationMs) {
-  if (alarmActive) return;
+  if (inProvisioningMode || bleDeviceConnected || alarmActive) {
+    if (inProvisioningMode || bleDeviceConnected) digitalWrite(BUZZER_PIN, LOW);
+    return;
+  }
   digitalWrite(BUZZER_PIN, HIGH);
   buzzerOffTime = millis() + durationMs;
 }
 
 void updateBuzzerAndLeds() {
+  if (inProvisioningMode || bleDeviceConnected) {
+    alarmActive = false;
+    alarmBuzzerState = false;
+    buzzerOffTime = 0;
+    digitalWrite(BUZZER_PIN, LOW);
+    return;
+  }
+
   unsigned long now = millis();
 
   if (alarmActive) {
@@ -1590,6 +1690,10 @@ void updateBuzzerAndLeds() {
 }
 
 void triggerBuzzer(int beeps) {
+  if (inProvisioningMode || bleDeviceConnected) {
+    digitalWrite(BUZZER_PIN, LOW);
+    return;
+  }
   for (int i = 0; i < beeps; i++) {
     digitalWrite(BUZZER_PIN, HIGH); delay(120);
     digitalWrite(BUZZER_PIN, LOW);  delay(80);

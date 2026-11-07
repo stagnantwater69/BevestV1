@@ -78,6 +78,8 @@ class BleProvisioner @Inject constructor(
 
     private var activeGatt: BluetoothGatt? = null
     private var scanJob: Job? = null
+    private var wifiVerifyJob: Job? = null
+    private var lastAttemptedSsid: String = ""
     private val scope = CoroutineScope(Dispatchers.Main + Job())
 
     val isBluetoothEnabled: Boolean
@@ -226,12 +228,8 @@ class BleProvisioner @Inject constructor(
             val filters = listOf(ScanFilter.Builder().build())
             scanner.startScan(filters, settings, scanCallback)
 
-            // Auto stop scan after 15 seconds to save battery
+            // Keep scanning continuously without a premature time limit while the pairing UI is open
             scanJob?.cancel()
-            scanJob = scope.launch {
-                delay(15_000)
-                stopScan()
-            }
         } catch (e: SecurityException) {
             _state.update {
                 it.copy(
@@ -331,30 +329,64 @@ class BleProvisioner @Inject constructor(
 
     @SuppressLint("MissingPermission")
     fun sendWifiConfig(ssid: String, pass: String, vestId: String) {
+        val trimmedSsid = ssid.trim()
+        val trimmedPass = pass.trim()
+
+        if (trimmedSsid.isBlank()) {
+            _state.update {
+                it.copy(
+                    connectionState = BleConnectionState.FAILED,
+                    errorCode = "WIFI_INVALID",
+                    statusMessage = "Wi-Fi SSID is required. Please enter the 2.4 GHz network name."
+                )
+            }
+            return
+        }
+        if (trimmedSsid.length > 32) {
+            _state.update {
+                it.copy(
+                    connectionState = BleConnectionState.FAILED,
+                    errorCode = "WIFI_INVALID",
+                    statusMessage = "Invalid Wi-Fi SSID — network name cannot exceed 32 characters."
+                )
+            }
+            return
+        }
+        if (trimmedPass.isBlank() || trimmedPass.length < 8 || trimmedPass.length > 63) {
+            _state.update {
+                it.copy(
+                    connectionState = BleConnectionState.FAILED,
+                    errorCode = "WIFI_INVALID",
+                    statusMessage = "Invalid Wi-Fi password — WPA/WPA2 passwords must be between 8 and 63 characters."
+                )
+            }
+            return
+        }
+
+        lastAttemptedSsid = trimmedSsid
         val gatt = activeGatt
         val vest = _state.value.connectedVest
 
         _state.update {
             it.copy(
                 connectionState = BleConnectionState.TRANSMITTING_WIFI,
-                statusMessage = "Transmitting Wi-Fi credentials to ${vest?.name ?: "Vest"} over BLE..."
+                errorCode = null,
+                statusMessage = "Transmitting Wi-Fi credentials to ${vest?.name ?: "Vest"} & verifying connection..."
             )
         }
 
         if (gatt == null) {
-            // Mock connection completed successfully
-            scope.launch {
-                delay(1500)
-                _state.update {
-                    it.copy(
-                        connectionState = BleConnectionState.SUCCESS_CONFIRMED,
-                        statusMessage = "Vest successfully provisioned & connected to Wi-Fi!"
-                    )
-                }
+            _state.update {
+                it.copy(
+                    connectionState = BleConnectionState.FAILED,
+                    errorCode = "BLE_NOT_CONNECTED",
+                    statusMessage = "Not connected to vest over Bluetooth. Please connect to the vest first."
+                )
             }
             return
         }
 
+        wifiVerifyJob?.cancel()
         scope.launch {
             var service = gatt.getService(SERVICE_UUID)
             var configChar = service?.getCharacteristic(CONFIG_CHAR_UUID)
@@ -371,13 +403,16 @@ class BleProvisioner @Inject constructor(
                 _state.update {
                     it.copy(
                         connectionState = BleConnectionState.FAILED,
-                        statusMessage = "Vest GATT provisioning service not found."
+                        errorCode = "GATT_SERVICE_MISSING",
+                        statusMessage = "Vest GATT provisioning service not found. Please reconnect to the vest."
                     )
                 }
                 return@launch
             }
 
-            val payload = """{"ssid":"$ssid","pass":"$pass","vestId":"$vestId"}"""
+            val escapedSsid = trimmedSsid.replace("\\", "\\\\").replace("\"", "\\\"")
+            val escapedPass = trimmedPass.replace("\\", "\\\\").replace("\"", "\\\"")
+            val payload = """{"ssid":"$escapedSsid","pass":"$escapedPass","vestId":"$vestId"}"""
             val payloadBytes = payload.toByteArray(Charsets.UTF_8)
             val writeType = if ((configChar.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
                 BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
@@ -411,8 +446,34 @@ class BleProvisioner @Inject constructor(
                 _state.update {
                     it.copy(
                         connectionState = BleConnectionState.FAILED,
-                        statusMessage = "Failed to transmit payload to vest characteristic."
+                        errorCode = "WRITE_FAILED",
+                        statusMessage = "Failed to transmit Wi-Fi credentials to vest over Bluetooth."
                     )
+                }
+                return@launch
+            }
+
+            // Actively poll status characteristic & enforce a verification timeout so invalid Wi-Fi credentials are always caught
+            wifiVerifyJob = scope.launch {
+                val statusChar = service?.getCharacteristic(STATUS_CHAR_UUID)
+                repeat(9) {
+                    delay(2_000)
+                    val curState = _state.value.connectionState
+                    if (curState != BleConnectionState.TRANSMITTING_WIFI) return@launch
+                    if (statusChar != null && activeGatt != null) {
+                        try {
+                            activeGatt?.readCharacteristic(statusChar)
+                        } catch (_: Exception) {}
+                    }
+                }
+                if (_state.value.connectionState == BleConnectionState.TRANSMITTING_WIFI) {
+                    _state.update {
+                        it.copy(
+                            connectionState = BleConnectionState.FAILED,
+                            errorCode = "WIFI_INVALID",
+                            statusMessage = "Invalid Wi-Fi credentials — vest could not connect to \"$trimmedSsid\". Please check the Wi-Fi SSID (2.4 GHz) and password."
+                        )
+                    }
                 }
             }
         }
@@ -441,12 +502,22 @@ class BleProvisioner @Inject constructor(
                 if (activeGatt == gatt) {
                     activeGatt = null
                 }
-                _state.update {
-                    it.copy(
-                        connectedVest = null,
-                        connectionState = BleConnectionState.DISCONNECTED,
-                        statusMessage = "Vest disconnected."
-                    )
+                _state.update { current ->
+                    when (current.connectionState) {
+                        BleConnectionState.SUCCESS_CONFIRMED -> current
+                        BleConnectionState.FAILED -> current.copy(connectedVest = null)
+                        BleConnectionState.TRANSMITTING_WIFI -> current.copy(
+                            connectedVest = null,
+                            connectionState = BleConnectionState.FAILED,
+                            errorCode = "WIFI_INVALID",
+                            statusMessage = "Could not verify connection to \"${lastAttemptedSsid.ifBlank { "Wi-Fi" }}\". Please verify the Wi-Fi SSID (2.4 GHz) and password, then reconnect."
+                        )
+                        else -> current.copy(
+                            connectedVest = null,
+                            connectionState = BleConnectionState.DISCONNECTED,
+                            statusMessage = "Vest disconnected."
+                        )
+                    }
                 }
             }
         }
@@ -494,33 +565,87 @@ class BleProvisioner @Inject constructor(
             android.util.Log.d("BleProvisioner", "Characteristic write status: $status for ${characteristic?.uuid}")
         }
 
-        @Deprecated("Deprecated in Java")
-        override fun onCharacteristicChanged(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?) {
-            if (characteristic?.uuid == STATUS_CHAR_UUID) {
-                val rawBytes = characteristic.value
-                val strVal = rawBytes?.toString(Charsets.UTF_8)?.trim()?.toIntOrNull()
-                val value = strVal ?: rawBytes?.firstOrNull()?.toInt() ?: 0
-                when (value) {
-                    1 -> _state.update { it.copy(statusMessage = "Vest is connecting to Wi-Fi...") }
-                    2 -> _state.update {
+        private fun handleStatusBytes(rawBytes: ByteArray?) {
+            val strVal = rawBytes?.toString(Charsets.UTF_8)?.trim()?.toIntOrNull()
+            val value = strVal ?: rawBytes?.firstOrNull()?.toInt() ?: 0
+            when (value) {
+                1 -> _state.update {
+                    it.copy(
+                        errorCode = null,
+                        statusMessage = "Vest is testing connection to \"${lastAttemptedSsid.ifBlank { "Wi-Fi" }}\"..."
+                    )
+                }
+                2 -> {
+                    wifiVerifyJob?.cancel()
+                    _state.update {
                         it.copy(
                             connectionState = BleConnectionState.SUCCESS_CONFIRMED,
-                            statusMessage = "✓ Vest confirmed Wi-Fi connection and switched to live stream!"
-                        )
-                    }
-                    3 -> _state.update {
-                        it.copy(
-                            connectionState = BleConnectionState.FAILED,
-                            statusMessage = "Wi-Fi Authentication Failed (Check password)."
-                        )
-                    }
-                    4 -> _state.update {
-                        it.copy(
-                            connectionState = BleConnectionState.FAILED,
-                            statusMessage = "Wi-Fi Network Not Found."
+                            errorCode = null,
+                            statusMessage = "✓ Vest confirmed connection to \"${lastAttemptedSsid.ifBlank { "Wi-Fi" }}\" and switched to live stream!"
                         )
                     }
                 }
+                3 -> {
+                    wifiVerifyJob?.cancel()
+                    _state.update {
+                        it.copy(
+                            connectionState = BleConnectionState.FAILED,
+                            errorCode = "WIFI_INVALID",
+                            statusMessage = "Invalid Wi-Fi credentials — authentication failed for \"${lastAttemptedSsid.ifBlank { "Wi-Fi" }}\". Please check the Wi-Fi password and try again."
+                        )
+                    }
+                }
+                4 -> {
+                    wifiVerifyJob?.cancel()
+                    _state.update {
+                        it.copy(
+                            connectionState = BleConnectionState.FAILED,
+                            errorCode = "WIFI_NOT_FOUND",
+                            statusMessage = "Invalid Wi-Fi SSID — network \"${lastAttemptedSsid.ifBlank { "Wi-Fi" }}\" was not found. Ensure the SSID is spelled accurately and is a 2.4 GHz network."
+                        )
+                    }
+                }
+            }
+        }
+
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+        ) {
+            if (characteristic.uuid == STATUS_CHAR_UUID) {
+                handleStatusBytes(value)
+            }
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onCharacteristicChanged(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?) {
+            if (characteristic?.uuid == STATUS_CHAR_UUID) {
+                @Suppress("DEPRECATION")
+                handleStatusBytes(characteristic.value)
+            }
+        }
+
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int,
+        ) {
+            if (status == BluetoothGatt.GATT_SUCCESS && characteristic.uuid == STATUS_CHAR_UUID) {
+                handleStatusBytes(value)
+            }
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt?,
+            characteristic: BluetoothGattCharacteristic?,
+            status: Int,
+        ) {
+            if (status == BluetoothGatt.GATT_SUCCESS && characteristic?.uuid == STATUS_CHAR_UUID) {
+                @Suppress("DEPRECATION")
+                handleStatusBytes(characteristic.value)
             }
         }
     }

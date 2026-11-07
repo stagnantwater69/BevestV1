@@ -62,6 +62,9 @@ class MonitoringRepositoryImpl @Inject constructor(
     /** Reactive map of the latest authoritative safety response state set by the app or vest. */
     private val safetyResponseOverride = MutableStateFlow<Map<String, SafetyResponseState>>(emptyMap())
 
+    @Volatile
+    private var latestRtdbBundle: RtdbBundle? = null
+
     private fun setOverrideState(workerId: String, state: SafetyResponseState) {
         safetyResponseOverride.update { it + (workerId to state) }
     }
@@ -81,7 +84,9 @@ class MonitoringRepositoryImpl @Inject constructor(
         database.getReference("vestsLive").valueEventsOrNull(),
         database.getReference("vestsLiveByMac").valueEventsOrNull(),
     ) { liveReadings, vestReadings, macReadings, vestsLive, vestsLiveByMac ->
-        RtdbBundle(liveReadings, vestReadings, macReadings, vestsLive, vestsLiveByMac)
+        RtdbBundle(liveReadings, vestReadings, macReadings, vestsLive, vestsLiveByMac).also {
+            latestRtdbBundle = it
+        }
     }
 
     /** Tracks the last 1-minute bucket logged to RTDB per worker so we write once per minute. */
@@ -170,7 +175,40 @@ class MonitoringRepositoryImpl @Inject constructor(
 
     private fun scheduleWaitingTimeout(workerId: String, started: Long) {
         repoScope.launch {
-            delay(15_200L)
+            // Re-assert WAITING during the first 12 seconds if the ESP32's periodic heartbeat
+            // overwrote /vestsLive/{vestId}/safetyResponse with NONE before checkRemoteSafetyResponse() polled it.
+            val checkIntervalsMs = listOf(900L, 1_100L, 1_500L, 2_000L, 2_500L, 3_000L, 4_200L)
+            for (stepMs in checkIntervalsMs) {
+                delay(stepMs)
+                if (waitingStartedAt[workerId] != started ||
+                    safetyResponseOverride.value[workerId] != SafetyResponseState.WAITING
+                ) {
+                    return@launch
+                }
+                val bundle = latestRtdbBundle
+                val vestId = bridgedVestByWorker[workerId]
+                val vestLiveState = if (!vestId.isNullOrBlank()) {
+                    bundle?.vestsLiveSnap?.child(vestId)?.safeStr("safetyResponse")
+                } else null
+                val readingState = if (!vestId.isNullOrBlank()) {
+                    bundle?.vestReadingsSnap?.child(vestId)?.safeStr("safetyResponse")
+                } else null
+
+                if (vestLiveState == SafetyResponseState.ACKNOWLEDGED.name ||
+                    readingState == SafetyResponseState.ACKNOWLEDGED.name ||
+                    vestLiveState == SafetyResponseState.EMERGENCY_REQUESTED.name ||
+                    readingState == SafetyResponseState.EMERGENCY_REQUESTED.name
+                ) {
+                    return@launch
+                }
+
+                // If the vest has not yet transitioned its RTDB node to WAITING, re-push WAITING
+                if (vestLiveState != SafetyResponseState.WAITING.name ||
+                    readingState != SafetyResponseState.WAITING.name
+                ) {
+                    pushSafetyResponseToRtdb(workerId, SafetyResponseState.WAITING)
+                }
+            }
             if (waitingStartedAt[workerId] == started &&
                 safetyResponseOverride.value[workerId] == SafetyResponseState.WAITING
             ) {
@@ -339,7 +377,37 @@ class MonitoringRepositoryImpl @Inject constructor(
             else -> SafetyResponseState.NONE
         }
 
+        val isActivelyWaiting = waitStart != null && (now - waitStart) < 15_000L
+        val canAcceptVestResponseDuringWait = waitStart == null || (now - waitStart) >= 600L
+
         val effectiveResponse = when {
+            // While an SSO-initiated 15s WAITING check is active, only ACKNOWLEDGED (1-click) or
+            // EMERGENCY_REQUESTED (3s hold) from the vest can end the wait early. Stale NO_RESPONSE
+            // or NONE packets in RTDB must never cancel an active WAITING check!
+            isActivelyWaiting -> when {
+                canAcceptVestResponseDuringWait && cloudResponse == SafetyResponseState.ACKNOWLEDGED -> {
+                    waitingStartedAt.remove(workerId)
+                    val ackStart = acknowledgedStartedAt.getOrPut(workerId) {
+                        now.also {
+                            repoScope.launch {
+                                delay(5_000L)
+                                if (acknowledgedStartedAt[workerId] == it) {
+                                    setSafetyResponse(workerId, SafetyResponseState.NONE)
+                                }
+                            }
+                        }
+                    }
+                    setOverrideState(workerId, SafetyResponseState.ACKNOWLEDGED)
+                    SafetyResponseState.ACKNOWLEDGED
+                }
+                canAcceptVestResponseDuringWait && cloudResponse == SafetyResponseState.EMERGENCY_REQUESTED -> {
+                    waitingStartedAt.remove(workerId)
+                    acknowledgedStartedAt.remove(workerId)
+                    setOverrideState(workerId, SafetyResponseState.EMERGENCY_REQUESTED)
+                    SafetyResponseState.EMERGENCY_REQUESTED
+                }
+                else -> SafetyResponseState.WAITING
+            }
             cloudResponse == SafetyResponseState.EMERGENCY_REQUESTED ||
                 cloudResponse == SafetyResponseState.NO_RESPONSE -> {
                 waitingStartedAt.remove(workerId)
@@ -375,9 +443,6 @@ class MonitoringRepositoryImpl @Inject constructor(
             }
             overrideState == SafetyResponseState.EMERGENCY_REQUESTED -> {
                 SafetyResponseState.EMERGENCY_REQUESTED
-            }
-            waitStart != null && (now - waitStart) < 15_500L -> {
-                SafetyResponseState.WAITING
             }
             overrideState == SafetyResponseState.ACKNOWLEDGED -> {
                 val ackStart = acknowledgedStartedAt[workerId]
@@ -577,29 +642,51 @@ class MonitoringRepositoryImpl @Inject constructor(
     override suspend fun setSafetyResponse(
         workerId: String,
         state: SafetyResponseState,
-    ): Outcome<Unit> = try {
-        val now = System.currentTimeMillis()
-        if (state == SafetyResponseState.WAITING) {
-            waitingStartedAt[workerId] = now
-            acknowledgedStartedAt.remove(workerId)
-            lastClearedAt.remove(workerId)
-        } else {
-            waitingStartedAt.remove(workerId)
-            if (state == SafetyResponseState.ACKNOWLEDGED) {
-                acknowledgedStartedAt[workerId] = now
-                lastClearedAt[workerId] = now
-                scheduleAckAutoReset(workerId)
-            } else {
+    ): Outcome<Unit> {
+        return try {
+            val now = System.currentTimeMillis()
+            val activeWaitStart = waitingStartedAt[workerId]
+            // Never allow a delayed background reset (NONE) to cancel an active 15s WAITING check
+            if (state == SafetyResponseState.NONE &&
+                activeWaitStart != null &&
+                (now - activeWaitStart) < 14_500L &&
+                safetyResponseOverride.value[workerId] == SafetyResponseState.WAITING
+            ) {
+                return Outcome.Success(Unit)
+            }
+
+            if (state == SafetyResponseState.WAITING) {
+                waitingStartedAt[workerId] = now
                 acknowledgedStartedAt.remove(workerId)
-                if (state == SafetyResponseState.NONE) {
+                lastClearedAt.remove(workerId)
+            } else {
+                waitingStartedAt.remove(workerId)
+                if (state == SafetyResponseState.ACKNOWLEDGED) {
+                    acknowledgedStartedAt[workerId] = now
                     lastClearedAt[workerId] = now
+                    scheduleAckAutoReset(workerId)
                 } else {
-                    lastClearedAt.remove(workerId)
+                    acknowledgedStartedAt.remove(workerId)
+                    if (state == SafetyResponseState.NONE) {
+                        lastClearedAt[workerId] = now
+                    } else {
+                        lastClearedAt.remove(workerId)
+                    }
                 }
             }
-        }
-        setOverrideState(workerId, state)
+            setOverrideState(workerId, state)
+            pushSafetyResponseToRtdb(workerId, state)
 
+            Outcome.Success(Unit)
+        } catch (e: Exception) {
+            Outcome.Failure(e.toAppError())
+        }
+    }
+
+    private suspend fun pushSafetyResponseToRtdb(
+        workerId: String,
+        state: SafetyResponseState,
+    ) {
         val clearFall = state == SafetyResponseState.NONE || state == SafetyResponseState.ACKNOWLEDGED
         val updates = mutableMapOf<String, Any>("safetyResponse" to state.name)
         if (clearFall) {
@@ -609,55 +696,114 @@ class MonitoringRepositoryImpl @Inject constructor(
 
         // 1. Update /liveReadings/{workerId}
         runCatching {
-            val ref = database.getReference(FirebasePaths.liveReading(workerId))
-            ref.updateChildren(updates)
+            database.getReference(FirebasePaths.liveReading(workerId)).updateChildren(updates)
         }
 
-        // 2. Also update /liveReadingsByVest/{vestId}, /liveReadingsByMac/{mac}, /vestsLive/{vestId},
-        // and any bridged hardware vestId/MAC so the ESP32 vest receives WAITING / ACKNOWLEDGED / NONE / NO_RESPONSE immediately
+        // 2. Discover all vestIds and MAC addresses associated with this worker (including
+        // Firestore worker/vest records, bridged hardware streams, ESP32 ±2 MAC variants, and active RTDB nodes)
         runCatching {
             val targetVestIds = mutableSetOf<String>()
             val targetMacs = mutableSetOf<String>()
 
+            fun addMacWithVariants(rawMac: String?) {
+                val clean = rawMac?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase().orEmpty()
+                if (clean.length != 12) return
+                targetMacs.add(clean)
+                val prefix = clean.substring(0, 10)
+                val lastByte = clean.substring(10, 12).toIntOrNull(16) ?: return
+                for (delta in listOf(-2, -1, 1, 2)) {
+                    val v = (lastByte + delta) and 0xFF
+                    targetMacs.add(prefix + "%02X".format(v))
+                }
+            }
+
             bridgedVestByWorker[workerId]?.takeIf { it.isNotBlank() }?.let { targetVestIds.add(it) }
-            bridgedMacByWorker[workerId]?.takeIf { it.isNotBlank() }?.let { targetMacs.add(it) }
+            bridgedMacByWorker[workerId]?.takeIf { it.isNotBlank() }?.let { addMacWithVariants(it) }
 
             val workerDoc = runCatching {
                 firestore.collection(FirebasePaths.WORKERS).document(workerId).get().await()
             }.getOrNull()
-            val assignedVestId = workerDoc?.getString("assignedVestId")?.takeIf { it.isNotBlank() }
-            if (assignedVestId != null) {
-                targetVestIds.add(assignedVestId)
-                val vestDoc = runCatching {
-                    firestore.collection(FirebasePaths.VESTS).document(assignedVestId).get().await()
-                }.getOrNull()
-                val cleanMac = (vestDoc?.getString("cleanMac") ?: vestDoc?.getString("macAddress"))
-                    ?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()
-                if (!cleanMac.isNullOrBlank()) {
-                    targetMacs.add(cleanMac)
-                }
+            val assignedFromWorker = workerDoc?.getString("assignedVestId")?.takeIf { it.isNotBlank() }
+            if (assignedFromWorker != null) {
+                targetVestIds.add(assignedFromWorker)
             }
 
+            val vestsForWorker = runCatching {
+                firestore.collection(FirebasePaths.VESTS)
+                    .whereEqualTo("assignedWorkerId", workerId)
+                    .get()
+                    .await()
+                    .documents
+            }.getOrDefault(emptyList())
+            for (doc in vestsForWorker) {
+                targetVestIds.add(doc.id)
+                addMacWithVariants(doc.getString("cleanMac") ?: doc.getString("macAddress"))
+            }
+
+            if (assignedFromWorker != null) {
+                val vestDoc = runCatching {
+                    firestore.collection(FirebasePaths.VESTS).document(assignedFromWorker).get().await()
+                }.getOrNull()
+                addMacWithVariants(vestDoc?.getString("cleanMac") ?: vestDoc?.getString("macAddress"))
+            }
+
+            // Also inspect live RTDB snapshots for any node matching this worker, vest, or MAC,
+            // or any active hardware vest stream in /vestsLive & /liveReadingsByVest
+            val bundle = latestRtdbBundle
+            fun scanSnap(snap: DataSnapshot?) {
+                if (snap == null || !snap.exists()) return
+                val allChildren = snap.children.toList()
+                for (child in allChildren) {
+                    val key = child.key.orEmpty()
+                    val cVestId = child.safeStr("vestId").orEmpty()
+                    val cWorkerId = (child.safeStr("workerId") ?: child.safeStr("assignedWorkerId")).orEmpty()
+                    val cMac = (child.safeStr("mac") ?: child.safeStr("macAddress"))
+                        ?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase().orEmpty()
+
+                    val matchesWorkerOrVest = cWorkerId.equals(workerId, ignoreCase = true) ||
+                        targetVestIds.any { it.equals(key, ignoreCase = true) || it.equals(cVestId, ignoreCase = true) } ||
+                        targetMacs.any { isMacMatch(it, cMac) || isMacMatch(it, key) }
+
+                    // If only one physical vest is streaming in RTDB (e.g. VEST-001) and this worker has a vest assigned,
+                    // also include that active hardware stream so the physical vest always receives the command.
+                    val isSingleActiveHardwareVest = allChildren.size == 1 && targetVestIds.isNotEmpty()
+
+                    if (matchesWorkerOrVest || isSingleActiveHardwareVest) {
+                        if (key.isNotBlank() && !key.startsWith("WRK-", ignoreCase = true) && key.length != 12) {
+                            targetVestIds.add(key)
+                            bridgedVestByWorker[workerId] = key
+                        }
+                        if (cVestId.isNotBlank()) {
+                            targetVestIds.add(cVestId)
+                            bridgedVestByWorker[workerId] = cVestId
+                        }
+                        if (cMac.isNotBlank()) {
+                            addMacWithVariants(cMac)
+                            bridgedMacByWorker[workerId] = cMac
+                        }
+                    }
+                }
+            }
+            scanSnap(bundle?.vestsLiveSnap)
+            scanSnap(bundle?.vestReadingsSnap)
+            scanSnap(bundle?.vestsLiveByMacSnap)
+
             for (vId in targetVestIds) {
-                database.getReference("liveReadingsByVest/$vId").updateChildren(updates)
                 database.getReference("vestsLive/$vId/safetyResponse").setValue(state.name)
+                database.getReference("liveReadingsByVest/$vId").updateChildren(updates)
                 if (clearFall) {
                     database.getReference("vestsLive/$vId/fallDetected").setValue(false)
                 }
             }
 
             for (mac in targetMacs) {
-                database.getReference("liveReadingsByMac/$mac").updateChildren(updates)
                 database.getReference("vestsLiveByMac/$mac/safetyResponse").setValue(state.name)
+                database.getReference("liveReadingsByMac/$mac").updateChildren(updates)
                 if (clearFall) {
                     database.getReference("vestsLiveByMac/$mac/fallDetected").setValue(false)
                 }
             }
         }
-
-        Outcome.Success(Unit)
-    } catch (e: Exception) {
-        Outcome.Failure(e.toAppError())
     }
 
     override suspend fun clearReading(workerId: String): Outcome<Unit> {

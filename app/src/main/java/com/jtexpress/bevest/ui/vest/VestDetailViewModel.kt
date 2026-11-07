@@ -6,26 +6,26 @@ import androidx.lifecycle.viewModelScope
 import com.jtexpress.bevest.data.ble.BleConnectionState
 import com.jtexpress.bevest.data.ble.BleProvisioner
 import com.jtexpress.bevest.data.ble.DiscoveredBleVest
+import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.domain.model.Vest
 import com.jtexpress.bevest.domain.model.VestAssignment
 import com.jtexpress.bevest.domain.model.VestStatus
-import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.domain.model.Worker
 import com.jtexpress.bevest.domain.repository.AuthRepository
 import com.jtexpress.bevest.domain.repository.UserRepository
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flatMapLatest
 import com.jtexpress.bevest.domain.repository.VestRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.utils.Outcome
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -34,6 +34,8 @@ import javax.inject.Inject
 data class WifiReprovisionUiState(
     val ssid: String = "",
     val pass: String = "",
+    val ssidError: String? = null,
+    val passError: String? = null,
     val sendingCloud: Boolean = false,
     val cloudSuccessMsg: String? = null,
     val errorMsg: String? = null,
@@ -97,12 +99,23 @@ class VestDetailViewModel @Inject constructor(
     val hasBlePermissions: Boolean get() = bleProvisioner.hasPermissions()
 
     private val wifiAndBleFlow = combine(wifiInputs, bleProvisioner.state, assigningWorker) { wifiLocal, bleState, isAssigning ->
+        val bleError = if (bleState.connectionState == BleConnectionState.FAILED) bleState.statusMessage else null
+        val bleSsidErr = if (bleState.connectionState == BleConnectionState.FAILED && bleState.errorCode == "WIFI_NOT_FOUND") {
+            "Wi-Fi network not found (check 2.4 GHz SSID)"
+        } else null
+        val blePassErr = if (bleState.connectionState == BleConnectionState.FAILED && bleState.errorCode == "WIFI_INVALID") {
+            "Invalid Wi-Fi SSID or password"
+        } else null
+
         wifiLocal.copy(
             scanningBle = bleState.scanning,
             discoveredBles = bleState.discoveredVests,
             connectedBle = bleState.connectedVest,
             bleConnectionState = bleState.connectionState,
             bleStatusMsg = bleState.statusMessage,
+            ssidError = wifiLocal.ssidError ?: bleSsidErr,
+            passError = wifiLocal.passError ?: blePassErr,
+            errorMsg = wifiLocal.errorMsg ?: bleError,
         ) to isAssigning
     }
 
@@ -199,11 +212,11 @@ class VestDetailViewModel @Inject constructor(
     }
 
     fun onWifiSsidInput(value: String) {
-        wifiInputs.update { it.copy(ssid = value, errorMsg = null, cloudSuccessMsg = null) }
+        wifiInputs.update { it.copy(ssid = value, ssidError = null, errorMsg = null, cloudSuccessMsg = null) }
     }
 
     fun onWifiPassInput(value: String) {
-        wifiInputs.update { it.copy(pass = value, errorMsg = null, cloudSuccessMsg = null) }
+        wifiInputs.update { it.copy(pass = value, passError = null, errorMsg = null, cloudSuccessMsg = null) }
     }
 
     fun resetWifiDialogState(currentSsid: String?) {
@@ -213,44 +226,20 @@ class VestDetailViewModel @Inject constructor(
     }
 
     /**
-     * Option 1A — Update Wi-Fi directly over Cloud (Firebase RTDB) while the vest is Online.
-     * The vest immediately saves the new credentials to NVS Flash and connects to the new network
-     * (or keeps them ready for the next construction site if out of range).
-     */
-    fun updateWifiViaCloud() {
-        val ssid = wifiInputs.value.ssid.trim()
-        val pass = wifiInputs.value.pass.trim()
-        if (ssid.isBlank()) {
-            wifiInputs.update { it.copy(errorMsg = "Please enter the new Wi-Fi SSID.") }
-            return
-        }
-        viewModelScope.launch {
-            wifiInputs.update { it.copy(sendingCloud = true, errorMsg = null, cloudSuccessMsg = null) }
-            when (val r = vestRepository.updateVestWifiRemotely(vestId, ssid, pass)) {
-                is Outcome.Success -> {
-                    wifiInputs.update {
-                        it.copy(
-                            sendingCloud = false,
-                            cloudSuccessMsg = "Wi-Fi command sent to $vestId! The vest will save \"$ssid\" to flash and switch networks within 5 seconds.",
-                        )
-                    }
-                    message.value = "Wi-Fi update sent to $vestId (\"$ssid\")."
-                }
-                is Outcome.Failure -> {
-                    wifiInputs.update { it.copy(sendingCloud = false, errorMsg = r.error.message) }
-                }
-            }
-        }
-    }
-
-    /**
-     * Option 1B — Remotely instruct an Online vest to enter BLE Pairing Mode, then start BLE scanning.
+     * Remotely instruct an Online vest to enter BLE Pairing Mode, then start BLE scanning.
      */
     fun triggerRemoteBleModeAndScan() {
         viewModelScope.launch {
-            wifiInputs.update { it.copy(errorMsg = null, cloudSuccessMsg = "Requesting vest to switch into Bluetooth Pairing Mode...") }
+            wifiInputs.update {
+                it.copy(
+                    errorMsg = null,
+                    ssidError = null,
+                    passError = null,
+                    cloudSuccessMsg = "Switching vest into Bluetooth Pairing Mode and scanning nearby...",
+                )
+            }
             vestRepository.triggerVestBleModeRemotely(vestId)
-            delay(3500)
+            delay(2000)
             startBleScan()
         }
     }
@@ -265,16 +254,38 @@ class VestDetailViewModel @Inject constructor(
     }
 
     fun connectBleVest(vest: DiscoveredBleVest) {
+        wifiInputs.update { it.copy(errorMsg = null, cloudSuccessMsg = null) }
         bleProvisioner.connectToVest(vest)
     }
 
     fun sendWifiOverBle() {
         val ssid = wifiInputs.value.ssid.trim()
         val pass = wifiInputs.value.pass.trim()
-        if (ssid.isBlank()) {
-            wifiInputs.update { it.copy(errorMsg = "Please enter the Wi-Fi SSID before transmitting.") }
+
+        val sErr = when {
+            ssid.isBlank() -> "Wi-Fi SSID is required"
+            ssid.length > 32 -> "SSID cannot exceed 32 characters"
+            else -> null
+        }
+        val pErr = when {
+            pass.isBlank() -> "Wi-Fi password is required"
+            pass.length < 8 -> "Password must be at least 8 characters"
+            pass.length > 63 -> "Password cannot exceed 63 characters"
+            else -> null
+        }
+
+        if (sErr != null || pErr != null) {
+            wifiInputs.update {
+                it.copy(
+                    ssidError = sErr,
+                    passError = pErr,
+                    errorMsg = sErr ?: pErr ?: "Invalid Wi-Fi credentials.",
+                )
+            }
             return
         }
+
+        wifiInputs.update { it.copy(ssidError = null, passError = null, errorMsg = null, cloudSuccessMsg = null) }
         bleProvisioner.sendWifiConfig(ssid, pass, vestId)
     }
 
