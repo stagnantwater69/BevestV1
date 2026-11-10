@@ -82,12 +82,9 @@
 #define FIREBASE_API_KEY       "AIzaSyBJMgiehdzS4V_La39159w3NZ5yeeTIwYU"
 #define FIREBASE_DATABASE_URL  "bevest-70698-default-rtdb.asia-southeast1.firebasedatabase.app"
 
-// Approach A: Firebase Anonymous Authentication (Zero hardcoded credentials!)
-// If Anonymous auth is enabled in Firebase Console, the ESP32 signs in automatically
-// without requiring any email or password.
-// Optional fallback credentials (leave empty "" to use pure anonymous auth):
-#define DEVICE_EMAIL           ""
-#define DEVICE_PASSWORD        ""
+// Shared Device Service Account (Used by all BeVest ESP32 units simultaneously)
+#define DEVICE_EMAIL           "vest@bevest.com"
+#define DEVICE_PASSWORD        "vest1234"
 
 // ── Default Fallbacks (Overridden by NVS / In-App Provisioning) ───────────────
 #define DEFAULT_VEST_ID        "VEST-001"
@@ -97,6 +94,7 @@
 #define GPS_RX_PIN             16   // ESP32 RX2 <- GPS TX
 #define GPS_TX_PIN             17   // ESP32 TX2 -> GPS RX
 // I2C Bus: SDA = GPIO 21, SCL = GPIO 22 (shared by MPU6050 and MAX30102)
+
 #define I2C_SDA_PIN            21
 #define I2C_SCL_PIN            22
 #define DS18B20_PIN            4    // OneWire Temperature Data
@@ -221,9 +219,14 @@ unsigned long      lastVestLive        = 0;
 unsigned long      lastPrint           = 0;
 unsigned long      buzzerOffTime       = 0;
 
-// Pulse oximeter buffer
-byte               ratesBuffer[HR_AVG_SIZE];
-byte               rateIndex           = 0;
+// MAX30102 Heart Rate buffer & state
+const byte         RATE_SIZE           = 4;
+byte               rates[RATE_SIZE];
+byte               rateSpot            = 0;
+byte               rateCount           = 0;
+long               lastBeat            = 0;
+float              beatsPerMinute      = 0.0f;
+int                beatAvg             = 0;
 long               irValue             = 0;
 
 // Buzzer & Alarm State
@@ -468,11 +471,13 @@ void setup() {
   // 2. Load stored credentials from NVS (Preferences)
   loadStoredConfiguration();
 
-  // 3. Initialize GPS (HardwareSerial 2)
+  // 3. Initialize GY-GPS6MV2 (u-blox NEO-6M — Fixed 9600 Baud on HardwareSerial 2)
+  gpsSerial.setRxBufferSize(1024);
   gpsSerial.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-  Serial.printf("[GPS]     Started UART2 on RX=GPIO%d, TX=GPIO%d\n", GPS_RX_PIN, GPS_TX_PIN);
+  Serial.printf("[GPS]     GY-GPS6MV2 initialized at 9600 baud on RX=GPIO%d, TX=GPIO%d\n", GPS_RX_PIN, GPS_TX_PIN);
 
   // 4. Initialize I2C Bus for MPU6050 & MAX30102
+  Wire.setPins(I2C_SDA_PIN, I2C_SCL_PIN);
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
   Wire.setTimeOut(25); // Prevent I2C bus lockup if jumper wires wiggle during motion/fall testing
   delay(100);
@@ -489,17 +494,17 @@ void setup() {
     setLedPattern(LED_ERR_SENSOR_4_BLINKS);
   }
 
-  // MAX30102 Pulse Oximeter
-  if (particleSensor.begin(Wire, I2C_SPEED_FAST)) {
-    particleSensor.setup(0xFF, 4, 2, 200, 411, 4096);
-    particleSensor.setPulseAmplitudeRed(0xFF);
-    particleSensor.setPulseAmplitudeIR(0xFF);
+  // MAX30102 Heart Rate Sensor (Configured with verified 0x57 / Standard I2C / 0x0A Red / 0x1F IR)
+  if (particleSensor.begin(Wire, I2C_SPEED_STANDARD, 0x57)) {
+    particleSensor.setup();
+    particleSensor.setPulseAmplitudeRed(0x0A);
+    particleSensor.setPulseAmplitudeIR(0x1F);
     particleSensor.setPulseAmplitudeGreen(0);
-    memset(ratesBuffer, 0, sizeof(ratesBuffer));
+    memset(rates, 0, sizeof(rates));
     maxOk = true;
-    Serial.println("[MAX30102] OK — Pulse Oximeter Ready");
+    Serial.println("[MAX30102] OK — Detected successfully! Place your finger on the sensor.");
   } else {
-    Serial.println("[MAX30102] ⚠️ Not detected on I2C bus");
+    Serial.println("[MAX30102] ⚠️ Initialization failed on I2C bus (0x57)");
   }
 
   // DS18B20 Body Temperature Sensor
@@ -659,13 +664,18 @@ void loop() {
   updateBuzzerAndLeds();
 
   // ── Normal Telemetry Operation ──
-  // 1. Process GPS stream
+  // 1. Process GY-GPS6MV2 NMEA stream ($GPRMC, $GPGGA, $GPGSV at 9600 baud)
   while (gpsSerial.available() > 0) {
-    if (gps.encode(gpsSerial.read())) {
-      if (gps.satellites.isValid()) gpsSats = (int)gps.satellites.value();
-      if (gps.hdop.isValid())       gpsHDOP = (float)gps.hdop.hdop();
-
-      if (gps.location.isValid() && gps.location.age() < 2000 && gpsHDOP < 5.0f) {
+    char c = gpsSerial.read();
+    if (gps.encode(c)) {
+      if (gps.satellites.isValid()) {
+        gpsSats = (int)gps.satellites.value();
+      }
+      if (gps.hdop.isValid()) {
+        gpsHDOP = (float)gps.hdop.hdop();
+      }
+      if (gps.location.isValid() &&
+          (fabs(gps.location.lat()) > 0.0001 || fabs(gps.location.lng()) > 0.0001)) {
         gpsLat       = gps.location.lat();
         gpsLng       = gps.location.lng();
         gpsFixed     = true;
@@ -674,7 +684,7 @@ void loop() {
     }
   }
 
-  if (gpsFixed && (millis() - gpsLastFixMs > 15000)) {
+  if (gpsFixed && (millis() - gpsLastFixMs > 30000)) {
     gpsFixed = false;
     gpsLat   = 0.0;
     gpsLng   = 0.0;
@@ -861,21 +871,10 @@ void initFirebaseService() {
   config.timeout.serverResponse = 10 * 1000;
   config.timeout.socketConnection = 10 * 1000;
 
-  // Approach A: Firebase Anonymous Authentication (Zero hardcoded credentials!)
-  Serial.println("[Firebase] 🔐 Requesting Anonymous Device Session from Cloud Auth...");
-  bool anonSuccess = Firebase.signUp(&config, &auth, "", "");
-  if (anonSuccess) {
-    Serial.println("[Firebase] 🟢 Anonymous Device Authentication granted by Cloud Auth!");
-  } else {
-    Serial.printf("[Firebase] ℹ️ Anonymous signup status: %s\n", config.signer.signupError.message.c_str());
-    if (strlen(DEVICE_EMAIL) > 0 && strlen(DEVICE_PASSWORD) > 0) {
-      Serial.println("[Firebase] 🔄 Falling back to configured device credentials...");
-      auth.user.email = DEVICE_EMAIL;
-      auth.user.password = DEVICE_PASSWORD;
-    } else {
-      Serial.println("[Firebase] ⚠️ If authentication fails, ensure 'Anonymous' is enabled in Firebase Console → Authentication → Sign-in method.");
-    }
-  }
+  // Authenticate using the shared BeVest device account (no anonymous user creation)
+  Serial.printf("[Firebase] 🔐 Signing in as shared device account (%s)...\n", DEVICE_EMAIL);
+  auth.user.email = DEVICE_EMAIL;
+  auth.user.password = DEVICE_PASSWORD;
 
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(false); // Managed explicitly to avoid "wifi:sta is connecting" conflicts and allow BLE fallback
@@ -1348,8 +1347,12 @@ void pushVitalLogToFirebase() {
                 minuteKey.c_str(), heartBPM, bodyTempC);
 }
 
-// ── MPU6050 Motion & Fall Detection (Runs at 200Hz in non-blocking loop) ────
+// ── MPU6050 Motion & Fall Detection (Polled every 20ms so I2C bus is shared cleanly with MAX30102) ──
 void readMPU6050() {
+  static unsigned long lastMpuPollMs = 0;
+  if (millis() - lastMpuPollMs < 20) return;
+  lastMpuPollMs = millis();
+
   if (!mpuOk) {
     static unsigned long lastMpuRetryMs = 0;
     if (millis() - lastMpuRetryMs > 3000) {
@@ -1358,6 +1361,7 @@ void readMPU6050() {
         mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
         mpu.setGyroRange(MPU6050_RANGE_500_DEG);
         mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+        Wire.setClock(100000); // Keep I2C at 100kHz for MAX30102 stability
         mpuOk = true;
         Serial.println("[MPU6050] ✅ Reconnected on I2C bus!");
       }
@@ -1444,9 +1448,25 @@ void readMPU6050() {
   }
 }
 
-// ── MAX30102 Heart Rate & SpO2 ───────────────────────────────────────────────
+// ── MAX30102 Heart Rate Detection (Exact verified BPM & Average BPM logic) ───
 void readHeartRate() {
+  static unsigned long lastHrReadMs = 0;
+  if (millis() - lastHrReadMs < 20) return; // Match exact 20ms sampling interval of verified MAX30102 code
+  lastHrReadMs = millis();
+
   if (!maxOk) {
+    static unsigned long lastMaxRetryMs = 0;
+    if (millis() - lastMaxRetryMs > 3000) {
+      lastMaxRetryMs = millis();
+      if (particleSensor.begin(Wire, I2C_SPEED_STANDARD, 0x57)) {
+        particleSensor.setup();
+        particleSensor.setPulseAmplitudeRed(0x0A);
+        particleSensor.setPulseAmplitudeIR(0x1F);
+        particleSensor.setPulseAmplitudeGreen(0);
+        maxOk = true;
+        Serial.println("[MAX30102] ✅ Reconnected on I2C bus!");
+      }
+    }
     if (ENABLE_SMART_FALLBACK) {
       heartBPM = 72 + (millis() / 5000) % 5;
       spO2     = 98;
@@ -1456,30 +1476,12 @@ void readHeartRate() {
 
   irValue = particleSensor.getIR();
 
-  if (irValue > 4500) {
-    if (checkForBeat(irValue)) {
-      static unsigned long lastBeat = 0;
-      unsigned long now = millis();
-      long delta = now - lastBeat;
-      lastBeat = now;
+  if (irValue < 50000) {
+    beatsPerMinute = 0;
+    beatAvg = 0;
+    rateCount = 0;
+    rateSpot = 0;
 
-      float bpm = 60000.0f / (float)delta;
-      if (bpm >= 45 && bpm <= 190) {
-        ratesBuffer[rateIndex] = (byte)bpm;
-        rateIndex = (rateIndex + 1) % HR_AVG_SIZE;
-
-        long sum = 0;
-        for (byte i = 0; i < HR_AVG_SIZE; i++) sum += ratesBuffer[i];
-        heartBPM = sum / HR_AVG_SIZE;
-      }
-    }
-
-    long redValue = particleSensor.getRed();
-    if (redValue > 1000) {
-      spO2 = (int)calcSpO2(redValue, irValue);
-      spO2 = constrain(spO2, 85, 100);
-    }
-  } else {
     if (ENABLE_SMART_FALLBACK) {
       heartBPM = 72 + ((millis() / 4000) % 5);
       spO2     = 98;
@@ -1487,6 +1489,35 @@ void readHeartRate() {
       heartBPM = 0;
       spO2     = 0;
     }
+  } else {
+    if (checkForBeat(irValue)) {
+      long delta = millis() - lastBeat;
+      lastBeat = millis();
+
+      if (delta > 0) {
+        beatsPerMinute = 60.0f / (delta / 1000.0f);
+
+        if (beatsPerMinute > 20 && beatsPerMinute < 255) {
+          rates[rateSpot] = (byte)beatsPerMinute;
+          rateSpot = (rateSpot + 1) % RATE_SIZE;
+
+          if (rateCount < RATE_SIZE) {
+            rateCount++;
+          }
+
+          beatAvg = 0;
+
+          for (byte i = 0; i < rateCount; i++) {
+            beatAvg += rates[i];
+          }
+
+          beatAvg /= rateCount;
+        }
+      }
+    }
+
+    // Populate heartBPM for Firebase & mobile app live readings
+    heartBPM = (beatAvg > 0) ? beatAvg : (int)beatsPerMinute;
   }
 }
 
@@ -1535,11 +1566,6 @@ void checkVitalEmergency() {
       vitalAlert = true;
       alertMsg += String("LOW HR (") + String(heartBPM) + " BPM) ";
     }
-  }
-
-  if (spO2 > 50 && spO2 < SPO2_LOW_ALERT) {
-    vitalAlert = true;
-    alertMsg += String("LOW SpO2 (") + String(spO2) + "%) ";
   }
 
   if (vitalAlert) {
@@ -1709,15 +1735,21 @@ uint64_t getEpochMillis() {
 
 // ── Periodic Status Print ────────────────────────────────────────────────────
 void printStatus() {
-  Serial.printf("[STATUS] Vest: %s | HR: %d BPM | Temp: %.1f C | Motion: %s | Sats: %d | WiFi: %s | RTDB: %s\n",
-                currentVestId.c_str(), heartBPM, bodyTempC, motionState.c_str(), gpsSats,
+  Serial.printf("[STATUS] Vest: %s | IR: %ld | BPM: %.1f | Avg BPM: %d | Temp: %.1f C | Motion: %s | Sats: %d | WiFi: %s | RTDB: %s\n",
+                currentVestId.c_str(), irValue, beatsPerMinute, heartBPM, bodyTempC, motionState.c_str(), gpsSats,
                 WiFi.status() == WL_CONNECTED ? "OK" : "NO",
                 Firebase.ready() ? "READY" : "OFFLINE");
-  if (gpsFixed) {
-    Serial.printf("[GPS]    🛰️  LOCKED — Lat: %.6f | Lng: %.6f | HDOP: %.1f\n", gpsLat, gpsLng, gpsHDOP);
+  if (irValue < 50000) {
+    Serial.printf("[MAX30102] IR=%ld | No finger detected\n", irValue);
   } else {
-    Serial.printf("[GPS]    📡 No fix yet — Sentences: %lu | Sats visible: %d\n",
-                  gps.passedChecksum(), gpsSats);
+    Serial.printf("[MAX30102] IR=%ld | BPM=%.1f | Average BPM=%d\n", irValue, beatsPerMinute, beatAvg);
+  }
+  if (gpsFixed) {
+    Serial.printf("[GPS]    🛰️  LOCKED — Lat: %.6f | Lng: %.6f | Sats: %d | HDOP: %.1f\n",
+                  gpsLat, gpsLng, gpsSats, gpsHDOP);
+  } else {
+    Serial.printf("[GPS]    📡 No fix yet — RX Chars: %lu | Valid Sentences: %lu | Sats visible: %d\n",
+                  gps.charsProcessed(), gps.passedChecksum(), gpsSats);
   }
 }
 
