@@ -684,12 +684,6 @@ void loop() {
     }
   }
 
-  if (gpsFixed && (millis() - gpsLastFixMs > 30000)) {
-    gpsFixed = false;
-    gpsLat   = 0.0;
-    gpsLng   = 0.0;
-  }
-
   // 2. Read Physical Sensors
   readMPU6050();
   readHeartRate();
@@ -1217,6 +1211,13 @@ void pushVestLiveToFirebase() {
   json.set("online", true);
   json.set("fallDetected", fallDetected);
   json.set("safetyResponse", currentSafetyResponse);
+  json.set("gpsFixed", gpsFixed);
+  if (gpsFixed) {
+    json.set("latitude",  gpsLat);
+    json.set("longitude", gpsLng);
+    json.set("gpsSats",   gpsSats);
+    json.set("gpsHDOP",   (double)gpsHDOP);
+  }
   json.set("lastSeen", (double)getEpochMillis());
   json.set("lastSeenServer/.sv", "timestamp");
 

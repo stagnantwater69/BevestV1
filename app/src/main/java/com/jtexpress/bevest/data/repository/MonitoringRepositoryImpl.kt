@@ -459,8 +459,13 @@ class MonitoringRepositoryImpl @Inject constructor(
         }
 
         val bestTimestamp = candidates.maxOfOrNull { it.timestamp } ?: rawBest.timestamp
+        val bestGps = candidates
+            .filter { it.latitude != null && it.longitude != null }
+            .maxByOrNull { it.timestamp }
         val resolvedReading = rawBest.copy(
             vestId = assignedVestId,
+            latitude = rawBest.latitude ?: bestGps?.latitude,
+            longitude = rawBest.longitude ?: bestGps?.longitude,
             fallDetected = anyFall,
             motionState = if (anyFall) MotionState.FALL_DETECTED else rawBest.motionState,
             safetyResponse = effectiveResponse,

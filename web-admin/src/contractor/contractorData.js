@@ -241,17 +241,24 @@ export const toUser = (snap) => {
 
 const toReading = (val) => {
   if (!val) return null;
+  const rawLat = num(val.latitude) ?? num(val.gps_lat) ?? num(val.lat);
+  const rawLng = num(val.longitude) ?? num(val.gps_lng) ?? num(val.lng);
+  const hasValidGps = rawLat != null && rawLng != null
+    && (Math.abs(rawLat) > 0.0001 || Math.abs(rawLng) > 0.0001);
+  const ts = num(val.timestampServer) || num(val.timestamp) || num(val.lastSeenServer) || num(val.lastSeen) || 0;
   return {
     vestId: val.vestId || '',
+    workerId: val.workerId || val.assignedWorkerId || '',
     heartRate: num(val.heartRate),
     temperature: num(val.temperature),
     motionState: upper(val.motionState, 'UNKNOWN'),
     fallDetected: val.fallDetected === true,
-    latitude: num(val.latitude),
-    longitude: num(val.longitude),
+    latitude: hasValidGps ? rawLat : null,
+    longitude: hasValidGps ? rawLng : null,
+    gpsSats: num(val.gpsSats),
     battery: num(val.battery),
     safetyResponse: upper(val.safetyResponse, 'NONE'),
-    timestamp: num(val.timestamp) || 0,
+    timestamp: ts,
   };
 };
 
@@ -476,21 +483,49 @@ export function useContractorData(contractorId) {
     () => setThresholds(DEFAULT_THRESHOLDS),
   ), []);
 
-  // One realtime listener per worker, mirroring MonitoringRepository.observeReadings.
-  const workerIdsKey = workers.map((w) => w.id).sort().join('|');
+  // Subscribe to liveReadings, liveReadingsByVest, and vestsLive so both worker-keyed and vest-keyed telemetry + GPS resolve cleanly.
+  const [vestReadings, setVestReadings] = useState({});
   useEffect(() => {
-    const ids = workerIdsKey ? workerIdsKey.split('|') : [];
-    const unsubs = ids.map((id) => onValue(
-      ref(rtdb, `liveReadings/${id}`),
-      (snap) => setReadings((prev) => ({ ...prev, [id]: toReading(snap.val()) })),
-      () => setReadings((prev) => ({ ...prev, [id]: null })),
-    ));
-    return () => unsubs.forEach((u) => u());
-  }, [workerIdsKey]);
+    const u1 = onValue(
+      ref(rtdb, 'liveReadings'),
+      (snap) => {
+        const val = snap.val() || {};
+        const parsed = {};
+        Object.keys(val).forEach((k) => { parsed[k] = toReading(val[k]); });
+        setReadings(parsed);
+      },
+      () => {},
+    );
+    const u2 = onValue(
+      ref(rtdb, 'liveReadingsByVest'),
+      (snap) => {
+        const val = snap.val() || {};
+        const parsed = {};
+        Object.keys(val).forEach((k) => { parsed[k] = toReading(val[k]); });
+        setVestReadings(parsed);
+      },
+      () => {},
+    );
+    return () => { u1(); u2(); };
+  }, []);
 
   const liveWorkers = useMemo(() => validatedWorkers
     .map((w) => {
-      const reading = readings[w.id] || null;
+      const direct = readings[w.id] || null;
+      const byVest = (w.assignedVestId && vestReadings[w.assignedVestId]) || null;
+      let reading = direct || byVest;
+      if (direct && byVest) {
+        const primary = (byVest.timestamp >= direct.timestamp) ? byVest : direct;
+        const secondary = (primary === byVest) ? direct : byVest;
+        reading = {
+          ...primary,
+          heartRate: primary.heartRate ?? secondary.heartRate,
+          temperature: primary.temperature ?? secondary.temperature,
+          latitude: primary.latitude ?? secondary.latitude,
+          longitude: primary.longitude ?? secondary.longitude,
+          battery: primary.battery ?? secondary.battery,
+        };
+      }
       return {
         worker: w,
         reading,
@@ -498,7 +533,7 @@ export function useContractorData(contractorId) {
         stale: isStale(reading, thresholds, now),
       };
     })
-    .sort((a, b) => a.worker.fullName.localeCompare(b.worker.fullName)), [validatedWorkers, readings, thresholds, now]);
+    .sort((a, b) => a.worker.fullName.localeCompare(b.worker.fullName)), [validatedWorkers, readings, vestReadings, thresholds, now]);
 
   return {
     loading: workersLoading || incidentsLoading,

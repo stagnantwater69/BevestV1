@@ -26,9 +26,9 @@ data class LiveMapState(
     val noSite: Boolean = false,
     val markers: List<WorkerLive> = emptyList(),
 ) {
-    /** Workers whose vests are reporting; offline workers are left off the map. */
+    /** Workers whose vests are reporting; offline workers with last-known GPS are still shown with a stale note. */
     val online get() = markers.filter { it.status != SafetyStatus.OFFLINE }
-    val located get() = online.filter { it.reading?.latitude != null && it.reading.longitude != null }
+    val located get() = markers.filter { it.reading?.latitude != null && it.reading.longitude != null }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)

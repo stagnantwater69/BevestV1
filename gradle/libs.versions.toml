@@ -30,6 +30,7 @@ coroutines = "1.7.3"
 mapsCompose = "4.3.3"
 playServicesMaps = "18.2.0"
 playServicesLocation = "21.2.0"
+osmdroid = "6.1.18"
 
 # ML Kit
 barcodeScanning = "17.2.0"
@@ -95,6 +96,7 @@ kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "ko
 maps-compose = { group = "com.google.maps.android", name = "maps-compose", version.ref = "mapsCompose" }
 play-services-maps = { group = "com.google.android.gms", name = "play-services-maps", version.ref = "playServicesMaps" }
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
+osmdroid-android = { group = "org.osmdroid", name = "osmdroid-android", version.ref = "osmdroid" }
 
 # ML Kit + CameraX
 mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "barcodeScanning" }

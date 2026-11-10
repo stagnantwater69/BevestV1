@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jtexpress.bevest.domain.model.Alert
 import com.jtexpress.bevest.domain.model.AlertSeverity
 import com.jtexpress.bevest.domain.model.AlertStatus
+import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.ui.common.BevestScaffold
 import com.jtexpress.bevest.ui.common.ConfirmationDialog
 import com.jtexpress.bevest.ui.common.DangerButton
@@ -41,6 +42,8 @@ import com.jtexpress.bevest.ui.common.DetailRow
 import com.jtexpress.bevest.ui.common.ErrorState
 import com.jtexpress.bevest.ui.common.FormField
 import com.jtexpress.bevest.ui.common.FormSection
+import com.jtexpress.bevest.ui.common.OsmMapView
+import com.jtexpress.bevest.ui.common.OsmPin
 import com.jtexpress.bevest.ui.common.PrimaryButton
 import com.jtexpress.bevest.ui.common.ReflectiveBand
 import com.jtexpress.bevest.ui.common.SecondaryButton
@@ -513,6 +516,43 @@ fun IncidentDetailScreen(
                             value = incident.vestId.ifBlank { "Not recorded" },
                             icon = BevestIcons.Vests,
                         )
+                    }
+
+                    if (incident.latitude != null && incident.longitude != null) {
+                        val incidentStatus = when (incident.severity) {
+                            AlertSeverity.WARNING -> SafetyStatus.WARNING
+                            AlertSeverity.DANGER -> SafetyStatus.DANGER
+                            AlertSeverity.EMERGENCY -> SafetyStatus.EMERGENCY
+                        }
+                        Surface(
+                            shape = BevestShapes.card,
+                            color = MaterialTheme.colorScheme.surface,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant,
+                            ),
+                            shadowElevation = Elevation.card,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp)
+                                .clip(BevestShapes.card),
+                        ) {
+                            OsmMapView(
+                                pins = listOf(
+                                    OsmPin(
+                                        id = incident.incidentId,
+                                        latitude = incident.latitude,
+                                        longitude = incident.longitude,
+                                        title = state.worker?.fullName?.takeIf { it.isNotBlank() } ?: incident.workerId,
+                                        snippet = incident.type.label(),
+                                        status = incidentStatus,
+                                    ),
+                                ),
+                                modifier = Modifier.fillMaxSize(),
+                                initialZoom = 18.0,
+                                followSinglePin = false,
+                            )
+                        }
                     }
 
                     // ---- Resolution Notes ----

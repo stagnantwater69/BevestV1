@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { FiShield, FiClock, FiUserCheck, FiCreditCard } from 'react-icons/fi';
+import { FiShield, FiClock, FiUserCheck, FiCreditCard, FiMapPin } from 'react-icons/fi';
 import {
   STATUS_COLOR, buildMonthlyReports, useContractorSsos,
 } from './contractorData';
@@ -8,6 +8,7 @@ import {
   Skeleton,
 } from './ui';
 import IncidentTrendChart from './IncidentTrendChart';
+import OsmMap from './OsmMap';
 import { getContractorSubscription } from '../subscriptionPlans';
 
 const DAY = 24 * 3600 * 1000;
@@ -17,9 +18,24 @@ const DAY = 24 * 3600 * 1000;
  * Focuses on trend — "are we getting safer?" — with monthly incident history.
  */
 const ContractorOverview = ({ contractorId, data, profile, onNavigate }) => {
-  const { loading, error, workers, incidents, now } = data;
+  const { loading, error, workers, liveWorkers = [], incidents, now } = data;
   const { ssos, loading: ssosLoading } = useContractorSsos(contractorId);
   const subscription = getContractorSubscription(profile);
+
+  const mapPins = useMemo(
+    () => liveWorkers
+      .filter((l) => l.reading?.latitude != null && l.reading?.longitude != null)
+      .map((l) => ({
+        id: l.worker.id,
+        latitude: l.reading.latitude,
+        longitude: l.reading.longitude,
+        title: l.worker.fullName,
+        status: l.status,
+        stale: l.stale,
+        subtitle: `Vest ${l.worker.assignedVestId || '—'} · HR: ${l.reading?.heartRate ?? '—'} bpm · Temp: ${l.reading?.temperature != null ? `${l.reading.temperature.toFixed(1)} °C` : '—'}`,
+      })),
+    [liveWorkers],
+  );
 
   const activeSsos = useMemo(
     () => ssos.filter((s) => s.active !== false).length,
@@ -121,6 +137,35 @@ const ContractorOverview = ({ contractorId, data, profile, onNavigate }) => {
         <SectionHeader title="Incident trend" supporting="Recorded incidents by month" />
         <div className="ct-card">
           <IncidentTrendChart incidents={incidents} />
+        </div>
+      </section>
+
+      {/* ---- Live Worker GPS Map ---- */}
+      <section className="ct-incident-trend-section" style={{ marginTop: '1.5rem' }}>
+        <SectionHeader
+          title="Live site GPS map"
+          supporting={
+            mapPins.length > 0
+              ? `${mapPins.length} worker${mapPins.length === 1 ? '' : 's'} reporting GPS position across your sites`
+              : 'Waiting for active vests to acquire satellite GPS fix'
+          }
+        />
+        <div className="ct-card" style={{ padding: '1rem' }}>
+          {mapPins.length > 0 ? (
+            <OsmMap pins={mapPins} height={340} zoom={17} />
+          ) : (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              padding: '1.25rem',
+              color: '#64748b',
+              fontSize: '0.9rem',
+            }}>
+              <FiMapPin style={{ fontSize: '1.25rem', flexShrink: 0 }} />
+              <span>No GPS positions reported yet. Once a worker&apos;s vest acquires a satellite lock outdoors, their live pin will appear on the map automatically.</span>
+            </div>
+          )}
         </div>
       </section>
     </>

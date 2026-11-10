@@ -11,6 +11,7 @@ import {
   PageHeader, SearchBox, FilterChips, Badge, EmptyState, ErrorState, Skeleton, IncidentRow,
 } from './ui';
 import { formatPhoneWithCountryCode } from '../PhoneInput';
+import OsmMap from './OsmMap';
 
 // WorkerFilter from WorkerDirectoryViewModel.kt, labelled as in WorkerDirectoryScreen.kt
 const FILTERS = [
@@ -168,13 +169,13 @@ const WorkerDetailModal = ({ live, incidents, thresholds, now, onClose }) => {
               <div className="item-details">
                 <span className="item-label">Last known location</span>
                 <span className="item-value">
-                  {hasLocation ? `${reading.latitude.toFixed(5)}, ${reading.longitude.toFixed(5)}` : 'No location yet'}
+                  {hasLocation ? `${reading.latitude.toFixed(6)}, ${reading.longitude.toFixed(6)}` : 'No GPS fix yet'}
                 </span>
               </div>
               {hasLocation && (
                 <a
                   className="view-all"
-                  href={`https://www.google.com/maps?q=${reading.latitude},${reading.longitude}`}
+                  href={`https://www.openstreetmap.org/?mlat=${reading.latitude}&mlon=${reading.longitude}#map=18/${reading.latitude}/${reading.longitude}`}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -183,6 +184,27 @@ const WorkerDetailModal = ({ live, incidents, thresholds, now, onClose }) => {
               )}
             </div>
           </div>
+
+          {hasLocation && (
+            <div>
+              <h3 className="ct-subheading">Live GPS Map</h3>
+              <OsmMap
+                height={220}
+                zoom={18}
+                pins={[
+                  {
+                    id: worker.id,
+                    latitude: reading.latitude,
+                    longitude: reading.longitude,
+                    title: worker.fullName,
+                    status,
+                    stale: live.stale,
+                    subtitle: `HR: ${reading?.heartRate ?? '—'} bpm · Temp: ${reading?.temperature != null ? `${reading.temperature.toFixed(1)} °C` : '—'}`,
+                  },
+                ]}
+              />
+            </div>
+          )}
 
           <div>
             <h3 className="ct-subheading">Recent incidents</h3>

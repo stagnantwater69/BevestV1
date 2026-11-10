@@ -54,6 +54,11 @@ fun DataSnapshot.toSensorReading(workerId: String): SensorReading? {
         } else {
             0L
         }
+    val rawLat = dbl("latitude") ?: dbl("gps_lat") ?: dbl("lat")
+    val rawLng = dbl("longitude") ?: dbl("gps_lng") ?: dbl("lng")
+    val hasValidCoords = rawLat != null && rawLng != null &&
+        (kotlin.math.abs(rawLat) > 0.0001 || kotlin.math.abs(rawLng) > 0.0001)
+
     return SensorReading(
         workerId = workerId,
         vestId = str("vestId").orEmpty(),
@@ -61,8 +66,8 @@ fun DataSnapshot.toSensorReading(workerId: String): SensorReading? {
         temperature = dbl("temperature"),
         motionState = if (fall && motion != MotionState.FALL_DETECTED) MotionState.FALL_DETECTED else motion,
         fallDetected = fall || motion == MotionState.FALL_DETECTED,
-        latitude = dbl("latitude"),
-        longitude = dbl("longitude"),
+        latitude = if (hasValidCoords) rawLat else null,
+        longitude = if (hasValidCoords) rawLng else null,
         batteryPercent = int("battery"),
         wifiRssi = int("wifiRssi") ?: int("rssi"),
         safetyResponse = response,
