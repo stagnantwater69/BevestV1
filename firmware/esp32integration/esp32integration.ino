@@ -877,8 +877,8 @@ void initFirebaseService() {
 
   Serial.print("[Firebase] Authenticating");
   unsigned long t0 = millis();
-  while (!Firebase.ready() && millis() - t0 < 12000) {
-    delay(300);
+  while (!Firebase.ready() && millis() - t0 < 15000) {
+    delay(200);
     Serial.print(".");
   }
   Serial.println();
