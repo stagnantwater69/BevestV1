@@ -1,15 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  FiCamera, FiUploadCloud, FiSearch, FiCheckCircle, FiAlertCircle, 
+  FiSearch, FiCheckCircle, FiAlertCircle, 
   FiRefreshCw, FiTrash2, FiPrinter, FiDownload, FiUser, FiShield, FiCpu, 
   FiWifi, FiWifiOff, FiX, FiEye, FiCheck, FiChevronLeft, FiChevronRight,
   FiClock, FiTag, FiMinimize2
 } from 'react-icons/fi';
 import { 
-  collection, doc, getDoc, getDocs, setDoc, deleteDoc, updateDoc, onSnapshot 
+  collection, doc, getDocs, updateDoc, onSnapshot 
 } from 'firebase/firestore';
 import { db } from './firebase';
-import jsQR from 'jsqr';
 import QRCode from 'qrcode';
 import { logActivity } from './activityLogger';
 
@@ -39,24 +38,8 @@ const SystemManagement = ({ user }) => {
   const itemsPerPage = 6;
 
   // Modals state
-  const [showScannerModal, setShowScannerModal] = useState(false);
   const [showQrViewerModal, setShowQrViewerModal] = useState(null); // vest object
-
-  // Form states
-  const [scanFeedback, setScanFeedback] = useState({ type: '', message: '' });
-  const [isProcessing, setIsProcessing] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
-
-  // Camera scanner references
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const animationFrameId = useRef(null);
-  const streamRef = useRef(null);
-  const [cameraError, setCameraError] = useState('');
-  const [isCameraActive, setIsCameraActive] = useState(false);
-
-  // File upload input ref
-  const fileInputRef = useRef(null);
 
   // Current admin display info
   const currentAdminName = user?.profile?.firstName 
@@ -136,232 +119,6 @@ const SystemManagement = ({ user }) => {
     }
   }, [showQrViewerModal]);
 
-  // Clean parsed vest ID
-  const parseVestId = (raw) => {
-    if (!raw) return '';
-    let text = String(raw).trim();
-    // If JSON payload like {"vestId":"VEST-001"}
-    try {
-      if (text.startsWith('{') && text.endsWith('}')) {
-        const parsed = JSON.parse(text);
-        if (parsed.vestId) return String(parsed.vestId).trim().toUpperCase();
-        if (parsed.id) return String(parsed.id).trim().toUpperCase();
-      }
-    } catch (_) {}
-    // If URL payload like https://bevest.com/vest/VEST-001
-    if (text.includes('/vest/')) {
-      const parts = text.split('/vest/');
-      text = parts[parts.length - 1];
-    }
-    // Remove query params if any
-    text = text.split('?')[0].replace(/[^a-zA-Z0-9_-]/g, '');
-    return text.toUpperCase();
-  };
-
-  // Add Vest to Database & Company Directory with Verification
-  const registerScannedVest = async (rawId) => {
-    const vestId = parseVestId(rawId);
-    if (!vestId) {
-      setScanFeedback({ type: 'error', message: 'Invalid or empty Vest ID from QR Code.' });
-      return false;
-    }
-
-    setIsProcessing(true);
-    setScanFeedback({ type: '', message: '' });
-
-    try {
-      // 1. VERIFY VEST DIRECTLY IN 'vests' COLLECTION
-      let vestRecord = null;
-      try {
-        const vestSnap = await getDoc(doc(db, 'vests', vestId));
-        if (vestSnap.exists()) {
-          vestRecord = vestSnap.data();
-        }
-      } catch (err) {
-        console.warn('Vest direct check error:', err.message);
-      }
-
-      // If vest is NOT found in 'vests': Refuse registration
-      if (!vestRecord) {
-        setScanFeedback({
-          type: 'error',
-          message: `❌ Vest Verification Failed: Vest "${vestId}" was NOT found in the Bevest hardware database. Only authentic Bevest smart vests can be registered.`
-        });
-        setIsProcessing(false);
-        return false;
-      }
-
-      // If already registered to another admin:
-      if (vestRecord.addedByAdminEmail && vestRecord.addedByAdminEmail !== currentAdminEmail) {
-        setScanFeedback({
-          type: 'warning',
-          message: `⚠️ Vest "${vestId}" is already claimed by ${vestRecord.addedByAdminName || vestRecord.addedByAdminEmail}. It cannot be registered to another organization.`
-        });
-        setIsProcessing(false);
-        return false;
-      }
-
-      // If already in this company's directory:
-      if (vestRecord.inCompanyDirectory && vestRecord.addedByAdminEmail === currentAdminEmail) {
-        setScanFeedback({
-          type: 'warning',
-          message: `Vest "${vestId}" is already registered in your company database! Status: ${vestRecord.status || 'AVAILABLE'}.`
-        });
-        setIsProcessing(false);
-        return false;
-      }
-
-      // 2. Claim / Register vest in 'vests' collection
-      const now = new Date();
-      const currentCompany = user?.companyId || user?.profile?.company || user?.profile?.companyName || null;
-      await updateDoc(doc(db, 'vests', vestId), {
-        status: vestRecord.status || 'AVAILABLE',
-        inCompanyDirectory: true,
-        companyId: currentCompany,
-        siteId: user?.siteId || null,
-        addedByAdminId: user?.uid || 'admin',
-        addedByAdminEmail: currentAdminEmail,
-        addedByAdminName: currentAdminName,
-        registeredToAdmin: currentAdminEmail,
-        registeredAt: now,
-        addedAt: now
-      });
-
-      setScanFeedback({
-        type: 'success',
-        message: `✓ Verified & Registered! Vest "${vestId}" (Status: ${vestRecord.status || 'AVAILABLE'}) is now verified and active in your company directory!`
-      });
-      logActivity(`Verified & registered smart vest: ${vestId}`, currentAdminEmail);
-      setIsProcessing(false);
-      return true;
-    } catch (err) {
-      console.error('Error registering vest:', err);
-      setScanFeedback({
-        type: 'error',
-        message: `Failed to register vest: ${err.message}`
-      });
-      setIsProcessing(false);
-      return false;
-    }
-  };
-
-  // Start Live Camera QR Scanner
-  const startCamera = async () => {
-    setCameraError('');
-    setIsCameraActive(true);
-    setScanFeedback({ type: '', message: '' });
-
-    try {
-      const constraints = {
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute('playsinline', 'true');
-        await videoRef.current.play();
-        scanFrame();
-      }
-    } catch (err) {
-      console.error('Camera access error:', err);
-      setCameraError('Unable to access camera. Please allow camera permissions or upload a QR image.');
-      setIsCameraActive(false);
-    }
-  };
-
-  // Stop Camera
-  const stopCamera = () => {
-    if (animationFrameId.current) {
-      cancelAnimationFrame(animationFrameId.current);
-      animationFrameId.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setIsCameraActive(false);
-  };
-
-  // Scan Video Frame in a Loop
-  const scanFrame = () => {
-    if (!videoRef.current || videoRef.current.readyState !== videoRef.current.HAVE_ENOUGH_DATA) {
-      animationFrameId.current = requestAnimationFrame(scanFrame);
-      return;
-    }
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current || document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: 'dontInvert',
-    });
-
-    if (code && code.data) {
-      stopCamera();
-      registerScannedVest(code.data);
-      return;
-    }
-
-    animationFrameId.current = requestAnimationFrame(scanFrame);
-  };
-
-  // Handle Upload QR Code Image
-  const handleImageUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setScanFeedback({ type: '', message: '' });
-    setIsProcessing(true);
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, img.width, img.height);
-
-        const imageData = ctx.getImageData(0, 0, img.width, img.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-        if (code && code.data) {
-          registerScannedVest(code.data);
-        } else {
-          setScanFeedback({
-            type: 'error',
-            message: 'No readable QR code found in the uploaded image. Please make sure the code is sharp and not glare-obscured.'
-          });
-          setIsProcessing(false);
-        }
-      };
-      img.onerror = () => {
-        setScanFeedback({ type: 'error', message: 'Failed to process image file.' });
-        setIsProcessing(false);
-      };
-      img.src = event.target.result;
-    };
-    reader.readAsDataURL(file);
-    // Reset file input so user can pick the same file again if desired
-    e.target.value = '';
-  };
-
   // Force Unassign Vest from Worker (Admin Override)
   const handleUnassignVest = async (vest) => {
     if (!vest.assignedWorkerId) return;
@@ -420,13 +177,6 @@ const SystemManagement = ({ user }) => {
     }
   };
 
-  // Close scanner modal and cleanup camera
-  const closeScannerModal = () => {
-    stopCamera();
-    setShowScannerModal(false);
-    setScanFeedback({ type: '', message: '' });
-  };
-
   // Filtered vests
   const filteredVests = vests.filter(vest => {
     const vId = (vest.id || vest.vestId || '').toLowerCase();
@@ -464,34 +214,8 @@ const SystemManagement = ({ user }) => {
             System Management
           </h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-            Hardware Provisioning Directory: Scan or upload Vest QR codes to register safety vests for SSO worker pairing.
+            Hardware Provisioning Directory: Real-time oversight of smart safety vests, worker assignments, and hardware connectivity.
           </p>
-        </div>
-
-        {/* Action Buttons for QR Scanning and Adding */}
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <button 
-            className="btn-primary" 
-            onClick={() => { setShowScannerModal(true); startCamera(); }}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
-          >
-            <FiCamera style={{ fontSize: '1.15rem' }} /> Scan QR Code
-          </button>
-
-          <button 
-            className="btn-secondary" 
-            onClick={() => fileInputRef.current?.click()}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
-          >
-            <FiUploadCloud style={{ fontSize: '1.15rem' }} /> Upload QR Image
-          </button>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleImageUpload} 
-            accept="image/*" 
-            style={{ display: 'none' }} 
-          />
         </div>
       </div>
 
@@ -598,15 +322,8 @@ const SystemManagement = ({ user }) => {
                       </div>
                       <h4 style={{ fontSize: '1.1rem', color: '#0f172a' }}>No safety vests found</h4>
                       <p style={{ color: '#64748b', fontSize: '0.875rem', maxWidth: '400px' }}>
-                        Scan or upload a vest QR code above to register your first hardware vest to the company directory.
+                        No safety vests found in the company directory. Vests are provisioned in the hardware catalog and deployed by Site Safety Officers.
                       </p>
-                      <button 
-                        className="btn-primary" 
-                        onClick={() => { setShowScannerModal(true); startCamera(); }}
-                        style={{ marginTop: '0.5rem' }}
-                      >
-                        <FiCamera style={{ marginRight: '0.4rem' }} /> Scan Vest QR Code
-                      </button>
                     </div>
                   </td>
                 </tr>
@@ -804,91 +521,6 @@ const SystemManagement = ({ user }) => {
           </div>
         </div>
       </div>
-
-      {/* ----------------- CAMERA SCANNER MODAL ----------------- */}
-      {showScannerModal && (
-        <div className="modal-overlay modal-backdrop" onClick={closeScannerModal}>
-          <div className="modal-content modal-popup" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px', padding: '2rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <FiCamera style={{ color: 'var(--primary-color)', fontSize: '1.25rem' }} />
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>Scan Vest QR Code</h3>
-              </div>
-              <button 
-                type="button" 
-                onClick={closeScannerModal}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.35rem', color: '#94a3b8', padding: '0.2rem', display: 'flex', alignItems: 'center' }}
-                title="Close"
-              >
-                <FiX />
-              </button>
-            </div>
-
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0 0 1.25rem 0', lineHeight: 1.5 }}>
-              Point the camera at the QR code printed on the BeVest safety vest to automatically register it into the company directory.
-            </p>
-
-            {/* Video Viewfinder */}
-            <div className="qr-scanner-viewfinder-box" style={{ position: 'relative', width: '100%', height: '260px', backgroundColor: '#000', borderRadius: '12px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {cameraError ? (
-                <div style={{ padding: '1rem', color: '#f87171', textAlign: 'center', fontSize: '0.85rem' }}>
-                  <FiAlertCircle style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }} /><br />
-                  {cameraError}
-                </div>
-              ) : (
-                <>
-                  <video 
-                    ref={videoRef} 
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                  />
-                  {/* Scanner overlay target frame */}
-                  <div className="scanner-target-frame" style={{ position: 'absolute', width: '180px', height: '180px', border: '2px solid rgba(249, 115, 22, 0.8)', borderRadius: '16px', boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.45)', pointerEvents: 'none' }}>
-                    <div className="scanner-laser-line" style={{ position: 'absolute', width: '100%', height: '2px', backgroundColor: '#f97316', boxShadow: '0 0 8px #f97316', animation: 'scanAnimation 2s infinite ease-in-out' }} />
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Feedback message */}
-            {scanFeedback.message && (
-              <div 
-                style={{ 
-                  marginTop: '1rem', 
-                  padding: '0.75rem 1rem', 
-                  borderRadius: '8px', 
-                  fontSize: '0.85rem',
-                  lineHeight: 1.45,
-                  backgroundColor: scanFeedback.type === 'success' ? '#ecfdf5' : scanFeedback.type === 'warning' ? '#fffbeb' : '#fef2f2',
-                  color: scanFeedback.type === 'success' ? '#065f46' : scanFeedback.type === 'warning' ? '#92400e' : '#991b1b',
-                  border: `1px solid ${scanFeedback.type === 'success' ? '#a7f3d0' : scanFeedback.type === 'warning' ? '#fde68a' : '#fecaca'}`
-                }}
-              >
-                {scanFeedback.message}
-              </div>
-            )}
-
-            {/* Action Buttons in Scanner Modal */}
-            <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.75rem', marginTop: '1.5rem', width: '100%' }}>
-              <button 
-                type="button" 
-                className="btn-secondary" 
-                onClick={() => fileInputRef.current?.click()}
-                style={{ padding: '0.7rem 1.25rem', fontSize: '0.875rem', fontWeight: 600, borderRadius: '8px' }}
-              >
-                <FiUploadCloud style={{ marginRight: '0.4rem' }} /> Or Upload Image
-              </button>
-              <button 
-                type="button" 
-                className="btn-primary" 
-                onClick={closeScannerModal}
-                style={{ padding: '0.7rem 1.25rem', fontSize: '0.875rem', fontWeight: 600, borderRadius: '8px' }}
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ----------------- QR VIEWER & PRINT LABEL MODAL ----------------- */}
       {showQrViewerModal && (
