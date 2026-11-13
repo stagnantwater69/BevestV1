@@ -1114,7 +1114,9 @@ void firebaseCloudTask(void* pvParameters) {
       pendingSafetyResponseSync = false;
       String stateToWrite = safetyResponseToSync;
       Firebase.setString(fbdo, (String("/vestsLive/") + currentVestId + "/safetyResponse").c_str(), stateToWrite);
+      Firebase.setString(fbdo, (String("/liveReadingsByVest/") + currentVestId + "/safetyResponse").c_str(), stateToWrite);
       Firebase.setString(fbdo, (String("/vestsLiveByMac/") + esp32CleanMac + "/safetyResponse").c_str(), stateToWrite);
+      Firebase.setString(fbdo, (String("/liveReadings/") + currentWorkerId + "/safetyResponse").c_str(), stateToWrite);
       lastPush = now;
       pendingImmediatePush = false;
       pushReadingToFirebase(false);
@@ -1683,14 +1685,15 @@ void checkSOS() {
   unsigned long now = millis();
   static unsigned long lastEmergencyStateMs = 0;
 
-  // Auto-reset ACKNOWLEDGED ("Worker has Responded") back to NONE ("No Actions") after 5 seconds
-  if (currentSafetyResponse == "ACKNOWLEDGED" && safetyResponseAckMs > 0 && (now - safetyResponseAckMs >= 5000UL)) {
+  // Auto-reset ACKNOWLEDGED ("Worker has Responded") back to NONE ("No Actions") after 12 seconds fallback
+  // (Cloud app manages 5-second display and resets RTDB; this fallback prevents lockup if cloud reset is dropped)
+  if (currentSafetyResponse == "ACKNOWLEDGED" && safetyResponseAckMs > 0 && (now - safetyResponseAckMs >= 12000UL)) {
     safetyResponseAckMs = 0;
     currentSafetyResponse = "NONE";
     safetyResponseToSync = "NONE";
     pendingSafetyResponseSync = true;
     pendingImmediatePush = true;
-    Serial.println("\n[SAFETY] 🔄 Auto-reset safetyResponse from ACKNOWLEDGED -> NONE (No Actions).");
+    Serial.println("\n[SAFETY] 🔄 Auto-reset safetyResponse from ACKNOWLEDGED -> NONE (Fallback Timeout).");
   }
 
   // Auto-reset EMERGENCY_REQUESTED / NO_RESPONSE after 8 seconds so repeated button holds always register
