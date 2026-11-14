@@ -119,7 +119,7 @@ class MonitoringRepositoryImpl @Inject constructor(
                 .valueEventsOrNull(),
         ) { workerSnap, vestsSnap, directReading, vestSnap, macSnap ->
             val validVests = vestsSnap?.documents.orEmpty().associateBy { it.id }
-            val assignedFromWorker = workerSnap?.getString("assignedVestId")?.takeIf { it.isNotBlank() && validVests.containsKey(it) }
+            val assignedFromWorker = workerSnap?.getString("assignedVestId")?.takeIf { it.isNotBlank() && validVests[it]?.getString("assignedWorkerId") == workerId }
             val assignedFromVest = vestsSnap?.documents?.firstOrNull { it.getString("assignedWorkerId") == workerId }?.id
             val assignedVestId = assignedFromWorker ?: assignedFromVest
 
@@ -177,7 +177,7 @@ class MonitoringRepositoryImpl @Inject constructor(
 
             for (workerId in workerIds) {
                 val workerDoc = workerDocs[workerId]
-                val assignedFromWorker = workerDoc?.getString("assignedVestId")?.takeIf { it.isNotBlank() && validVests.containsKey(it) }
+                val assignedFromWorker = workerDoc?.getString("assignedVestId")?.takeIf { it.isNotBlank() && validVests[it]?.getString("assignedWorkerId") == workerId }
                 val assignedFromVest = vestsSnap?.documents?.firstOrNull { it.getString("assignedWorkerId") == workerId }?.id
                 val assignedVestId = assignedFromWorker ?: assignedFromVest
 

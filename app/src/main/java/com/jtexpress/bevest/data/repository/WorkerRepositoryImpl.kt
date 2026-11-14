@@ -37,13 +37,15 @@ class WorkerRepositoryImpl @Inject constructor(
             query.snapshots(),
             vests.snapshots(),
         ) { workersSnap, vestsSnap ->
-            val validVestIds = vestsSnap.documents.map { it.id }.toSet()
+            val vestOwners = vestOwnersOf(vestsSnap)
             val list = workersSnap.documents.map { doc ->
                 val w = doc.toWorker()
                 val assigned = w.assignedVestId
-                if (assigned != null && !validVestIds.contains(assigned)) {
+                if (assigned != null && !isValidAssignment(vestOwners, assigned, w.workerId)) {
                     // Vest was deleted from database! Automatically self-heal worker record
-                    doc.reference.update("assignedVestId", null)
+                    // Only persist the repair when the vest list came from the server, so a
+                    // partial offline cache can never wipe a valid assignment.
+                    if (!vestsSnap.metadata.isFromCache) doc.reference.update("assignedVestId", null)
                     w.copy(assignedVestId = null)
                 } else {
                     w
@@ -61,11 +63,11 @@ class WorkerRepositoryImpl @Inject constructor(
             if (!snap.exists()) {
                 Outcome.Failure(AppError.NotFound("This worker no longer exists."))
             } else {
-                val validVestIds = vestsSnap.documents.map { it.id }.toSet()
+                val vestOwners = vestOwnersOf(vestsSnap)
                 val w = snap.toWorker()
                 val assigned = w.assignedVestId
-                if (assigned != null && !validVestIds.contains(assigned)) {
-                    snap.reference.update("assignedVestId", null)
+                if (assigned != null && !isValidAssignment(vestOwners, assigned, w.workerId)) {
+                    if (!vestsSnap.metadata.isFromCache) snap.reference.update("assignedVestId", null)
                     Outcome.Success(w.copy(assignedVestId = null))
                 } else {
                     Outcome.Success(w)
@@ -80,7 +82,9 @@ class WorkerRepositoryImpl @Inject constructor(
             val assigned = w.assignedVestId
             if (assigned != null) {
                 val vestSnap = vests.document(assigned).get().await()
-                if (!vestSnap.exists()) {
+                val owner = vestSnap.getString("assignedWorkerId")?.takeIf { it.isNotBlank() }
+                val inDirectory = vestSnap.getBoolean("inCompanyDirectory") == true
+                if (!vestSnap.exists() || !inDirectory || owner != w.workerId) {
                     workers.document(workerId).update("assignedVestId", null)
                     Outcome.Success(w.copy(assignedVestId = null))
                 } else {
@@ -95,6 +99,22 @@ class WorkerRepositoryImpl @Inject constructor(
     } catch (e: Exception) {
         Outcome.Failure(e.toAppError())
     }
+
+    /**
+     * Map of vestId -> assignedWorkerId for vests that are actually registered in a company
+     * directory. A vest that was deleted by the Developer, or returned to inventory, is absent.
+     */
+    private fun vestOwnersOf(vestsSnap: com.google.firebase.firestore.QuerySnapshot): Map<String, String?> =
+        vestsSnap.documents
+            .filter { it.getBoolean("inCompanyDirectory") == true }
+            .associate { it.id to it.getString("assignedWorkerId")?.takeIf { s -> s.isNotBlank() } }
+
+    /**
+     * A worker's vest only counts if the vest still exists in the directory AND the vest
+     * points back to the same worker. Anything else is a stale/orphaned link.
+     */
+    private fun isValidAssignment(vestOwners: Map<String, String?>, vestId: String, workerId: String): Boolean =
+        vestOwners.containsKey(vestId) && vestOwners[vestId] == workerId
 
     override suspend fun addWorker(worker: Worker): Outcome<Unit> = try {
         val existing = workers.document(worker.workerId).get().await()

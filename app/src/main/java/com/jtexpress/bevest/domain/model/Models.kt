@@ -48,6 +48,7 @@ data class Vest(
     val siteId: String? = null,
     val macAddress: String? = null,
     val serialNumber: String? = null,
+    val wifiSsid: String? = null,
 )
 
 data class SensorReading(

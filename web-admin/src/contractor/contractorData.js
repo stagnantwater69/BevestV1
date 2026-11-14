@@ -282,6 +282,10 @@ export function useContractorData(contractorId) {
   const [workersLoading, setWorkersLoading] = useState(true);
   const [workersError, setWorkersError] = useState(null);
 
+  // vestId -> assignedWorkerId for vests registered in a company directory. Used to hide
+  // stale worker.assignedVestId links left behind by deleted / returned vests.
+  const [vestOwners, setVestOwners] = useState(null);
+
   const [incidents, setIncidents] = useState([]);
   const [incidentsLoading, setIncidentsLoading] = useState(true);
   const [incidentsError, setIncidentsError] = useState(null);
@@ -313,6 +317,28 @@ export function useContractorData(contractorId) {
       },
     );
   }, [contractorId]);
+
+  useEffect(() => onSnapshot(
+    collection(db, 'vests'),
+    (qs) => {
+      const map = {};
+      qs.docs.forEach((d) => {
+        const v = d.data() || {};
+        if (v.inCompanyDirectory === true) map[d.id] = v.assignedWorkerId || null;
+      });
+      setVestOwners(map);
+    },
+    () => setVestOwners(null),
+  ), []);
+
+  // A worker only has a vest if that vest still exists and points back to them.
+  const validatedWorkers = useMemo(() => (vestOwners == null
+    ? workers
+    : workers.map((w) => (
+      w.assignedVestId && vestOwners[w.assignedVestId] !== w.id
+        ? { ...w, assignedVestId: null }
+        : w
+    ))), [workers, vestOwners]);
 
   useEffect(() => {
     if (!contractorId) return undefined;
@@ -364,7 +390,7 @@ export function useContractorData(contractorId) {
     return () => unsubs.forEach((u) => u());
   }, [workerIdsKey]);
 
-  const liveWorkers = useMemo(() => workers
+  const liveWorkers = useMemo(() => validatedWorkers
     .map((w) => {
       const reading = readings[w.id] || null;
       return {
@@ -374,12 +400,12 @@ export function useContractorData(contractorId) {
         stale: isStale(reading, thresholds, now),
       };
     })
-    .sort((a, b) => a.worker.fullName.localeCompare(b.worker.fullName)), [workers, readings, thresholds, now]);
+    .sort((a, b) => a.worker.fullName.localeCompare(b.worker.fullName)), [validatedWorkers, readings, thresholds, now]);
 
   return {
     loading: workersLoading || incidentsLoading,
     error: workersError || incidentsError,
-    workers,
+    workers: validatedWorkers,
     liveWorkers,
     incidents,
     thresholds,
