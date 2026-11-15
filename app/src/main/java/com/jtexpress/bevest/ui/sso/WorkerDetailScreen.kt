@@ -16,6 +16,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.Cake
+import androidx.compose.material.icons.outlined.Apartment
+import com.jtexpress.bevest.ui.common.DetailRow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -52,6 +56,7 @@ import com.jtexpress.bevest.ui.common.ErrorState
 import com.jtexpress.bevest.ui.common.LastUpdatedLabel
 import com.jtexpress.bevest.ui.common.LivePulse
 import com.jtexpress.bevest.ui.common.MetricCard
+import com.jtexpress.bevest.ui.common.WifiSignalLevel
 import com.jtexpress.bevest.ui.common.ReflectiveBand
 import com.jtexpress.bevest.ui.common.SectionHeader
 import com.jtexpress.bevest.ui.common.StatusChip
@@ -200,6 +205,17 @@ fun WorkerDetailScreen(
                             },
                             modifier = Modifier.weight(1f),
                         )
+                        val wifiLevel = WifiSignalLevel.fromRssi(reading?.wifiRssi, online = !state.stale && reading != null)
+                        MetricCard(
+                            icon = wifiLevel.icon(),
+                            label = "Wi-Fi Signal",
+                            value = if (state.stale || reading == null) "Offline" else (reading.wifiRssi?.toString() ?: "—"),
+                            unit = if (!state.stale && reading?.wifiRssi != null) "dBm" else null,
+                            accent = if (!state.stale && reading != null) wifiLevel.color(palette) else null,
+                            stale = state.stale,
+                            supporting = if (!state.stale && reading != null && reading.wifiRssi != null) wifiLevel.label else null,
+                            modifier = Modifier.weight(1f),
+                        )
                     }
 
                     val response = reading?.safetyResponse ?: SafetyResponseState.NONE
@@ -218,6 +234,35 @@ fun WorkerDetailScreen(
                         },
                         stale = state.stale,
                     )
+
+                    // ---- Worker Info ----
+                    if (!worker.birthday.isNullOrBlank() || !worker.floorNumber.isNullOrBlank() || worker.phone.isNotBlank()) {
+                        SectionHeader(
+                            title = "Worker details",
+                            supporting = "Profile and work assignment information",
+                        )
+                        if (worker.phone.isNotBlank()) {
+                            DetailRow(
+                                label = "Phone",
+                                value = worker.phone,
+                                icon = Icons.Outlined.Phone,
+                            )
+                        }
+                        if (!worker.birthday.isNullOrBlank()) {
+                            DetailRow(
+                                label = "Birthday",
+                                value = worker.birthday,
+                                icon = Icons.Outlined.Cake,
+                            )
+                        }
+                        if (!worker.floorNumber.isNullOrBlank()) {
+                            DetailRow(
+                                label = "Floor number",
+                                value = worker.floorNumber,
+                                icon = Icons.Outlined.Apartment,
+                            )
+                        }
+                    }
 
                     // ---- Location ----
                     SectionHeader("Location")

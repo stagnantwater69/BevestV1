@@ -15,7 +15,6 @@ import com.jtexpress.bevest.navigation.Routes
 import com.jtexpress.bevest.ui.common.BottomTab
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.common.RoleScaffold
-import com.jtexpress.bevest.ui.sim.SimulationScreen
 import com.jtexpress.bevest.ui.common.profileDestinations
 
 /**
@@ -61,8 +60,6 @@ fun ContractorArea(
             add(BottomTab(Routes.CONTRACTOR_SSOS, "SSO", BevestIcons.Officer))
             add(BottomTab(Routes.CONTRACTOR_REPORTS, "Reports", BevestIcons.Reports))
             add(BottomTab(Routes.CONTRACTOR_SUBSCRIPTION, "Plan", BevestIcons.Subscription))
-            // Demo tooling: a tab in debug builds, absent from release.
-            if (BuildConfig.DEBUG) add(BottomTab(Routes.SIMULATION, "Simulation", BevestIcons.Simulator))
         },
         startRoute = Routes.CONTRACTOR_DASHBOARD,
     ) { navController ->
@@ -127,11 +124,6 @@ fun ContractorArea(
                 actorId = user.uid,
                 onBack = { navController.popBackStack() },
             )
-        }
-        if (BuildConfig.DEBUG) {
-            composable(Routes.SIMULATION) {
-                SimulationScreen(user = user, onBack = { navController.openTab(Routes.CONTRACTOR_DASHBOARD) })
-            }
         }
         profileDestinations(navController, onSignOut)
     }

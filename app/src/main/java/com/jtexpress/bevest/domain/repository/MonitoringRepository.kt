@@ -22,4 +22,7 @@ interface MonitoringRepository {
 
     /** Debug simulator only — removes the live reading so the worker reads as OFFLINE. */
     suspend fun clearReading(workerId: String): Outcome<Unit>
+
+    /** Forces a network query of the live reading paths from Firebase RTDB. */
+    suspend fun refreshReadings(): Outcome<Unit>
 }

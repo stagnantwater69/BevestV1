@@ -9,7 +9,14 @@ import com.jtexpress.bevest.data.ble.DiscoveredBleVest
 import com.jtexpress.bevest.domain.model.Vest
 import com.jtexpress.bevest.domain.model.VestAssignment
 import com.jtexpress.bevest.domain.model.VestStatus
+import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.domain.model.Worker
+import com.jtexpress.bevest.domain.repository.AuthRepository
+import com.jtexpress.bevest.domain.repository.UserRepository
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import com.jtexpress.bevest.domain.repository.VestRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.utils.Outcome
@@ -55,12 +62,35 @@ class VestDetailViewModel @Inject constructor(
     private val vestRepository: VestRepository,
     private val workerRepository: WorkerRepository,
     private val bleProvisioner: BleProvisioner,
+    private val authRepository: AuthRepository,
+    private val userRepository: UserRepository,
 ) : ViewModel() {
 
     private val vestId: String = savedStateHandle.get<String>("vestId").orEmpty()
     private val message = MutableStateFlow<String?>(null)
     private val assigningWorker = MutableStateFlow(false)
     private val wifiInputs = MutableStateFlow(WifiReprovisionUiState())
+    private val scopeFilter = MutableStateFlow<Pair<String?, String?>?>(null) // contractorId to siteId
+
+    init {
+        val uid = authRepository.currentUserId()
+        if (uid != null) {
+            viewModelScope.launch {
+                when (val u = userRepository.getUser(uid)) {
+                    is Outcome.Success -> {
+                        if (scopeFilter.value == null) {
+                            scopeFilter.value = (u.data.contractorId to u.data.siteId)
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+
+    fun bind(user: User) {
+        scopeFilter.value = (user.contractorId to user.siteId)
+    }
 
     val isBluetoothEnabled: Boolean get() = bleProvisioner.isBluetoothEnabled
     val isLocationEnabled: Boolean get() = bleProvisioner.isLocationEnabled
@@ -76,13 +106,30 @@ class VestDetailViewModel @Inject constructor(
         ) to isAssigning
     }
 
+    private val vestFlow = vestRepository.observeVest(vestId)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val workersFlow: Flow<Outcome<List<Worker>>> = combine(scopeFilter, vestFlow) { filter, vestOutcome ->
+        val userContractor = filter?.first
+        val userSite = filter?.second
+        val vest = (vestOutcome as? Outcome.Success)?.data
+        val effectiveSite = userSite ?: vest?.siteId
+        val effectiveContractor = userContractor ?: vest?.companyId
+        effectiveContractor to effectiveSite
+    }.distinctUntilChanged().flatMapLatest { (cid, sid) ->
+        workerRepository.observeWorkers(contractorId = cid, siteId = sid)
+    }
+
     val state: StateFlow<VestDetailState> = combine(
-        vestRepository.observeVest(vestId),
+        vestFlow,
         vestRepository.observeAssignments(vestId),
-        workerRepository.observeWorkers(contractorId = null, siteId = null),
+        workersFlow,
         message,
         wifiAndBleFlow,
     ) { vestOutcome, assignmentsOutcome, workersOutcome, msg, (mergedWifi, isAssigning) ->
+        if (workersOutcome is Outcome.Failure) {
+            android.util.Log.e("VestDetailVM", "observeWorkers error: ${workersOutcome.error.message}")
+        }
         val allWorkers = (workersOutcome as? Outcome.Success)?.data.orEmpty()
         val nameMap = allWorkers.associate { w ->
             val display = w.fullName.trim().takeIf { it.isNotBlank() }?.let { "$it (${w.workerId})" } ?: w.workerId

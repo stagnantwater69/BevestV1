@@ -171,6 +171,22 @@ fun AddEditWorkerScreen(
                         error = state.phoneError,
                         helper = "Optional — used to reach them directly",
                         keyboardType = KeyboardType.Phone,
+                        imeAction = ImeAction.Next,
+                    )
+                    FormField(
+                        state.birthday,
+                        viewModel::onBirthday,
+                        "Birthday",
+                        helper = "e.g. YYYY-MM-DD or MM/DD/YYYY",
+                        keyboardType = KeyboardType.Text,
+                        imeAction = ImeAction.Next,
+                    )
+                    FormField(
+                        state.floorNumber,
+                        viewModel::onFloorNumber,
+                        "Floor number",
+                        helper = "e.g. Floor 3, Ground Floor, Basement 1",
+                        keyboardType = KeyboardType.Text,
                         imeAction = ImeAction.Done,
                     )
                 }

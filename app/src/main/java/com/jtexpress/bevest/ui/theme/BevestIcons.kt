@@ -75,6 +75,8 @@ object BevestIcons {
     val Add: ImageVector = Icons.Outlined.Add
     val Scan: ImageVector = Icons.Outlined.QrCodeScanner
     val Refresh: ImageVector = Icons.Outlined.Refresh
+    val Build: ImageVector = Icons.Outlined.Build
+    val Maintenance: ImageVector = Icons.Outlined.Build
     val Simulator: ImageVector = Icons.Outlined.Build
     val History: ImageVector = Icons.Outlined.History
     val Timer: ImageVector = Icons.Outlined.Timer

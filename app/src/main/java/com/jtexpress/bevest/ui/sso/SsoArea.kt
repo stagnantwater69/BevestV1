@@ -45,7 +45,6 @@ import com.jtexpress.bevest.notifications.DeepLink
 import com.jtexpress.bevest.ui.common.BottomTab
 import com.jtexpress.bevest.ui.common.RoleScaffold
 import com.jtexpress.bevest.ui.common.profileDestinations
-import com.jtexpress.bevest.ui.sim.SimulationScreen
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Spacing
@@ -85,18 +84,12 @@ fun SsoArea(
     fallPopup?.let { popup ->
         FallDetectedPopupDialog(
             popup = popup,
-            onRespond = {
+            onOpenAlert = {
                 safetyWatcher.dismissFallPopup(popup.alert)
                 navController.navigate(Routes.withArg(Routes.SSO_ALERT_DETAIL, popup.alert.alertId))
             },
             onAcknowledge = {
                 safetyWatcher.acknowledgeFall(popup.alert, user.uid)
-            },
-            onResolve = {
-                safetyWatcher.resolveFall(popup.alert, user.uid)
-            },
-            onDismiss = {
-                safetyWatcher.dismissFallPopup(popup.alert)
             },
         )
     }
@@ -119,7 +112,6 @@ fun SsoArea(
                 onOpenAlert = { id -> navController.navigate(Routes.withArg(Routes.SSO_ALERT_DETAIL, id)) },
                 onOpenAlerts = { navController.navigate(Routes.SSO_ALERTS) },
                 onOpenProfile = { navController.navigate(Routes.PROFILE) },
-                onOpenSimulator = { navController.navigate(Routes.SIMULATION) },
             )
         }
         composable(Routes.SSO_WORKERS) {
@@ -186,14 +178,12 @@ fun SsoArea(
             VestDetailScreen(
                 vestId = entry.arguments?.getString("vestId").orEmpty(),
                 actorId = user.uid,
+                user = user,
                 onBack = { navController.popBackStack() },
             )
         }
         composable(Routes.SSO_PAIR_VEST) {
             PairVestScreen(user = user, onDone = { navController.popBackStack() })
-        }
-        composable(Routes.SIMULATION) {
-            SimulationScreen(user = user, onBack = { navController.popBackStack() })
         }
         profileDestinations(navController, onSignOut)
     }
@@ -202,16 +192,14 @@ fun SsoArea(
 @Composable
 private fun FallDetectedPopupDialog(
     popup: FallPopupState,
-    onRespond: () -> Unit,
+    onOpenAlert: () -> Unit,
     onAcknowledge: () -> Unit,
-    onResolve: () -> Unit,
-    onDismiss: () -> Unit,
 ) {
     val red = LocalStatusPalette.current.emergency
     val isEmergency = popup.alert.severity == AlertSeverity.EMERGENCY
 
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = onAcknowledge,
         properties = DialogProperties(
             dismissOnBackPress = true,
             dismissOnClickOutside = false,
@@ -284,24 +272,24 @@ private fun FallDetectedPopupDialog(
             }
             Spacer(Modifier.height(Spacing.xxl))
             Button(
-                onClick = onRespond,
+                onClick = onOpenAlert,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.White,
                     contentColor = red,
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(60.dp),
+                    .height(56.dp),
             ) {
                 Text(
-                    text = "Respond & View Alert",
+                    text = "Open and View Alert",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
             }
             Spacer(Modifier.height(Spacing.md))
             OutlinedButton(
-                onClick = onResolve,
+                onClick = onAcknowledge,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                 border = ButtonDefaults.outlinedButtonBorder.copy(brush = SolidColor(Color.White)),
                 modifier = Modifier
@@ -309,33 +297,10 @@ private fun FallDetectedPopupDialog(
                     .height(52.dp),
             ) {
                 Text(
-                    text = "Mark Resolved",
+                    text = "Acknowledged",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White,
-                )
-            }
-            Spacer(Modifier.height(Spacing.sm))
-            TextButton(
-                onClick = onAcknowledge,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-            ) {
-                Text(
-                    text = "Acknowledge Alert",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                )
-            }
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    text = "Silence & Dismiss",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.85f),
                 )
             }
         }

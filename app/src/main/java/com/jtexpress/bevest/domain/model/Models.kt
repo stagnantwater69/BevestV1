@@ -26,6 +26,8 @@ data class Worker(
     val firstName: String = "",
     val lastName: String = "",
     val phone: String = "",
+    val birthday: String? = null,
+    val floorNumber: String? = null,
     val photoUrl: String? = null,
     val contractorId: String? = null,
     val siteId: String? = null,
@@ -49,6 +51,7 @@ data class Vest(
     val macAddress: String? = null,
     val serialNumber: String? = null,
     val wifiSsid: String? = null,
+    val wifiRssi: Int? = null,
 )
 
 data class SensorReading(
@@ -61,6 +64,7 @@ data class SensorReading(
     val latitude: Double? = null,
     val longitude: Double? = null,
     val batteryPercent: Int? = null,
+    val wifiRssi: Int? = null,
     val safetyResponse: SafetyResponseState = SafetyResponseState.NONE,
     val timestamp: Long = 0L,
 )

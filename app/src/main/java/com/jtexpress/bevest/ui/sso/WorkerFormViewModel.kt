@@ -27,6 +27,8 @@ data class WorkerFormState(
     val firstName: String = "",
     val lastName: String = "",
     val phone: String = "",
+    val birthday: String = "",
+    val floorNumber: String = "",
     val photoUrl: String? = null,
     val active: Boolean = true,
     val projects: List<ProjectSite> = emptyList(),
@@ -86,6 +88,8 @@ class WorkerFormViewModel @Inject constructor(
                             firstName = r.data.firstName,
                             lastName = r.data.lastName,
                             phone = r.data.phone,
+                            birthday = r.data.birthday.orEmpty(),
+                            floorNumber = r.data.floorNumber.orEmpty(),
                             photoUrl = r.data.photoUrl,
                             active = r.data.active,
                             projects = projects,
@@ -119,6 +123,8 @@ class WorkerFormViewModel @Inject constructor(
     fun onFirstName(v: String) = _state.update { it.copy(firstName = v, firstNameError = null) }
     fun onLastName(v: String) = _state.update { it.copy(lastName = v, lastNameError = null) }
     fun onPhone(v: String) = _state.update { it.copy(phone = v, phoneError = null) }
+    fun onBirthday(v: String) = _state.update { it.copy(birthday = v) }
+    fun onFloorNumber(v: String) = _state.update { it.copy(floorNumber = v) }
     fun onProjectSelected(projectId: String) =
         _state.update { it.copy(selectedProjectId = projectId, projectError = null, formError = null) }
     fun onPhotoPicked(bytes: ByteArray) { pendingPhoto = bytes }
@@ -156,6 +162,8 @@ class WorkerFormViewModel @Inject constructor(
             firstName = s.firstName.trim(),
             lastName = s.lastName.trim(),
             phone = s.phone.trim(),
+            birthday = s.birthday.trim().takeIf { it.isNotBlank() },
+            floorNumber = s.floorNumber.trim().takeIf { it.isNotBlank() },
             photoUrl = s.photoUrl,
             contractorId = contractorId,
             siteId = siteId,
@@ -178,6 +186,8 @@ class WorkerFormViewModel @Inject constructor(
                 firstName = s.firstName.trim(),
                 lastName = s.lastName.trim(),
                 phone = s.phone.trim(),
+                birthday = s.birthday.trim().takeIf { it.isNotBlank() },
+                floorNumber = s.floorNumber.trim().takeIf { it.isNotBlank() },
                 photoUrl = s.photoUrl,
                 contractorId = contractorId,
                 siteId = siteId,

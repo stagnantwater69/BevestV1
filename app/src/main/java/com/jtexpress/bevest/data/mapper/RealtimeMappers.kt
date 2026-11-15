@@ -55,6 +55,7 @@ fun DataSnapshot.toSensorReading(workerId: String): SensorReading? {
         latitude = dbl("latitude"),
         longitude = dbl("longitude"),
         batteryPercent = int("battery"),
+        wifiRssi = int("wifiRssi") ?: int("rssi"),
         safetyResponse = SafetyResponseState.fromRaw(str("safetyResponse")),
         timestamp = effectiveTimestamp,
     )

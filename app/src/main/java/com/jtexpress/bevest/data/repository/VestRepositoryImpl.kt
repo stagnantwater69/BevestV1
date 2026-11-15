@@ -46,6 +46,7 @@ class VestRepositoryImpl @Inject constructor(
         val serialNumber: String? = null,
         val vestId: String? = null,
         val wifiSsid: String? = null,
+        val wifiRssi: Int? = null,
     )
 
     private fun DataSnapshot.safeStr(key: String): String? =
@@ -82,6 +83,7 @@ class VestRepositoryImpl @Inject constructor(
                 ?: child.safeStr("macAddress")?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()
             val serial = child.safeStr("serialNumber")
             val wifiSsid = child.safeStr("wifiSsid")
+            val wifiRssi = child.safeInt("wifiRssi") ?: child.safeInt("rssi")
             val rawOnline = child.safeBool("online", default = false)
             val battery = child.safeInt("battery")
             val lastSeen = child.safeLong("lastSeenServer")
@@ -100,6 +102,7 @@ class VestRepositoryImpl @Inject constructor(
                 serialNumber = serial,
                 vestId = vestIdField ?: key,
                 wifiSsid = wifiSsid,
+                wifiRssi = wifiRssi,
             )
 
             fun mergeInto(targetKey: String) {
@@ -116,6 +119,7 @@ class VestRepositoryImpl @Inject constructor(
                         serialNumber = info.serialNumber ?: prev.serialNumber,
                         vestId = info.vestId ?: prev.vestId,
                         wifiSsid = info.wifiSsid ?: prev.wifiSsid,
+                        wifiRssi = info.wifiRssi ?: prev.wifiRssi,
                     )
                 }
             }
@@ -221,6 +225,9 @@ class VestRepositoryImpl @Inject constructor(
                         if (validLastSeen != null) {
                             updateMap["lastSeen"] = validLastSeen
                         }
+                        if (live?.wifiRssi != null) {
+                            updateMap["wifiRssi"] = live.wifiRssi
+                        }
                         doc.reference.update(updateMap)
                     } catch (_: Exception) {}
                 }
@@ -230,6 +237,7 @@ class VestRepositoryImpl @Inject constructor(
                     batteryPercent = live?.battery ?: base.batteryPercent,
                     lastSeen = validLastSeen ?: base.lastSeen,
                     wifiSsid = live?.wifiSsid ?: base.wifiSsid,
+                    wifiRssi = if (liveOnline) (live?.wifiRssi ?: base.wifiRssi) else null,
                 )
             }
             Outcome.Success(mapped) as Outcome<List<Vest>>
@@ -274,6 +282,9 @@ class VestRepositoryImpl @Inject constructor(
                         if (validLastSeen != null) {
                             updateMap["lastSeen"] = validLastSeen
                         }
+                        if (live?.wifiRssi != null) {
+                            updateMap["wifiRssi"] = live.wifiRssi
+                        }
                         snap.reference.update(updateMap)
                     } catch (_: Exception) {}
                 }
@@ -283,6 +294,8 @@ class VestRepositoryImpl @Inject constructor(
                         status = effectiveStatus,
                         batteryPercent = live?.battery ?: base.batteryPercent,
                         lastSeen = validLastSeen ?: base.lastSeen,
+                        wifiSsid = live?.wifiSsid ?: base.wifiSsid,
+                        wifiRssi = if (liveOnline) (live?.wifiRssi ?: base.wifiRssi) else null,
                     )
                 )
             }

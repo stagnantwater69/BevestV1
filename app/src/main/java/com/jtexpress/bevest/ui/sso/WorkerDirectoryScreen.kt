@@ -8,6 +8,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,6 +58,22 @@ fun WorkerDirectoryScreen(
     BevestScaffold(
         title = "Workers",
         subtitle = if (user.role == UserRole.SSO) user.siteId else null,
+        actions = {
+            IconButton(onClick = viewModel::refreshReadings) {
+                if (state.refreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                } else {
+                    Icon(
+                        imageVector = BevestIcons.Refresh,
+                        contentDescription = "Refresh live readings",
+                    )
+                }
+            }
+        },
         floatingActionButton = {
             if (canAdd) {
                 ExtendedFloatingActionButton(

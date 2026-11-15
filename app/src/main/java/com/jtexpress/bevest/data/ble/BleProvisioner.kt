@@ -294,7 +294,7 @@ class BleProvisioner @Inject constructor(
 
         try {
             activeGatt?.close()
-            activeGatt = vest.device.connectGatt(context, false, gattCallback)
+            activeGatt = vest.device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
         } catch (e: Exception) {
             _state.update {
                 it.copy(
@@ -355,30 +355,65 @@ class BleProvisioner @Inject constructor(
             return
         }
 
-        val service = gatt.getService(SERVICE_UUID)
-        val configChar = service?.getCharacteristic(CONFIG_CHAR_UUID)
+        scope.launch {
+            var service = gatt.getService(SERVICE_UUID)
+            var configChar = service?.getCharacteristic(CONFIG_CHAR_UUID)
 
-        if (configChar == null) {
-            _state.update {
-                it.copy(
-                    connectionState = BleConnectionState.FAILED,
-                    statusMessage = "Vest GATT provisioning service not found."
-                )
+            if (configChar == null) {
+                android.util.Log.w("BleProvisioner", "Config characteristic null, discovering services...")
+                gatt.discoverServices()
+                delay(500)
+                service = gatt.getService(SERVICE_UUID)
+                configChar = service?.getCharacteristic(CONFIG_CHAR_UUID)
             }
-            return
-        }
 
-        val payload = """{"ssid":"$ssid","pass":"$pass","vestId":"$vestId"}"""
-        configChar.value = payload.toByteArray(Charsets.UTF_8)
-        configChar.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            if (configChar == null) {
+                _state.update {
+                    it.copy(
+                        connectionState = BleConnectionState.FAILED,
+                        statusMessage = "Vest GATT provisioning service not found."
+                    )
+                }
+                return@launch
+            }
 
-        val success = gatt.writeCharacteristic(configChar)
-        if (!success) {
-            _state.update {
-                it.copy(
-                    connectionState = BleConnectionState.FAILED,
-                    statusMessage = "Failed to transmit payload to vest characteristic."
-                )
+            val payload = """{"ssid":"$ssid","pass":"$pass","vestId":"$vestId"}"""
+            val payloadBytes = payload.toByteArray(Charsets.UTF_8)
+            val writeType = if ((configChar.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            } else {
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            }
+
+            var success = false
+            for (attempt in 1..3) {
+                success = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    gatt.writeCharacteristic(configChar, payloadBytes, writeType) == 0
+                } else {
+                    @Suppress("DEPRECATION")
+                    configChar.value = payloadBytes
+                    @Suppress("DEPRECATION")
+                    configChar.writeType = writeType
+                    @Suppress("DEPRECATION")
+                    gatt.writeCharacteristic(configChar)
+                }
+
+                if (success) {
+                    android.util.Log.d("BleProvisioner", "Wi-Fi config written successfully on attempt $attempt")
+                    break
+                } else {
+                    android.util.Log.w("BleProvisioner", "Write attempt $attempt returned false, retrying in 250ms...")
+                    delay(250)
+                }
+            }
+
+            if (!success) {
+                _state.update {
+                    it.copy(
+                        connectionState = BleConnectionState.FAILED,
+                        statusMessage = "Failed to transmit payload to vest characteristic."
+                    )
+                }
             }
         }
     }
@@ -393,7 +428,12 @@ class BleProvisioner @Inject constructor(
                         statusMessage = "Connected to vest! Discovering services..."
                     )
                 }
-                gatt?.discoverServices()
+                scope.launch {
+                    delay(300)
+                    gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+                    delay(200)
+                    gatt?.discoverServices()
+                }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 try {
                     gatt?.close()
@@ -413,15 +453,24 @@ class BleProvisioner @Inject constructor(
 
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                val service = gatt?.getService(SERVICE_UUID)
+            if (status == BluetoothGatt.GATT_SUCCESS && gatt != null) {
+                // Request 512-byte MTU so Wi-Fi JSON payload transmits cleanly in a single frame
+                gatt.requestMtu(512)
+
+                val service = gatt.getService(SERVICE_UUID)
                 val statusChar = service?.getCharacteristic(STATUS_CHAR_UUID)
                 if (statusChar != null) {
                     gatt.setCharacteristicNotification(statusChar, true)
                     val descriptor = statusChar.getDescriptor(CLIENT_CONFIG_DESCRIPTOR)
                     if (descriptor != null) {
-                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                        gatt.writeDescriptor(descriptor)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                            @Suppress("DEPRECATION")
+                            gatt.writeDescriptor(descriptor)
+                        }
                     }
                 }
                 _state.update {
@@ -431,6 +480,18 @@ class BleProvisioner @Inject constructor(
                     )
                 }
             }
+        }
+
+        override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
+            android.util.Log.d("BleProvisioner", "MTU negotiated: $mtu (status: $status)")
+        }
+
+        override fun onDescriptorWrite(gatt: BluetoothGatt?, descriptor: BluetoothGattDescriptor?, status: Int) {
+            android.util.Log.d("BleProvisioner", "Descriptor write status: $status for ${descriptor?.uuid}")
+        }
+
+        override fun onCharacteristicWrite(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
+            android.util.Log.d("BleProvisioner", "Characteristic write status: $status for ${characteristic?.uuid}")
         }
 
         @Deprecated("Deprecated in Java")

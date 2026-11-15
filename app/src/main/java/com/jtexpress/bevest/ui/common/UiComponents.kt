@@ -27,6 +27,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.outlined.Wifi
+import androidx.compose.material.icons.outlined.Wifi1Bar
+import androidx.compose.material.icons.outlined.Wifi2Bar
+import androidx.compose.material.icons.outlined.WifiOff
+import com.jtexpress.bevest.ui.theme.StatusPalette
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -198,6 +203,83 @@ fun BatteryIndicator(percent: Int?, modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.labelMedium,
             color = if (low) palette.warning else MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+enum class WifiSignalLevel(val label: String) {
+    EXCELLENT("Excellent"),
+    GOOD("Good"),
+    FAIR("Fair"),
+    WEAK("Weak"),
+    DISCONNECTED("Offline");
+
+    fun color(palette: StatusPalette): Color = when (this) {
+        EXCELLENT -> Color(0xFF10B981) // Emerald Green
+        GOOD -> palette.normal
+        FAIR -> palette.warning
+        WEAK -> palette.danger
+        DISCONNECTED -> palette.offline
+    }
+
+    fun icon(): ImageVector = when (this) {
+        EXCELLENT -> Icons.Outlined.Wifi
+        GOOD -> Icons.Outlined.Wifi
+        FAIR -> Icons.Outlined.Wifi2Bar
+        WEAK -> Icons.Outlined.Wifi1Bar
+        DISCONNECTED -> Icons.Outlined.WifiOff
+    }
+
+    companion object {
+        fun fromRssi(rssi: Int?, online: Boolean): WifiSignalLevel {
+            if (!online || rssi == null || rssi == 0) return DISCONNECTED
+            return when {
+                rssi >= -60 -> EXCELLENT
+                rssi >= -72 -> GOOD
+                rssi >= -84 -> FAIR
+                else -> WEAK
+            }
+        }
+    }
+}
+
+/** Color-coded Wi-Fi signal indicator with RSSI strength and level label. */
+@Composable
+fun WifiSignalIndicator(
+    rssi: Int?,
+    online: Boolean,
+    modifier: Modifier = Modifier,
+    showLabel: Boolean = true,
+    compact: Boolean = false,
+) {
+    val palette = LocalStatusPalette.current
+    val level = WifiSignalLevel.fromRssi(rssi, online)
+    val color = level.color(palette)
+    val icon = level.icon()
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = "Wi-Fi Signal: ${level.label}",
+            tint = color,
+            modifier = Modifier.size(14.dp),
+        )
+        if (showLabel) {
+            val labelText = when {
+                !online -> "Offline"
+                rssi == null -> "—"
+                compact -> "${rssi} dBm"
+                else -> "${rssi} dBm (${level.label})"
+            }
+            Text(
+                text = labelText,
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+            )
+        }
     }
 }
 

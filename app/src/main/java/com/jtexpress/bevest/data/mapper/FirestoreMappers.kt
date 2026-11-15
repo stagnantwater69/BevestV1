@@ -87,6 +87,8 @@ fun DocumentSnapshot.toWorker(): Worker = Worker(
     firstName = str("firstName"),
     lastName = str("lastName"),
     phone = str("phone"),
+    birthday = strOrNull("birthday"),
+    floorNumber = strOrNull("floorNumber"),
     photoUrl = strOrNull("photoUrl"),
     contractorId = strOrNull("contractorId"),
     siteId = strOrNull("siteId"),
@@ -126,6 +128,7 @@ fun DocumentSnapshot.toVest(): Vest {
         macAddress = strOrNull("macAddress"),
         serialNumber = strOrNull("serialNumber") ?: strOrNull("esp32Serial"),
         wifiSsid = strOrNull("wifiSsid"),
+        wifiRssi = int("wifiRssi") ?: int("rssi"),
     )
 }
 
