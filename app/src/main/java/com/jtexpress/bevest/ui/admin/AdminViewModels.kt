@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.jtexpress.bevest.utils.TempPassword
 import javax.inject.Inject
 
 data class AdminDashboardState(
@@ -239,7 +240,7 @@ class AddUserViewModel @Inject constructor(
     }
 
     fun generatePassword() = _state.update {
-        it.copy(tempPassword = "GID-2026-${(1000..9999).random()}", errors = it.errors - "tempPassword")
+        it.copy(tempPassword = TempPassword.generate("BV"), errors = it.errors - "tempPassword")
     }
 
     fun submit(actorId: String) {

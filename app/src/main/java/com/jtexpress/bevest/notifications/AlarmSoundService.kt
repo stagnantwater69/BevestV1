@@ -44,6 +44,7 @@ class AlarmSoundService : Service() {
     override fun onCreate() {
         super.onCreate()
         running = true
+        starting = false
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -157,6 +158,10 @@ class AlarmSoundService : Service() {
         @Volatile
         private var running = false
 
+        /** A start has been sent; the service may not have been created yet. */
+        @Volatile
+        private var starting = false
+
         private val ALARM_AUDIO: AudioAttributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ALARM)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -168,6 +173,7 @@ class AlarmSoundService : Service() {
          * without an exemption) — the caller then falls back to a sounding notification.
          */
         fun start(context: Context, id: Int, notification: Notification): Boolean = runCatching {
+            starting = true
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, AlarmSoundService::class.java)
@@ -175,20 +181,22 @@ class AlarmSoundService : Service() {
                     .putExtra(EXTRA_ID, id)
                     .putExtra(EXTRA_NOTIFICATION, notification),
             )
-        }.isSuccess
+        }.onFailure { starting = false }.isSuccess
 
         /**
          * Stops the alarm for notification [id], or every alarm when null. With
          * [keepNotification] the alert stays in the shade (the caller re-posts it quietly).
          */
         fun stop(context: Context, id: Int?, keepNotification: Boolean) {
-            if (!running) return
+            // No early return on [running]: a stop sent right after a start can arrive
+            // before the service has been created, and must still reach it.
             val intent = Intent(context, AlarmSoundService::class.java)
                 .setAction(ACTION_STOP)
                 .putExtra(EXTRA_KEEP, keepNotification)
             if (id != null) intent.putExtra(EXTRA_ID, id)
-            // A plain start: the service is already in the foreground if it's sounding,
-            // and if it isn't there's nothing to stop.
+            // A plain start: the service is already in the foreground if it's sounding.
+            // If it isn't running at all, don't create it just to stop nothing.
+            if (!running && !starting) return
             runCatching { context.startService(intent) }
         }
     }

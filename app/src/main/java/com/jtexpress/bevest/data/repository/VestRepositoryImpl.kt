@@ -118,6 +118,9 @@ class VestRepositoryImpl @Inject constructor(
 
             val newVestSnap = txn.get(newVestRef)
             if (!newVestSnap.exists()) throw IllegalStateException("Vest $newVestId is not registered.")
+            if (VestStatus.fromRaw(newVestSnap.getString("status")) == VestStatus.MAINTENANCE) {
+                throw IllegalStateException("Vest $newVestId is marked for maintenance.")
+            }
             val newVestAssigned = newVestSnap.getString("assignedWorkerId")
             if (!newVestAssigned.isNullOrBlank() && newVestAssigned != workerId) {
                 throw IllegalStateException("Vest $newVestId is already assigned to another worker.")

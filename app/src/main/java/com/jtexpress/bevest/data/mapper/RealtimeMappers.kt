@@ -32,6 +32,7 @@ fun DataSnapshot.toSensorReading(workerId: String): SensorReading? {
         batteryPercent = int("battery"),
         safetyResponse = SafetyResponseState.fromRaw(str("safetyResponse")),
         timestamp = long("timestamp"),
+        simulated = bool("simulated"),
     )
 }
 
@@ -43,5 +44,6 @@ fun DataSnapshot.toThresholdConfig(): ThresholdConfig {
         warningDurationSeconds = int("warningDurationSeconds") ?: d.warningDurationSeconds,
         responseTimeoutSeconds = int("responseTimeoutSeconds") ?: d.responseTimeoutSeconds,
         offlineTimeoutSeconds = int("offlineTimeoutSeconds") ?: d.offlineTimeoutSeconds,
+        unansweredTimeoutSeconds = int("unansweredTimeoutSeconds") ?: d.unansweredTimeoutSeconds,
     )
 }

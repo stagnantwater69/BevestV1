@@ -13,6 +13,7 @@ import com.jtexpress.bevest.domain.repository.SettingsRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.domain.safety.SafetyStatusEngine
 import com.jtexpress.bevest.utils.Outcome
+import com.jtexpress.bevest.utils.ServerClock
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +48,7 @@ class WorkerDetailViewModel @Inject constructor(
     private val monitoringRepository: MonitoringRepository,
     private val settingsRepository: SettingsRepository,
     private val alertRepository: AlertRepository,
+    private val clock: ServerClock,
 ) : ViewModel() {
 
     private val workerId: String = savedStateHandle.get<String>("workerId").orEmpty()
@@ -62,6 +64,7 @@ class WorkerDetailViewModel @Inject constructor(
      * costs nothing: the buffer dies with the ViewModel.
      */
     private val heartRateHistory = MutableStateFlow<List<Int>>(emptyList())
+    private var lastSampleAt = 0L
 
     val state: StateFlow<WorkerDetailState> =
         workerRepository.observeWorker(workerId).flatMapLatest { workerOutcome ->
@@ -71,17 +74,19 @@ class WorkerDetailViewModel @Inject constructor(
                 )
                 is Outcome.Success -> combine(
                     monitoringRepository.observeReading(workerId).onEach { reading ->
-                        reading?.heartRate?.let { hr ->
-                            heartRateHistory.update { (it + hr).takeLast(HISTORY_SIZE) }
-                        }
+                        // One sample per vest reading: the node also changes when an
+                        // officer sets safetyResponse, which is not a new heartbeat.
+                        val hr = reading?.heartRate ?: return@onEach
+                        if (reading.timestamp == lastSampleAt) return@onEach
+                        lastSampleAt = reading.timestamp
+                        heartRateHistory.update { (it + hr).takeLast(HISTORY_SIZE) }
                     },
                     settingsRepository.observeThresholds(),
                     alertRepository.observeActiveAlerts(workerOutcome.data.siteId),
-                    actionMessage,
-                    heartRateHistory,
-                ) { reading, thresholds, alertsOutcome, message, history ->
+                    combine(actionMessage, heartRateHistory) { message, history -> message to history },
+                    clock.ticker(),
+                ) { reading, thresholds, alertsOutcome, (message, history), now ->
                     val engine = SafetyStatusEngine(thresholds)
-                    val now = System.currentTimeMillis()
                     WorkerDetailState(
                         loading = false,
                         worker = workerOutcome.data,

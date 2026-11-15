@@ -21,3 +21,7 @@ local.properties
 /functions/lib
 .firebase/
 *.log
+
+# Firebase admin keys: never commit
+serviceAccount*.json
+*-firebase-adminsdk-*.json

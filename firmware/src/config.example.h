@@ -12,6 +12,7 @@
 // Firebase — project bevest-70698
 #define FIREBASE_API_KEY       "CHANGE_ME"   // Web API key: Firebase console -> Project settings
 #define FIREBASE_DATABASE_URL  "https://bevest-70698-default-rtdb.asia-southeast1.firebasedatabase.app/"
+#define FIREBASE_PROJECT_ID    "bevest-70698"   // for reading vests/{VEST_ID} from Firestore
 
 // Device account — a dedicated Firebase Auth (email/password) user carrying the
 // custom claim  { "device": true }.  See firmware/README.md -> "Device auth".
@@ -20,13 +21,15 @@
 
 // Identity
 #define VEST_ID             "VEST-001"
-#define WORKER_ID           "CHANGE_ME"   // Firestore workers/{id} this vest is assigned to.
-                                          // TODO(option B): resolve at boot from
-                                          // vests/{VEST_ID}.assignedWorkerId instead of hard-coding.
+// The worker comes from vests/{VEST_ID}.assignedWorkerId, which the app sets when an
+// officer pairs the vest; the vest re-checks it every ASSIGNMENT_POLL_MS. WORKER_ID is
+// only a fallback for when Firestore can't be reached at boot — leave it "" normally.
+#define WORKER_ID           ""
 
 // Cadence
 #define READING_INTERVAL_MS   4000
 #define VESTLIVE_INTERVAL_MS  15000
+#define ASSIGNMENT_POLL_MS    30000
 #define RESPONSE_TIMEOUT_S    15     // keep in sync with Firestore settings/thresholds.responseTimeoutSeconds
 
 // ── Pin map — ESP32 DevKitC / WROOM-32. FINALISE against the assembled vest. ──

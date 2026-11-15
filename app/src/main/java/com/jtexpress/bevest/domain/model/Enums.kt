@@ -20,6 +20,19 @@ enum class SafetyStatus {
     EMERGENCY,
     OFFLINE;
 
+    /**
+     * How urgent this status is, for sorting and "worst on site". Never use [ordinal]
+     * for that: OFFLINE sits last in the enum but is not more severe than an open danger.
+     */
+    val severity: Int
+        get() = when (this) {
+            NORMAL -> 0
+            OFFLINE -> 1
+            WARNING -> 2
+            DANGER -> 3
+            EMERGENCY -> 4
+        }
+
     companion object {
         fun fromRaw(raw: String?): SafetyStatus =
             entries.firstOrNull { it.name.equals(raw?.trim(), ignoreCase = true) } ?: OFFLINE

@@ -6,8 +6,13 @@
 #include "power/battery.h"
 #include "logic/safety.h"
 
+#ifndef ASSIGNMENT_POLL_MS
+#define ASSIGNMENT_POLL_MS 30000   // older config.h files predate this
+#endif
+
 static uint32_t s_lastReading  = 0;
 static uint32_t s_lastVestLive = 0;
+static uint32_t s_lastAssignmentCheck = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -64,6 +69,11 @@ void loop() {
                     p.fallDetected, p.battery, fix);
       if (p.fallDetected) sensors::motion::clearFall();   // reported once; app opens the incident
     }
+  }
+
+  if (now - s_lastAssignmentCheck >= ASSIGNMENT_POLL_MS) {
+    s_lastAssignmentCheck = now;
+    net::syncAssignment();
   }
 
   if (now - s_lastVestLive >= VESTLIVE_INTERVAL_MS) {

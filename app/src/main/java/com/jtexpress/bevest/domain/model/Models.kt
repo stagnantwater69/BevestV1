@@ -17,6 +17,8 @@ data class User(
     val active: Boolean = true,
     /** Contractors only; null means no plan chosen yet. */
     val subscription: Subscription? = null,
+    /** Signed up with a temporary password that hasn't been replaced yet. */
+    val mustChangePassword: Boolean = false,
 ) {
     val fullName: String get() = listOf(firstName, lastName).filter { it.isNotBlank() }.joinToString(" ")
 }
@@ -57,6 +59,8 @@ data class SensorReading(
     val batteryPercent: Int? = null,
     val safetyResponse: SafetyResponseState = SafetyResponseState.NONE,
     val timestamp: Long = 0L,
+    /** Written by the in-app simulator, which raises and escalates its own alerts. */
+    val simulated: Boolean = false,
 )
 
 data class Alert(
@@ -69,8 +73,18 @@ data class Alert(
     val message: String = "",
     val createdAt: Long = 0L,
     val acknowledgedAt: Long? = null,
+    /** The officer who said they're responding: uid, and their name at that moment. */
+    val acknowledgedBy: String? = null,
+    val acknowledgedByName: String? = null,
+    /** When the engine flagged that no officer had responded in time, if it has. */
+    val unansweredAt: Long? = null,
     val resolvedAt: Long? = null,
     val resolvedBy: String? = null,
+    val siteId: String? = null,
+    val incidentId: String? = null,
+    val simulated: Boolean = false,
+    /** Opened by the safety engine for a condition that can clear on its own (vest offline, a warning). */
+    val autoResolve: Boolean = false,
 )
 
 data class Incident(
@@ -96,6 +110,20 @@ data class ProjectSite(
     val name: String = "",
     val location: String = "",
     val active: Boolean = true,
+)
+
+/** A site's working day, opened by the start-of-shift check. One per site per date. */
+data class Shift(
+    val siteId: String = "",
+    val date: String = "",
+    val startedAt: Long? = null,
+    val startedBy: String = "",
+    val startedByName: String = "",
+    /** The latest run of the check (the first run is the one that started the shift). */
+    val checkedAt: Long? = null,
+    val workerCount: Int = 0,
+    val readyCount: Int = 0,
+    val issues: List<String> = emptyList(),
 )
 
 data class VestAssignment(

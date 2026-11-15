@@ -41,4 +41,7 @@ interface UserRepository {
     suspend fun addFcmToken(uid: String, token: String): Outcome<Unit>
 
     suspend fun removeFcmToken(uid: String, token: String): Outcome<Unit>
+
+    /** The temporary password has been replaced. */
+    suspend fun clearMustChangePassword(uid: String): Outcome<Unit>
 }

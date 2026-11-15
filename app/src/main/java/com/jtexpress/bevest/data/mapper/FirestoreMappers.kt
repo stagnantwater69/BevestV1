@@ -10,6 +10,7 @@ import com.jtexpress.bevest.domain.model.BillingCycle
 import com.jtexpress.bevest.domain.model.Incident
 import com.jtexpress.bevest.domain.model.ProjectSite
 import com.jtexpress.bevest.domain.model.SafetyStatus
+import com.jtexpress.bevest.domain.model.Shift
 import com.jtexpress.bevest.domain.model.Subscription
 import com.jtexpress.bevest.domain.model.SubscriptionPlans
 import com.jtexpress.bevest.domain.model.User
@@ -42,6 +43,7 @@ fun DocumentSnapshot.toUser(): User = User(
     siteId = strOrNull("siteId"),
     active = bool("active", true),
     subscription = (get("subscription") as? Map<*, *>)?.toSubscription(millis("createdAt")),
+    mustChangePassword = bool("mustChangePassword", false),
 )
 
 private fun Any?.asMillis(): Long? = when (this) {
@@ -114,8 +116,27 @@ fun DocumentSnapshot.toAlert(): Alert = Alert(
     message = str("message"),
     createdAt = millis("createdAt") ?: 0L,
     acknowledgedAt = millis("acknowledgedAt"),
+    acknowledgedBy = strOrNull("acknowledgedBy"),
+    acknowledgedByName = strOrNull("acknowledgedByName"),
+    unansweredAt = millis("unansweredAt"),
     resolvedAt = millis("resolvedAt"),
     resolvedBy = strOrNull("resolvedBy"),
+    siteId = strOrNull("siteId"),
+    incidentId = strOrNull("incidentId"),
+    simulated = getBoolean("simulated") == true,
+    autoResolve = getBoolean("autoResolve") == true,
+)
+
+fun DocumentSnapshot.toShift(): Shift = Shift(
+    siteId = str("siteId"),
+    date = str("date"),
+    startedAt = millis("startedAt"),
+    startedBy = str("startedBy"),
+    startedByName = str("startedByName"),
+    checkedAt = millis("checkedAt"),
+    workerCount = int("workerCount") ?: 0,
+    readyCount = int("readyCount") ?: 0,
+    issues = (get("issues") as? List<*>)?.filterIsInstance<String>().orEmpty(),
 )
 
 fun DocumentSnapshot.toIncident(): Incident = Incident(

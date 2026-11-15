@@ -579,7 +579,7 @@ fun PairVestScreen(
                                     .fillMaxWidth()
                                     .heightIn(min = ComponentHeight.control)
                                     .clip(BevestShapes.card)
-                                    .clickable { viewModel.selectWorker(w.workerId) },
+                                    .clickable(enabled = !state.submitting) { viewModel.selectWorker(w.workerId, user.uid) },
                                 shape = BevestShapes.card,
                                 color = MaterialTheme.colorScheme.surface,
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -612,7 +612,9 @@ fun PairVestScreen(
 
                     PairStep.CONNECTION_TEST -> {
                         Text(
-                            "Reading from the vest to confirm every sensor is reporting.",
+                            "Vest ${state.identifiedVestId} is now paired. Waiting for it to report " +
+                                "(it picks up a new pairing within 30 seconds) to confirm every sensor works. " +
+                                "Going back undoes the pairing.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -642,11 +644,11 @@ fun PairVestScreen(
                                 icon = BevestIcons.Refresh,
                             )
                             PrimaryButton(
-                                text = "Confirm pairing",
-                                onClick = { viewModel.confirmPairing(user.uid) },
+                                text = "Put vest in service",
+                                onClick = viewModel::confirmPairing,
                                 enabled = state.checks.allPass,
                                 loading = state.submitting,
-                                loadingText = "Pairing…",
+                                loadingText = "Saving…",
                             )
                             if (!state.checks.allPass) {
                                 Text(

@@ -19,10 +19,10 @@ service firebase.storage {
                    && request.resource.contentType.matches('image/.*');
     }
 
-    // Generated report PDFs — contractors and admins.
+    // Generated report PDFs — each contractor only their own folder, plus admins.
     match /reports/{contractorId}/{file} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn() && (role() == 'CONTRACTOR' || role() == 'ADMIN');
+      allow read, write: if isSignedIn()
+                         && (request.auth.uid == contractorId || role() == 'ADMIN');
     }
   }
 }

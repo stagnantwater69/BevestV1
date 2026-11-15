@@ -1,5 +1,6 @@
 package com.jtexpress.bevest.ui.common
 
+import com.jtexpress.bevest.domain.model.Alert
 import com.jtexpress.bevest.domain.model.AlertSeverity
 import com.jtexpress.bevest.domain.model.AlertStatus
 import com.jtexpress.bevest.domain.model.AlertType
@@ -8,6 +9,8 @@ import com.jtexpress.bevest.domain.model.SafetyResponseState
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.model.UserRole
 import com.jtexpress.bevest.domain.model.VestStatus
+import com.jtexpress.bevest.domain.safety.ShiftProblem
+import com.jtexpress.bevest.utils.DateTimeUtils
 
 /**
  * User-facing copy for every domain enum.
@@ -20,6 +23,32 @@ import com.jtexpress.bevest.domain.model.VestStatus
  * [label] is the short form for chips and rows. [detail] adds the sentence of context a
  * detail screen has room for — what actually happened, and what it means.
  */
+
+/**
+ * Who has an open alert, in words. Shown wherever the alert is, so two officers never
+ * both run to the same fall, or each assume the other has it. Null when there's nothing
+ * to say: resolved, or a warning nobody is expected to run to.
+ */
+fun Alert.responseLine(now: Long = System.currentTimeMillis()): String? = when (status) {
+    AlertStatus.ACKNOWLEDGED -> {
+        val who = acknowledgedByName?.takeIf { it.isNotBlank() } ?: "An officer"
+        val since = acknowledgedAt?.takeIf { it > 0 }?.let { " · ${DateTimeUtils.relativeAge(it, now)}" }.orEmpty()
+        "$who is responding$since"
+    }
+    AlertStatus.ACTIVE -> when {
+        severity == AlertSeverity.WARNING -> null
+        unansweredAt != null -> "Nobody has responded · raised ${DateTimeUtils.relativeAge(createdAt, now)}"
+        else -> "Nobody responding yet"
+    }
+    AlertStatus.RESOLVED -> null
+}
+
+fun ShiftProblem.label(): String = when (this) {
+    ShiftProblem.NO_VEST -> "No vest paired"
+    ShiftProblem.NEVER_REPORTED -> "Vest has never reported"
+    ShiftProblem.NOT_REPORTING -> "Vest not reporting"
+    ShiftProblem.LOW_BATTERY -> "Battery low"
+}
 
 fun SafetyStatus.label(): String = when (this) {
     SafetyStatus.NORMAL -> "Normal"

@@ -33,6 +33,7 @@ import {
   instantaneousStatus,
   reason,
 } from "./safety";
+import { cloudEngineActive } from "./engine";
 
 initializeApp();
 const db = getFirestore();
@@ -244,6 +245,8 @@ export const evaluateReading = onValueWritten(
     const workerId = event.params.workerId as string;
     const reading = (event.data.after.val() as Reading | null) ?? null;
     if (!reading) return;
+    // The simulators raise their own alerts; the phones run detection unless mode is cloud.
+    if (reading.simulated === true || !(await cloudEngineActive())) return;
 
     const t = await thresholds();
     const now = Date.now();
@@ -364,6 +367,7 @@ export const evaluateReading = onValueWritten(
 
 /** Step 2: time-based escalation. */
 export const escalate = onSchedule("every 1 minutes", async () => {
+  if (!(await cloudEngineActive())) return;
   const t = await thresholds();
   const now = Date.now();
   const windows = await db.collection("conditionWindows").get();

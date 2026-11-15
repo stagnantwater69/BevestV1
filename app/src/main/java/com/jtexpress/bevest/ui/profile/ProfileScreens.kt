@@ -435,12 +435,15 @@ fun EditProfileScreen(
 @Composable
 fun ChangePasswordScreen(
     onDone: () -> Unit,
+    /** First sign-in with a temporary password: explained, and back signs out instead. */
+    forced: Boolean = false,
+    onBack: () -> Unit = onDone,
     viewModel: ChangePasswordViewModel = hiltViewModel(),
 ) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
     LaunchedEffect(state.changed) { if (state.changed) onDone() }
 
-    BevestScaffold(title = "Change password", onBack = onDone) { padding ->
+    BevestScaffold(title = if (forced) "Set your password" else "Change password", onBack = onBack) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -449,11 +452,19 @@ fun ChangePasswordScreen(
                 .padding(horizontal = Spacing.gutter, vertical = Spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Spacing.lg),
         ) {
+            if (forced) {
+                Text(
+                    "Your account was set up with a temporary password. Choose your own " +
+                        "before you continue.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             FormSection(title = "Confirm it's you") {
                 FormField(
                     state.current,
                     viewModel::onCurrent,
-                    "Current password",
+                    if (forced) "Temporary password" else "Current password",
                     error = state.currentError,
                     isPassword = true,
                     required = true,

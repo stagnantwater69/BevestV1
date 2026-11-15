@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar icon: a shield with a cross band, single colour (Android tints it). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2L4,5v6c0,5.05 3.41,9.76 8,11 4.59,-1.24 8,-5.95 8,-11V5l-8,-3zM18,11c0,1.06 -0.17,2.09 -0.48,3.06L6.48,14.06C6.17,13.09 6,12.06 6,11V9.5h12V11z" />
+</vector>

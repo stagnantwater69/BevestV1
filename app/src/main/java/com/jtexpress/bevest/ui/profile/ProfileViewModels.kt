@@ -111,6 +111,7 @@ data class ChangePasswordUiState(
 @HiltViewModel
 class ChangePasswordViewModel @Inject constructor(
     private val authRepository: AuthRepository,
+    private val userRepository: UserRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChangePasswordUiState())
@@ -132,7 +133,10 @@ class ChangePasswordViewModel @Inject constructor(
         _state.update { it.copy(submitting = true, formError = null) }
         viewModelScope.launch {
             when (val result = authRepository.changePassword(s.current, s.next)) {
-                is Outcome.Success -> _state.update { it.copy(submitting = false, changed = true) }
+                is Outcome.Success -> {
+                    authRepository.currentUserId()?.let { userRepository.clearMustChangePassword(it) }
+                    _state.update { it.copy(submitting = false, changed = true) }
+                }
                 is Outcome.Failure -> _state.update { it.copy(submitting = false, formError = result.error.message) }
             }
         }

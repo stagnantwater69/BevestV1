@@ -9,6 +9,7 @@ import com.jtexpress.bevest.domain.repository.SettingsRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.domain.safety.SafetyStatusEngine
 import com.jtexpress.bevest.utils.Outcome
+import com.jtexpress.bevest.utils.ServerClock
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,16 +62,13 @@ class WorkerDirectoryViewModel @Inject constructor(
     private val monitoringRepository: MonitoringRepository,
     private val settingsRepository: SettingsRepository,
     private val alertRepository: AlertRepository,
+    private val clock: ServerClock,
 ) : ViewModel() {
 
     private val scope = MutableStateFlow<Pair<String?, String?>?>(null) // contractorId, siteId
     private val query = MutableStateFlow("")
     private val filter = MutableStateFlow(WorkerFilter.ALL)
-    private var started = false
-
     fun start(contractorId: String?, siteId: String?) {
-        if (started) return
-        started = true
         scope.value = contractorId to siteId
     }
 
@@ -97,11 +95,10 @@ class WorkerDirectoryViewModel @Inject constructor(
                         monitoringRepository.observeReadings(workers.map { it.workerId }),
                         settingsRepository.observeThresholds(),
                         alertsFlow,
-                        query,
-                        filter,
-                    ) { readings, thresholds, alertsOutcome, q, f ->
+                        combine(query, filter) { q, f -> q to f },
+                        clock.ticker(),
+                    ) { readings, thresholds, alertsOutcome, (q, f), now ->
                         val engine = SafetyStatusEngine(thresholds)
-                        val now = System.currentTimeMillis()
                         val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
                         val live = workers.map { w ->
                             val r = readings[w.workerId]

@@ -82,9 +82,9 @@ class SafetyStatusEngine(
         val unanswered = mine
             .filter { it.status == AlertStatus.ACTIVE }
             .map { if (it.severity == AlertSeverity.EMERGENCY) SafetyStatus.EMERGENCY else SafetyStatus.DANGER }
-            .maxByOrNull { severityRank(it) }
+            .maxByOrNull { it.severity }
         if (unanswered != null) {
-            return if (severityRank(unanswered) > severityRank(live)) unanswered else live
+            return if (unanswered.severity > live.severity) unanswered else live
         }
         if (mine.any { it.status == AlertStatus.ACKNOWLEDGED }) {
             return if (reading?.safetyResponse == SafetyResponseState.EMERGENCY_REQUESTED &&
@@ -98,13 +98,6 @@ class SafetyStatusEngine(
         return live
     }
 
-    /** OFFLINE sits last in the enum but is not more severe than an open danger. */
-    private fun severityRank(s: SafetyStatus): Int = when (s) {
-        SafetyStatus.NORMAL, SafetyStatus.OFFLINE -> 0
-        SafetyStatus.WARNING -> 1
-        SafetyStatus.DANGER -> 2
-        SafetyStatus.EMERGENCY -> 3
-    }
 
     /** True when the reading is too old to be shown as live (plan section 21). */
     fun isStale(reading: SensorReading?, nowMillis: Long = System.currentTimeMillis()): Boolean {

@@ -11,6 +11,8 @@ data class ThresholdConfig(
     val warningDurationSeconds: Int = 5 * 60,
     val responseTimeoutSeconds: Int = 15,
     val offlineTimeoutSeconds: Int = 60,
+    /** How long a fall or emergency may go without any officer responding before it's flagged. */
+    val unansweredTimeoutSeconds: Int = 60,
 ) {
     companion object {
         val DEFAULT = ThresholdConfig()

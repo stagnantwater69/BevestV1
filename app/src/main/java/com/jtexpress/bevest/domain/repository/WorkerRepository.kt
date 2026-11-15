@@ -13,7 +13,14 @@ interface WorkerRepository {
 
     suspend fun getWorker(workerId: String): Outcome<Worker>
 
+    /**
+     * Creates the worker, atomically. Fails with a Validation error containing
+     * "already exists" when the ID is taken — on any site — so the caller can try the next.
+     */
     suspend fun addWorker(worker: Worker): Outcome<Unit>
+
+    /** The highest `WRK-###` number ever issued, across every site (0 if unknown). */
+    suspend fun lastIssuedWorkerNumber(): Int
 
     suspend fun updateWorker(worker: Worker): Outcome<Unit>
 

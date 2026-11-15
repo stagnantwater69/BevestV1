@@ -2,6 +2,7 @@ package com.jtexpress.bevest.data.repository
 
 import com.google.firebase.database.FirebaseDatabase
 import com.jtexpress.bevest.data.firebase.FirebasePaths
+import com.jtexpress.bevest.data.firebase.retryForever
 import com.jtexpress.bevest.data.firebase.toAppError
 import com.jtexpress.bevest.data.firebase.valueEvents
 import com.jtexpress.bevest.data.mapper.toSensorReading
@@ -11,7 +12,6 @@ import com.jtexpress.bevest.domain.repository.MonitoringRepository
 import com.jtexpress.bevest.utils.Outcome
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -35,7 +35,7 @@ class MonitoringRepositoryImpl @Inject constructor(
         database.getReference(FirebasePaths.liveReading(workerId))
             .valueEvents()
             .map { it.toSensorReading(workerId) }
-            .catch { emit(null) }
+            .retryForever()
             .onStart { emit(null) }
 
     override fun observeReadings(workerIds: List<String>): Flow<Map<String, SensorReading>> {
@@ -43,7 +43,7 @@ class MonitoringRepositoryImpl @Inject constructor(
         val flows = workerIds.map { id ->
             database.getReference(FirebasePaths.liveReading(id)).valueEvents()
                 .map { id to it.toSensorReading(id) }
-                .catch { emit(id to null) }
+                .retryForever()
                 .onStart { emit(id to null) }
         }
         return combine(flows) { pairs ->
@@ -85,6 +85,8 @@ class MonitoringRepositoryImpl @Inject constructor(
                 "battery" to reading.batteryPercent,
                 "safetyResponse" to reading.safetyResponse.name,
                 "timestamp" to reading.timestamp,
+                // Tells the safety engine to leave this worker to the simulator.
+                "simulated" to true,
             ),
         ).await()
         Outcome.Success(Unit)

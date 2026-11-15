@@ -7,18 +7,19 @@
       "$workerId": {
         ".read": "auth != null",
 
-        // Sensor fields: only the vest firmware (custom claim device == true) or an
-        // SSO/Admin (role claim set by the syncUserClaims function) may write the
-        // node. This covers the firmware, the in-app IoT simulator (run as an SSO),
-        // and the SSO tools — and blocks every other signed-in account.
-        ".write": "auth != null && (auth.token.device == true || auth.token.role == 'SSO' || auth.token.role == 'ADMIN' || auth.token.role == 'CONTRACTOR')",
+        // Real sensor data: only the vest firmware (custom claim device == true) or an
+        // admin. SSO and contractor accounts (role claim from syncUserClaims, or from
+        // firmware/tools/sync-role-claims.js on the free plan) run the simulators: they
+        // may only create, change or clear nodes flagged `simulated`, so they can never
+        // overwrite a real vest's readings.
+        ".write": "auth != null && (auth.token.device == true || auth.token.role == 'ADMIN' || ((auth.token.role == 'SSO' || auth.token.role == 'CONTRACTOR') && (!data.exists() || data.child('simulated').val() == true) && (!newData.exists() || newData.child('simulated').val() == true)))",
         ".validate": "newData.hasChildren(['timestamp'])",
 
         "safetyResponse": {
-          // The handshake target. Any signed-in user may set it (an SSO initiating a
-          // check), in addition to the vest and the cloud engine.
-          ".write": "auth != null",
-          ".validate": "newData.isString()"
+          // The handshake target: the vest, an officer acknowledging or the safety
+          // engine escalating. Contractors only on simulated nodes.
+          ".write": "auth != null && (auth.token.role != 'CONTRACTOR' || data.parent().child('simulated').val() == true)",
+          ".validate": "newData.isString() && newData.val().matches(/^(NONE|WAITING|ACKNOWLEDGED|EMERGENCY_REQUESTED|NO_RESPONSE|ESCALATED)$/)"
         }
       }
     },

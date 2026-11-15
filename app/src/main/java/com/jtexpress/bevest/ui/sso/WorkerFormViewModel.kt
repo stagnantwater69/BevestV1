@@ -100,13 +100,18 @@ class WorkerFormViewModel @Inject constructor(
         }
     }
 
-    /** `WRK-###` one past the highest existing ID this operator can see. */
+    /**
+     * `WRK-###` one past the highest ID issued anywhere. Worker IDs are global but an
+     * officer only sees their own site, so the shared counter is what keeps a new site
+     * from starting at WRK-001 again.
+     */
     private suspend fun generateWorkerId(siteId: String?): String {
         val existing = (workerRepository.observeWorkers(contractorId, siteId).first() as? Outcome.Success)
             ?.data.orEmpty()
-        val maxNum = existing
+        val visibleMax = existing
             .mapNotNull { Regex("WRK-(\\d+)").find(it.workerId)?.groupValues?.get(1)?.toIntOrNull() }
             .maxOrNull() ?: 0
+        val maxNum = maxOf(visibleMax, workerRepository.lastIssuedWorkerNumber())
         return "WRK-%03d".format(maxNum + 1)
     }
 
@@ -163,8 +168,11 @@ class WorkerFormViewModel @Inject constructor(
         )
         when (val r = workerRepository.updateWorker(worker)) {
             is Outcome.Success -> {
-                pendingPhoto?.let { workerRepository.uploadPhoto(worker.workerId, it) }
-                _state.update { it.copy(submitting = false, saved = true) }
+                val photoError = uploadPendingPhoto(worker.workerId)
+                _state.update {
+                    if (photoError == null) it.copy(submitting = false, saved = true)
+                    else it.copy(submitting = false, formError = photoError)
+                }
             }
             is Outcome.Failure -> _state.update { it.copy(submitting = false, formError = friendly(r.error)) }
         }
@@ -187,8 +195,12 @@ class WorkerFormViewModel @Inject constructor(
             )
             when (val r = workerRepository.addWorker(worker)) {
                 is Outcome.Success -> {
-                    pendingPhoto?.let { workerRepository.uploadPhoto(candidate, it) }
-                    _state.update { it.copy(submitting = false, saved = true, workerId = candidate) }
+                    val photoError = uploadPendingPhoto(candidate)
+                    _state.update {
+                        // The worker exists now: a retry must update it, not create another.
+                        if (photoError == null) it.copy(submitting = false, saved = true, workerId = candidate)
+                        else it.copy(submitting = false, isEdit = true, workerId = candidate, formError = photoError)
+                    }
                     return
                 }
                 is Outcome.Failure -> {
@@ -204,6 +216,19 @@ class WorkerFormViewModel @Inject constructor(
         }
         _state.update {
             it.copy(submitting = false, formError = "Could not assign a worker ID. Please try again.")
+        }
+    }
+
+    /** Uploads the picked photo, if any. Returns what to tell the officer if it failed. */
+    private suspend fun uploadPendingPhoto(workerId: String): String? {
+        val bytes = pendingPhoto ?: return null
+        return when (val r = workerRepository.uploadPhoto(workerId, bytes)) {
+            is Outcome.Success -> {
+                pendingPhoto = null
+                null
+            }
+            is Outcome.Failure ->
+                "Worker saved, but the photo didn't upload (${r.error.message}). Tap save to try again."
         }
     }
 

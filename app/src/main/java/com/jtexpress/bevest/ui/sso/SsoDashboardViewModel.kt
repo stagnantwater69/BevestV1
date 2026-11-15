@@ -6,12 +6,17 @@ import com.jtexpress.bevest.domain.model.Alert
 import com.jtexpress.bevest.domain.model.AlertSeverity
 import com.jtexpress.bevest.domain.model.AlertStatus
 import com.jtexpress.bevest.domain.model.SafetyStatus
+import com.jtexpress.bevest.domain.model.Shift
 import com.jtexpress.bevest.domain.repository.AlertRepository
 import com.jtexpress.bevest.domain.repository.MonitoringRepository
 import com.jtexpress.bevest.domain.repository.SettingsRepository
+import com.jtexpress.bevest.domain.repository.ShiftRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
+import com.jtexpress.bevest.domain.safety.MonitorHealth
 import com.jtexpress.bevest.domain.safety.SafetyStatusEngine
+import com.jtexpress.bevest.domain.safety.SafetyWatcher
 import com.jtexpress.bevest.utils.Outcome
+import com.jtexpress.bevest.utils.ServerClock
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,7 +71,7 @@ data class SsoDashboardState(
      * color of its shield, so the panel's whole identity tracks the site's condition.
      */
     val worstStatus: SafetyStatus
-        get() = workers.maxByOrNull { it.status.ordinal }?.status ?: SafetyStatus.OFFLINE
+        get() = workers.maxByOrNull { it.status.severity }?.status ?: SafetyStatus.OFFLINE
 
     /**
      * The verdict, in the words an officer would use.
@@ -104,16 +109,25 @@ class SsoDashboardViewModel @Inject constructor(
     private val monitoringRepository: MonitoringRepository,
     private val alertRepository: AlertRepository,
     private val settingsRepository: SettingsRepository,
+    private val shiftRepository: ShiftRepository,
+    private val clock: ServerClock,
+    safetyWatcher: SafetyWatcher,
 ) : ViewModel() {
 
-    private val siteId = MutableStateFlow<String?>(null)
-    private var started = false
+    /** Whether this phone's safety engine can currently see the site. */
+    val monitorHealth: StateFlow<MonitorHealth> = safetyWatcher.health
 
+    private val siteId = MutableStateFlow<String?>(null)
+
+    /** Follows the officer's site, so a reassignment takes effect without a restart. */
     fun start(site: String?) {
-        if (started) return
-        started = true
         siteId.value = site
     }
+
+    /** Today's shift, or null until someone runs the start-of-shift check. */
+    val shift: StateFlow<Shift?> = siteId.flatMapLatest { site ->
+        if (site.isNullOrBlank()) flowOf(null) else shiftRepository.observeToday(site, clock)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val state: StateFlow<SsoDashboardState> = siteId.flatMapLatest { site ->
         if (site.isNullOrBlank()) {
@@ -135,9 +149,9 @@ class SsoDashboardViewModel @Inject constructor(
                             monitoringRepository.observeReadings(ids),
                             thresholdsFlow,
                             alertsFlow,
-                        ) { readings, thresholds, alertsOutcome ->
+                            clock.ticker(),
+                        ) { readings, thresholds, alertsOutcome, now ->
                             val engine = SafetyStatusEngine(thresholds)
-                            val now = System.currentTimeMillis()
                             val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
                             val live = workers.map { w ->
                                 val r = readings[w.workerId]
@@ -147,7 +161,7 @@ class SsoDashboardViewModel @Inject constructor(
                                     status = engine.evaluate(r, alerts, w.workerId, now),
                                     stale = engine.isStale(r, now),
                                 )
-                            }.sortedByDescending { it.status.ordinal }
+                            }.sortedByDescending { it.status.severity }
                             SsoDashboardState(
                                 loading = false,
                                 workers = live,

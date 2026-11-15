@@ -6,6 +6,7 @@ import com.jtexpress.bevest.data.repository.MonitoringRepositoryImpl
 import com.jtexpress.bevest.data.repository.ProjectRepositoryImpl
 import com.jtexpress.bevest.data.repository.ReportRepositoryImpl
 import com.jtexpress.bevest.data.repository.SettingsRepositoryImpl
+import com.jtexpress.bevest.data.repository.ShiftRepositoryImpl
 import com.jtexpress.bevest.data.repository.SystemRepositoryImpl
 import com.jtexpress.bevest.data.repository.UserRepositoryImpl
 import com.jtexpress.bevest.data.repository.VestRepositoryImpl
@@ -16,6 +17,7 @@ import com.jtexpress.bevest.domain.repository.MonitoringRepository
 import com.jtexpress.bevest.domain.repository.ProjectRepository
 import com.jtexpress.bevest.domain.repository.ReportRepository
 import com.jtexpress.bevest.domain.repository.SettingsRepository
+import com.jtexpress.bevest.domain.repository.ShiftRepository
 import com.jtexpress.bevest.domain.repository.SystemRepository
 import com.jtexpress.bevest.domain.repository.UserRepository
 import com.jtexpress.bevest.domain.repository.VestRepository
@@ -54,6 +56,9 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindAlertRepository(impl: AlertRepositoryImpl): AlertRepository
+
+    @Binds @Singleton
+    abstract fun bindShiftRepository(impl: ShiftRepositoryImpl): ShiftRepository
 
     @Binds @Singleton
     abstract fun bindReportRepository(impl: ReportRepositoryImpl): ReportRepository

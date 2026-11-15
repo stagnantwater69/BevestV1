@@ -237,6 +237,7 @@ class SimulationEngine {
       await set(ref(rtdb, `liveReadings/${firstId}`), {
         workerId: firstId,
         timestamp: Date.now(),
+        simulated: true,
       });
 
       this.log(`Live stream started — ${this.sim.size} vest(s) transmitting`);
@@ -410,6 +411,9 @@ class SimulationEngine {
         safetyResponse:
           phase === PHASES.EMERGENCY && response === 'NONE' ? 'NO_RESPONSE' : response,
         timestamp: Date.now(),
+        // The rules only let the simulator write simulated nodes, and the safety
+        // engine leaves them to the simulator.
+        simulated: true,
       });
     } catch (err) {
       console.warn('Could not push live reading for worker', id, err);

@@ -49,6 +49,7 @@ import com.jtexpress.bevest.ui.common.StatusBadge
 import com.jtexpress.bevest.ui.common.SuccessNote
 import com.jtexpress.bevest.ui.common.detail
 import com.jtexpress.bevest.ui.common.label
+import com.jtexpress.bevest.ui.common.responseLine
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.BevestShapes
 import com.jtexpress.bevest.ui.theme.Elevation
@@ -105,6 +106,7 @@ fun AlertDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(Spacing.lg),
                 ) {
                     AlertHeadline(alert, severityColor)
+                    alert.responseLine()?.let { ResponderNote(it, acknowledged = alert.status == AlertStatus.ACKNOWLEDGED) }
 
                     // ---- What we know ----
                     SectionHeader("Details")
@@ -143,12 +145,14 @@ fun AlertDetailScreen(
                     )
 
                     if (alert.status == AlertStatus.ACTIVE) {
+                        // Same words as the full-screen alarm: it tells the other officers
+                        // this one is handled, not just that the alarm was seen.
                         PrimaryButton(
-                            text = "Acknowledge",
+                            text = "I'm responding",
                             onClick = { viewModel.acknowledge(actorId) },
                             icon = BevestIcons.forStatus(com.jtexpress.bevest.domain.model.SafetyStatus.NORMAL),
                             loading = state.working,
-                            loadingText = "Acknowledging…",
+                            loadingText = "Telling the others…",
                         )
                     }
 
@@ -185,6 +189,28 @@ fun AlertDetailScreen(
             onConfirm = { confirmResolve = false; viewModel.resolve(actorId, notes) },
             onDismiss = { confirmResolve = false },
         )
+    }
+}
+
+/** Who has this alert, right under the headline: the first thing a second officer needs. */
+@Composable
+private fun ResponderNote(text: String, acknowledged: Boolean) {
+    val palette = LocalStatusPalette.current
+    val color = if (acknowledged) palette.normal else palette.emergency
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = BevestShapes.inner,
+        color = color.copy(alpha = 0.10f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.4f)),
+    ) {
+        Row(
+            Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Icon(BevestIcons.Workers, contentDescription = null, tint = color, modifier = Modifier.size(IconSize.medium))
+            Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+        }
     }
 }
 
@@ -277,7 +303,8 @@ private fun ResponseTimeline(alert: Alert) {
     val palette = LocalStatusPalette.current
     val steps = buildList {
         add(Triple("Raised", alert.createdAt, palette.danger))
-        add(Triple("Acknowledged", alert.acknowledgedAt, palette.warning))
+        add(Triple(alert.acknowledgedByName?.let { "Responding: $it" } ?: "Acknowledged", alert.acknowledgedAt, palette.warning))
+        alert.unansweredAt?.let { add(Triple("Flagged: nobody responding", it, palette.emergency)) }
         add(Triple("Resolved", alert.resolvedAt, palette.normal))
     }
 

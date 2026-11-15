@@ -5,6 +5,7 @@ import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
+import com.google.firebase.database.DatabaseException
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.jtexpress.bevest.utils.AppError
 
@@ -33,5 +34,8 @@ fun Throwable.toAppError(): AppError = when {
         }
         else -> AppError.Unknown(this)
     }
+    // Realtime Database write rejections arrive as a plain DatabaseException.
+    this is DatabaseException && message?.contains("Permission denied", ignoreCase = true) == true ->
+        AppError.NotAuthorized()
     else -> AppError.Unknown(this)
 }

@@ -17,6 +17,7 @@ import { onValueWritten } from "firebase-functions/v2/database";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { logger } from "firebase-functions";
 import { DEFAULT_THRESHOLDS, Thresholds } from "./safety";
+import { cloudEngineActive } from "./engine";
 
 interface VestLive {
   battery?: number | null;
@@ -97,6 +98,7 @@ async function clearVestAlert(vestId: string, type: "VEST_OFFLINE" | "LOW_BATTER
 }
 
 export const vestHealthSweep = onSchedule("every 1 minutes", async () => {
+  if (!(await cloudEngineActive())) return;
   const t = await thresholds();
   const now = Date.now();
   const offlineMs = t.offlineTimeoutSeconds * 1000;

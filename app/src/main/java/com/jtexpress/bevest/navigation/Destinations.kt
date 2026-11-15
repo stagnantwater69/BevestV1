@@ -47,6 +47,7 @@ object Routes {
     const val SSO_VESTS = "sso_vests"
     const val SSO_VEST_DETAIL = "sso_vest_detail" // /{vestId}
     const val SSO_PAIR_VEST = "sso_pair_vest"
+    const val SSO_SHIFT_CHECK = "sso_shift_check"
 
     // Debug — IoT simulation (SSO: live stream + scenarios; Contractor: seed history)
     const val SIMULATION = "simulation"

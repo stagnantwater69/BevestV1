@@ -177,6 +177,13 @@ class UserRepositoryImpl @Inject constructor(
         Outcome.Failure(e.toAppError())
     }
 
+    override suspend fun clearMustChangePassword(uid: String): Outcome<Unit> = try {
+        users.document(uid).update("mustChangePassword", false).await()
+        Outcome.Success(Unit)
+    } catch (e: Exception) {
+        Outcome.Failure(e.toAppError())
+    }
+
     override suspend fun removeFcmToken(uid: String, token: String): Outcome<Unit> = try {
         users.document(uid)
             .update("fcmTokens", com.google.firebase.firestore.FieldValue.arrayRemove(token))

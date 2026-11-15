@@ -421,6 +421,8 @@ fun EmergencyBanner(
     reason: String,
     onView: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Who is responding, or that nobody is yet. */
+    responder: String? = null,
 ) {
     val palette = LocalStatusPalette.current
     val haptics = LocalHapticFeedback.current
@@ -450,7 +452,8 @@ fun EmergencyBanner(
             }
             .semantics(mergeDescendants = true) {
                 contentDescription =
-                    "Emergency: $workerName. ${reason.ifBlank { "No safety response" }}. Open."
+                    "Emergency: $workerName. ${reason.ifBlank { "No safety response" }}. " +
+                        "${responder?.let { "$it. " }.orEmpty()}Open."
             },
         shape = BevestShapes.emergency,
         color = palette.emergency,
@@ -489,6 +492,15 @@ fun EmergencyBanner(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    responder?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowForward,

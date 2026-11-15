@@ -70,9 +70,10 @@ android {
         }
     }
     lint {
-        // Surface issues in CI without failing the build yet; tighten once the
-        // existing warnings are triaged (consider a lint-baseline.xml).
-        abortOnError = false
+        // Existing issues are recorded in lint-baseline.xml; anything new fails the build.
+        // Regenerate after triaging: delete the file and run ./gradlew :app:lintDebug.
+        baseline = file("lint-baseline.xml")
+        abortOnError = true
         warningsAsErrors = false
         checkReleaseBuilds = true
         sarifReport = true

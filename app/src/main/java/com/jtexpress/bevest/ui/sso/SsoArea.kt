@@ -1,8 +1,8 @@
 package com.jtexpress.bevest.ui.sso
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -14,24 +14,23 @@ import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.common.RoleScaffold
 import com.jtexpress.bevest.ui.sim.SimulationScreen
 import com.jtexpress.bevest.ui.common.profileDestinations
-import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.Flow
 
 @Composable
 fun SsoArea(
     user: User,
     onSignOut: () -> Unit,
-    deepLinks: SharedFlow<DeepLink>? = null,
+    deepLinks: Flow<DeepLink>? = null,
 ) {
     val siteId = user.siteId
     val navController = rememberNavController()
 
-    // Fall detection + escalation runs on the phone while the SSO is signed in (the
-    // project's free Firebase plan can't run the cloud functions that would do it).
+    // Alert detection + escalation runs on the phone while the SSO is signed in (the
+    // project's free Firebase plan can't run the cloud functions that would do it), and
+    // keeps running in the background until they sign out.
     val safetyWatcher: SafetyWatcherHost = hiltViewModel()
-    DisposableEffect(siteId) {
-        safetyWatcher.start(siteId)
-        onDispose { safetyWatcher.stop() }
-    }
+    val context = LocalContext.current
+    LaunchedEffect(siteId) { safetyWatcher.start(context, siteId) }
 
     LaunchedEffect(deepLinks) {
         deepLinks?.collect { link ->
@@ -64,6 +63,16 @@ fun SsoArea(
                 onOpenAlerts = { navController.navigate(Routes.SSO_ALERTS) },
                 onOpenProfile = { navController.navigate(Routes.PROFILE) },
                 onOpenSimulator = { navController.navigate(Routes.SIMULATION) },
+                onOpenShiftCheck = { navController.navigate(Routes.SSO_SHIFT_CHECK) },
+            )
+        }
+        composable(Routes.SSO_SHIFT_CHECK) {
+            ShiftCheckScreen(
+                user = user,
+                onBack = { navController.popBackStack() },
+                onOpenWorker = { id -> navController.navigate(Routes.withArg(Routes.SSO_WORKER_DETAIL, id)) },
+                onPairVest = { navController.navigate(Routes.SSO_PAIR_VEST) },
+                onOpenAlarmSetup = { navController.navigate(Routes.ALARM_SETUP) },
             )
         }
         composable(Routes.SSO_WORKERS) {

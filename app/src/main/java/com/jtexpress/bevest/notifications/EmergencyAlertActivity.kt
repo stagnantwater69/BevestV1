@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -33,6 +34,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.jtexpress.bevest.MainActivity
+import com.jtexpress.bevest.domain.repository.AlertRepository
+import com.jtexpress.bevest.domain.repository.AuthRepository
+import com.jtexpress.bevest.domain.safety.AlertResponder
+import com.jtexpress.bevest.utils.Outcome
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 import com.jtexpress.bevest.notifications.NotificationHelper.putDeepLink
 import com.jtexpress.bevest.ui.theme.BevestTheme
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
@@ -40,13 +48,21 @@ import com.jtexpress.bevest.ui.theme.Spacing
 
 /**
  * The full-screen alert an emergency notification opens over the lock screen, like an
- * incoming call. Respond opens the alert; Stop alarm or either volume button silences
- * the siren and vibration but keeps the alert in the notification shade.
+ * incoming call. Acknowledge claims the alert for this officer (stopping escalation and
+ * every other officer's siren) and opens it; Respond only opens it; Stop alarm or either
+ * volume button silences this phone but keeps the alert in the notification shade.
  */
+@AndroidEntryPoint
 class EmergencyAlertActivity : ComponentActivity() {
+
+    @Inject lateinit var alertRepository: AlertRepository
+    @Inject lateinit var authRepository: AuthRepository
+    @Inject lateinit var responder: AlertResponder
 
     private val alert = mutableStateOf(AlertContent())
     private val silenced = mutableStateOf(false)
+    private val status = mutableStateOf<String?>(null)
+    private val working = mutableStateOf(false)
 
     private data class AlertContent(
         val title: String = "⚠ EMERGENCY",
@@ -95,6 +111,10 @@ class EmergencyAlertActivity : ComponentActivity() {
                         color = Color.White,
                         textAlign = TextAlign.Center,
                     )
+                    status.value?.let {
+                        Spacer(Modifier.height(Spacing.md))
+                        Text(it, style = MaterialTheme.typography.labelLarge, color = Color.White, textAlign = TextAlign.Center)
+                    }
                     if (silenced.value) {
                         Spacer(Modifier.height(Spacing.md))
                         Text(
@@ -104,12 +124,26 @@ class EmergencyAlertActivity : ComponentActivity() {
                         )
                     }
                     Spacer(Modifier.height(Spacing.xxl))
+                    if (content.type == "ALERT" && content.targetId != null) {
+                        Button(
+                            onClick = ::acknowledge,
+                            enabled = !working.value,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = red),
+                            modifier = Modifier.fillMaxWidth().height(64.dp),
+                        ) {
+                            Text("I'm responding", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(Spacing.md))
+                    }
                     Button(
                         onClick = ::respond,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = red),
-                        modifier = Modifier.fillMaxWidth().height(64.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White.copy(alpha = 0.2f),
+                            contentColor = Color.White,
+                        ),
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
                     ) {
-                        Text("Respond", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text("Open alert", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(Spacing.md))
                     TextButton(onClick = ::stopAlarm, modifier = Modifier.fillMaxWidth().height(56.dp)) {
@@ -131,6 +165,7 @@ class EmergencyAlertActivity : ComponentActivity() {
         setIntent(intent)
         alert.value = read(intent)
         silenced.value = false
+        status.value = null
     }
 
     /** Like an NDRRMC alert: a volume press silences it without dismissing anything. */
@@ -167,6 +202,35 @@ class EmergencyAlertActivity : ComponentActivity() {
             NotificationHelper.cancel(this, content.notificationId)
         }
         silenced.value = true
+    }
+
+    /**
+     * Claims the alert: acknowledged in the database (so it stops escalating and every
+     * other officer's phone goes quiet), then opened like [respond].
+     */
+    private fun acknowledge() {
+        val content = alert.value
+        val alertId = content.targetId ?: return
+        val uid = authRepository.currentUserId()
+        if (uid == null) {
+            respond()
+            return
+        }
+        working.value = true
+        lifecycleScope.launch {
+            when (val r = alertRepository.acknowledgeAlert(alertId, uid)) {
+                is Outcome.Success -> {
+                    content.workerId?.let { responder.acknowledged(it) }
+                    respond()
+                }
+                is Outcome.Failure -> {
+                    // Already taken by another officer, or offline: say so, keep the screen.
+                    working.value = false
+                    status.value = r.error.message
+                    silence()
+                }
+            }
+        }
     }
 
     private fun respond() {

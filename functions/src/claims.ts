@@ -40,6 +40,8 @@ export const syncUserClaims = onDocumentWritten("users/{uid}", async (event) => 
 
   if ((existing.role ?? null) === nextRole) return;
 
-  await getAuth().setCustomUserClaims(uid, nextRole ? { role: nextRole } : {});
+  // Merge, so any other claim on the account survives a role change.
+  const { role: _old, ...others } = existing;
+  await getAuth().setCustomUserClaims(uid, nextRole ? { ...others, role: nextRole } : others);
   logger.info(`syncUserClaims: ${uid} role claim -> ${nextRole ?? "(cleared)"}`);
 });

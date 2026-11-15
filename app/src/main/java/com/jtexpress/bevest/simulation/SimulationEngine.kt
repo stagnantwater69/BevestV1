@@ -12,6 +12,7 @@ import com.jtexpress.bevest.domain.model.SensorReading
 import com.jtexpress.bevest.domain.repository.AuthRepository
 import com.jtexpress.bevest.domain.repository.MonitoringRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
+import com.jtexpress.bevest.utils.AppError
 import com.jtexpress.bevest.utils.Outcome
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -98,7 +99,9 @@ class SimulationEngine @Inject constructor(
     private val authRepository: AuthRepository,
 ) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // Main thread only: the maps below are also touched from ViewModels (acknowledge,
+    // resolve), and they are plain collections.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var loop: Job? = null
 
     /** Mutable per-worker sim data, keyed by workerId. Projected into [state]. */
@@ -183,19 +186,23 @@ class SimulationEngine @Inject constructor(
         }
         _state.update { it.copy(busy = true) }
         scope.launch {
-            // Probe: live streaming needs the Realtime Database to exist and be reachable.
+            // Probe: live streaming needs the Realtime Database to be reachable and writable.
             val probe = monitoring.pushSimulatedReading(
                 SensorReading(workerId = firstId, timestamp = System.currentTimeMillis()),
             )
             if (probe is Outcome.Failure) {
-                _state.update {
-                    it.copy(
-                        busy = false,
-                        message = "Live streaming needs the Realtime Database. Create it in the " +
-                            "Firebase console, re-download google-services.json, and rebuild. " +
-                            "Seeding history still works without it.",
-                    )
+                val message = when (probe.error) {
+                    // The database rules check the role claim on the sign-in token, and only
+                    // let the simulator touch nodes flagged `simulated` (never a real vest's).
+                    is AppError.NotAuthorized ->
+                        "Live streaming was refused: this account has no role on its sign-in yet, " +
+                            "or $firstId is a real vest's reading. Run sync-role-claims, then sign " +
+                            "out and back in. Seeding history still works."
+                    is AppError.Network -> "Live streaming needs a connection. Check your network and try again."
+                    else -> "Live streaming couldn't reach the Realtime Database: " +
+                        (probe.error.cause?.message ?: probe.error.message)
                 }
+                _state.update { it.copy(busy = false, message = message) }
                 return@launch
             }
             log("Live stream started — ${sim.size} vest(s) transmitting")
@@ -208,6 +215,19 @@ class SimulationEngine @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Signing out: stop streaming and clear this run's readings while the account can
+     * still write them, then forget everything bound to it.
+     */
+    suspend fun shutdown() {
+        val streamed = loop != null
+        loop?.cancel(); loop = null
+        if (streamed) sim.keys.toList().forEach { monitoring.clearReading(it) }
+        sim.clear(); elapsedTicks.clear(); openAlertIds.clear(); incidentRaised.clear(); acknowledged.clear()
+        boundKey = null; boundContractorId = null; boundSiteId = null
+        _state.value = SimulationState()
     }
 
     fun stop() {

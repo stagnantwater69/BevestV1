@@ -9,6 +9,7 @@ import com.jtexpress.bevest.domain.repository.SettingsRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.domain.safety.SafetyStatusEngine
 import com.jtexpress.bevest.utils.Outcome
+import com.jtexpress.bevest.utils.ServerClock
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,14 +39,12 @@ class LiveMapViewModel @Inject constructor(
     private val monitoringRepository: MonitoringRepository,
     private val settingsRepository: SettingsRepository,
     private val alertRepository: AlertRepository,
+    private val clock: ServerClock,
 ) : ViewModel() {
 
     private val siteId = MutableStateFlow<String?>(null)
-    private var started = false
 
     fun start(site: String?) {
-        if (started) return
-        started = true
         siteId.value = site
     }
 
@@ -60,9 +59,9 @@ class LiveMapViewModel @Inject constructor(
                         monitoringRepository.observeReadings(workers.map { it.workerId }),
                         settingsRepository.observeThresholds(),
                         alertRepository.observeActiveAlerts(site),
-                    ) { readings, thresholds, alertsOutcome ->
+                        clock.ticker(),
+                    ) { readings, thresholds, alertsOutcome, now ->
                         val engine = SafetyStatusEngine(thresholds)
-                        val now = System.currentTimeMillis()
                         val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
                         LiveMapState(
                             loading = false,

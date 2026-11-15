@@ -8,7 +8,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.jtexpress.bevest.notifications.DeepLink
-import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.Flow
 import com.jtexpress.bevest.BuildConfig
 import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.navigation.Routes
@@ -32,7 +32,7 @@ private fun NavHostController.openTab(route: String) = navigate(route) {
 fun ContractorArea(
     user: User,
     onSignOut: () -> Unit,
-    deepLinks: SharedFlow<DeepLink>? = null,
+    deepLinks: Flow<DeepLink>? = null,
 ) {
     val contractorId = user.contractorId ?: user.uid
     val navController = rememberNavController()

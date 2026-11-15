@@ -14,6 +14,8 @@
     <!-- Emergency alarms: the alarm sound loops in a foreground service until stopped -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Safety monitoring: the phone-side engine keeps watching the site in the background -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <uses-feature
@@ -67,6 +69,15 @@
             android:name=".notifications.AlarmSoundService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <service
+            android:name=".notifications.MonitoringService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Worker safety monitoring: watches live vest readings for falls and emergency button presses and sounds the site safety officer's alarm while they are on duty." />
+        </service>
 
         <service
             android:name=".notifications.BeVestMessagingService"

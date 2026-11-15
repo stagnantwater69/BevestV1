@@ -1,0 +1,12 @@
+{
+  "name": "bevest-rules-tests",
+  "private": true,
+  "description": "Security-rules tests for firestore.rules, database.rules.json and storage.rules, run against the Firebase emulators.",
+  "scripts": {
+    "test": "firebase emulators:exec --only firestore,database,storage --project demo-bevest \"node --test\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "firebase": "^10.14.1"
+  }
+}

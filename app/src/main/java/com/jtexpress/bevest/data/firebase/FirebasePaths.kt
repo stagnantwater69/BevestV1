@@ -25,7 +25,11 @@ object FirebasePaths {
 
     // ---- Settings (Firestore collection `settings`) ----
     const val SETTINGS = "settings"
+    const val COUNTERS = "counters"
+    const val SHIFTS = "shifts"                       // {siteId}_{yyyy-MM-dd}: start-of-shift check
+    const val WORKER_COUNTER_DOC = "workers"          // counters/workers { last: highest WRK number issued }
     const val THRESHOLDS_DOC = "thresholds"           // settings/thresholds
+    const val ENGINE_DOC = "engine"                   // settings/engine { mode: "device" | "cloud" }
     const val SYSTEM_DOC = "system"                   // settings/system  (maintenance mode)
 
     // ---- Storage ----

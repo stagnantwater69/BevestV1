@@ -39,8 +39,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jtexpress.bevest.BuildConfig
+import com.jtexpress.bevest.ui.common.ErrorNote
+import com.jtexpress.bevest.domain.safety.MonitorHealth
 import com.jtexpress.bevest.domain.model.SafetyStatus
+import com.jtexpress.bevest.domain.model.Shift
 import com.jtexpress.bevest.domain.model.User
+import com.jtexpress.bevest.ui.common.BevestCard
 import com.jtexpress.bevest.ui.common.BevestScaffold
 import com.jtexpress.bevest.ui.common.DashboardSkeleton
 import com.jtexpress.bevest.ui.common.EmergencyBanner
@@ -54,6 +58,7 @@ import com.jtexpress.bevest.ui.common.SiteStatusPanel
 import com.jtexpress.bevest.ui.common.StatusChip
 import com.jtexpress.bevest.ui.common.WorkerAvatar
 import com.jtexpress.bevest.ui.common.label
+import com.jtexpress.bevest.ui.common.responseLine
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.BevestShapes
 import com.jtexpress.bevest.ui.theme.ComponentHeight
@@ -61,6 +66,7 @@ import com.jtexpress.bevest.ui.theme.Elevation
 import com.jtexpress.bevest.ui.theme.IconSize
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Spacing
+import com.jtexpress.bevest.utils.DateTimeUtils
 
 /**
  * The officer's home screen.
@@ -84,10 +90,13 @@ fun SsoDashboardScreen(
     onOpenAlerts: () -> Unit,
     onOpenProfile: () -> Unit,
     onOpenSimulator: () -> Unit,
+    onOpenShiftCheck: () -> Unit,
     viewModel: SsoDashboardViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(user.siteId) { viewModel.start(user.siteId) }
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    val health = viewModel.monitorHealth.collectAsStateWithLifecycle().value
+    val shift = viewModel.shift.collectAsStateWithLifecycle().value
     val palette = LocalStatusPalette.current
     // Which count in the status panel was tapped; its workers show in a sheet.
     var openGroup by remember { mutableStateOf<StatusGroup?>(null) }
@@ -145,6 +154,16 @@ fun SsoDashboardScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
+                // 0. If this phone can't see the site, nothing below can be trusted.
+                if (health is MonitorHealth.Degraded) {
+                    item(key = "monitor-health") {
+                        ErrorNote(
+                            "Live monitoring interrupted — reconnecting. Alerts may be delayed " +
+                                "until it recovers. (${health.reason})",
+                        )
+                    }
+                }
+
                 // 1. An active emergency outranks everything, including the summary.
                 state.topEmergencyAlert?.let { alert ->
                     item(key = "emergency") {
@@ -157,6 +176,7 @@ fun SsoDashboardScreen(
                             workerName = name,
                             reason = alert.message,
                             onView = { onOpenAlert(alert.alertId) },
+                            responder = alert.responseLine(),
                         )
                     }
                 }
@@ -187,6 +207,11 @@ fun SsoDashboardScreen(
                         ),
                         modifier = Modifier.animateContentSize(),
                     )
+                }
+
+                // 2b. The start-of-shift check: a prompt until it's done, then a record.
+                if (state.workers.isNotEmpty()) {
+                    item(key = "shift") { ShiftCard(shift, onClick = onOpenShiftCheck) }
                 }
 
                 // 3. What needs attention right now, if anything does. Hidden entirely
@@ -246,6 +271,44 @@ fun SsoDashboardScreen(
                         WorkerLiveRow(live, onClick = { onOpenWorker(live.worker.workerId) })
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Before the shift: a prompt to run the check. After: who started it, and whether
+ * anything was left unready, so a second officer arriving later knows.
+ */
+@Composable
+private fun ShiftCard(shift: Shift?, onClick: () -> Unit) {
+    val palette = LocalStatusPalette.current
+    val issues = shift?.let { it.workerCount - it.readyCount } ?: 0
+    val color = when {
+        shift == null -> palette.warning
+        issues > 0 -> palette.warning
+        else -> palette.normal
+    }
+    BevestCard(onClick = onClick, accent = color) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Icon(BevestIcons.Timer, contentDescription = null, tint = color, modifier = Modifier.size(IconSize.medium))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    if (shift == null) "Start-of-shift check" else "Shift started ${DateTimeUtils.timeOfDay(shift.startedAt)}",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    when {
+                        shift == null -> "Check every vest is on and charged before work starts."
+                        issues > 0 -> "By ${shift.startedByName} · $issues not ready. Tap to recheck."
+                        else -> "By ${shift.startedByName} · everyone ready"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

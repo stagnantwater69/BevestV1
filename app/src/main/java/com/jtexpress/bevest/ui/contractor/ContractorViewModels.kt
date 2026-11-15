@@ -17,6 +17,7 @@ import com.jtexpress.bevest.domain.repository.ReportRepository
 import com.jtexpress.bevest.domain.repository.UserRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.utils.Outcome
+import com.jtexpress.bevest.utils.TempPassword
 import com.jtexpress.bevest.utils.Validators
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -25,13 +26,13 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.security.SecureRandom
 import javax.inject.Inject
 
 // ---------------- Dashboard ----------------
@@ -329,6 +330,7 @@ data class AddSsoState(
 @HiltViewModel
 class AddSsoViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
+    private val userRepository: UserRepository,
 ) : ViewModel() {
 
     private var contractorId: String = ""
@@ -354,10 +356,7 @@ class AddSsoViewModel @Inject constructor(
      * characters (0/O, 1/l/I), since it is usually read out or copied by hand.
      */
     fun generatePassword() {
-        val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"
-        val random = SecureRandom()
-        val chunk = { (1..4).map { alphabet[random.nextInt(alphabet.length)] }.joinToString("") }
-        update("tempPassword", "SSO-${chunk()}-${chunk()}")
+        update("tempPassword", TempPassword.generate("SSO"))
     }
 
     fun submit() {
@@ -374,6 +373,22 @@ class AddSsoViewModel @Inject constructor(
         }
         _state.update { it.copy(submitting = true, formError = null) }
         viewModelScope.launch {
+            // The plan caps how many officers a contractor has; no plan means no cap yet.
+            val plan = (userRepository.getUser(contractorId) as? Outcome.Success)?.data?.subscription
+            if (plan != null) {
+                val active = (userRepository.observeSsos(contractorId).first() as? Outcome.Success)
+                    ?.data.orEmpty().count { it.active }
+                if (active >= plan.ssoLimit) {
+                    _state.update {
+                        it.copy(
+                            submitting = false,
+                            formError = "Your ${plan.planName} plan allows ${plan.ssoLimit} safety officers " +
+                                "and you have $active. Disable one or upgrade your plan to add another.",
+                        )
+                    }
+                    return@launch
+                }
+            }
             val result = accountRepository.createUser(
                 email = s.email,
                 tempPassword = s.tempPassword,

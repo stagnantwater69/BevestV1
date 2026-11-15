@@ -3,6 +3,10 @@ rules_version = '2';
 // BeVest Firestore security rules (plan section 19).
 // Authorization lives here, not in the app UI (plan section 31.9).
 // Cloud Functions use the Admin SDK and bypass these rules.
+//
+// A contractor's own uid is their contractorId: checks against a contractor use
+// request.auth.uid, because contractor docs created on the web have no contractorId field.
+// Rules tests: firestore-tests/ (npm test, runs against the emulator).
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -35,21 +39,42 @@ service cloud.firestore {
       return isActive() && role() == 'SSO';
     }
 
+    /** The vest firmware's account (custom claim set by firmware/tools/set-device-claim.js). */
+    function isDevice() {
+      return isSignedIn() && request.auth.token.device == true;
+    }
+
     function myContractorId() {
-      return userDoc().contractorId;
+      return userDoc().get('contractorId', null);
     }
 
     function mySiteId() {
-      return userDoc().siteId;
+      return userDoc().get('siteId', null);
+    }
+
+    function isMyContractor(contractorId) {
+      return contractorId != null && contractorId == request.auth.uid;
+    }
+
+    /** Only these fields changed between the stored doc and the write. */
+    function onlyChanges(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    function workerOnMySite(workerId) {
+      return workerId == null || workerId == ''
+        || get(/databases/$(database)/documents/workers/$(workerId)).data.siteId == mySiteId();
     }
 
     // ---- users ----
     match /users/{uid} {
       allow get: if isAdmin()
                  || request.auth.uid == uid
-                 || (isContractor() && resource.data.contractorId == request.auth.uid);
+                 || (isContractor() && resource.data.get('contractorId', null) == request.auth.uid);
+      // A contractor may only list their own officers: the query must filter on
+      // contractorId == their uid, or the rules reject it.
       allow list: if isAdmin()
-                  || (isContractor() && request.query.limit <= 200);
+                  || (isContractor() && resource.data.get('contractorId', null) == request.auth.uid);
       allow delete: if isAdmin();
       // Admin provisions any account. Contractors can provision SSO accounts under their own contractorId.
       allow create: if isAdmin()
@@ -63,19 +88,16 @@ service cloud.firestore {
                         && resource.data.contractorId == request.auth.uid
                         && request.resource.data.role == resource.data.role
                         && request.resource.data.contractorId == resource.data.contractorId
-                        && request.resource.data.email == resource.data.email)
+                        && request.resource.data.get('email', null) == resource.data.get('email', null))
                     // Self-edits (profile, FCM tokens, a contractor's own subscription).
                     // get() with a default: web-created contractor docs have no
                     // contractorId/siteId field, and a missing field would deny the write.
                     || (request.auth.uid == uid
                         && request.resource.data.role == resource.data.role
+                        && request.resource.data.get('email', null) == resource.data.get('email', null)
                         && request.resource.data.get('active', true) == resource.data.get('active', true)
                         && request.resource.data.get('contractorId', null) == resource.data.get('contractorId', null)
-                        && request.resource.data.get('siteId', null) == resource.data.get('siteId', null))
-                    || (isContractor()
-                        && resource.data.contractorId == request.auth.uid
-                        && request.resource.data.role == resource.data.role
-                        && request.resource.data.contractorId == resource.data.contractorId);
+                        && request.resource.data.get('siteId', null) == resource.data.get('siteId', null));
     }
 
     // ---- workers ----
@@ -84,21 +106,71 @@ service cloud.firestore {
                   || resource == null  // let an SSO check whether an auto ID is free
                   || (isContractor() && resource.data.contractorId == request.auth.uid)
                   || (isSso() && resource.data.siteId == mySiteId());
-      allow create, update: if isAdmin()
-                            || (isSso() && request.resource.data.siteId == mySiteId());
+      // set() on an existing doc is an update, so an SSO can never overwrite another
+      // site's worker by reusing its ID.
+      allow create: if isAdmin()
+                    || (isSso()
+                        && request.resource.data.siteId == mySiteId()
+                        && request.resource.data.contractorId == myContractorId());
+      allow update: if isAdmin()
+                    || (isSso()
+                        && resource.data.siteId == mySiteId()
+                        && request.resource.data.siteId == mySiteId()
+                        && request.resource.data.get('contractorId', null) == resource.data.get('contractorId', null));
       allow delete: if isAdmin();
     }
 
-    // ---- vests ----
-    match /vests/{vestId} {
+    // ---- worker ID allocation (counters/workers.last = highest WRK number issued) ----
+    match /counters/{id} {
       allow read: if isAdmin() || isSso() || isContractor();
-      allow write: if isAdmin() || isSso();
+      allow write: if (isAdmin() || isSso())
+                   && request.resource.data.last is int
+                   && (resource == null || request.resource.data.last > resource.data.get('last', 0));
+    }
+
+    // ---- shifts/{siteId}_{yyyy-MM-dd}: the start-of-shift check ----
+    // The site is checked from the document ID, so an officer can watch for today's
+    // shift before anyone has started it (a missing document has no data to check).
+    match /shifts/{shiftId} {
+      function isMySiteShift() {
+        return mySiteId() != null
+          && shiftId.size() == mySiteId().size() + 11
+          && shiftId[0:mySiteId().size() + 1] == mySiteId() + '_';
+      }
+      allow get: if isAdmin()
+                 || (isSso() && isMySiteShift())
+                 || (isContractor() && resource != null && isMyContractor(resource.data.get('contractorId', null)));
+      allow list: if isAdmin()
+                  || (isContractor() && isMyContractor(resource.data.get('contractorId', null)));
+      allow create: if isSso() && isMySiteShift()
+                    && shiftId == request.resource.data.siteId + '_' + request.resource.data.date
+                    && request.resource.data.contractorId == myContractorId()
+                    && request.resource.data.startedBy == request.auth.uid;
+      // Re-running the check updates its result, never who started the shift or when.
+      allow update: if isSso() && isMySiteShift()
+                    && onlyChanges(['checkedAt', 'checkedBy', 'workerCount', 'readyCount', 'issues'])
+                    && request.resource.data.checkedBy == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    // ---- vests (a shared pool registered by admins) ----
+    match /vests/{vestId} {
+      allow read: if isAdmin() || isSso() || isContractor() || isDevice();
+      allow create, delete: if isAdmin();
+      // An SSO pairs, unpairs, services and swaps vests — only ones that are free or
+      // worn by a worker on their own site, and only onto a worker on their site.
+      allow update: if isAdmin()
+                    || (isSso()
+                        && workerOnMySite(resource.data.get('assignedWorkerId', null))
+                        && workerOnMySite(request.resource.data.get('assignedWorkerId', null)));
     }
 
     // ---- vest assignments (history, never deleted — plan 31.7) ----
     match /vestAssignments/{id} {
       allow read: if isAdmin() || isSso() || isContractor();
-      allow create, update: if isAdmin() || isSso();
+      allow create: if isAdmin() || (isSso() && workerOnMySite(request.resource.data.workerId));
+      allow update: if isAdmin()
+                    || (isSso() && workerOnMySite(resource.data.workerId) && onlyChanges(['unassignedAt']));
       allow delete: if false;
     }
 
@@ -106,40 +178,68 @@ service cloud.firestore {
     match /alerts/{alertId} {
       allow read: if isAdmin()
                   || (isSso() && resource.data.siteId == mySiteId())
-                  || (isContractor() && resource.data.contractorId == myContractorId());
-      // Production alerts are created by the cloud safety engine or an SSO. The
-      // in-app simulator (no IoT hardware yet) may create/remove alerts flagged
-      // `simulated == true` — these never affect real safety data.
-      allow create: if isAdmin() || isSso()
-                    || (isSignedIn() && request.resource.data.simulated == true);
+                  || (isContractor() && isMyContractor(resource.data.get('contractorId', null)));
+      // Real alerts come from the safety engine (an SSO's phone on the free plan, or
+      // the cloud functions). The simulators may create/remove alerts flagged
+      // `simulated == true` — only on the operator's own site or contractor account,
+      // so nobody can sound a fake alarm on someone else's site.
+      allow create: if isAdmin()
+                    || (isSso() && request.resource.data.siteId == mySiteId())
+                    || (isContractor()
+                        && request.resource.data.simulated == true
+                        && isMyContractor(request.resource.data.get('contractorId', null)));
       allow update: if isAdmin()
-                    || (isSso() && resource.data.siteId == mySiteId());
-      allow delete: if isSignedIn() && resource.data.simulated == true;
+                    || (isSso()
+                        && resource.data.siteId == mySiteId()
+                        && request.resource.data.siteId == resource.data.siteId)
+                    // Closing an incident closes the alert it grew from.
+                    || (isContractor()
+                        && isMyContractor(resource.data.get('contractorId', null))
+                        && request.resource.data.status == 'RESOLVED'
+                        && onlyChanges(['status', 'resolvedAt', 'resolvedBy', 'resolutionNotes']));
+      allow delete: if resource.data.get('simulated', false) == true
+                    && (isAdmin()
+                        || (isSso() && resource.data.siteId == mySiteId())
+                        || (isContractor() && isMyContractor(resource.data.get('contractorId', null))));
     }
 
     // ---- incidents ----
     match /incidents/{incidentId} {
       allow read: if isAdmin()
                   || (isSso() && resource.data.siteId == mySiteId())
-                  || (isContractor() && resource.data.contractorId == myContractorId());
-      // Real incidents come from the cloud engine or, while the project has no
-      // cloud functions (free plan), from an SSO's app escalating a fall on their own
-      // site. Simulated ones (flagged `simulated == true`) may be created/removed by
-      // any signed-in user so the app can be demoed before the IoT layer exists.
+                  || (isContractor() && isMyContractor(resource.data.get('contractorId', null)));
       allow create: if isAdmin()
                     || (isSso() && request.resource.data.siteId == mySiteId())
-                    || (isSignedIn() && request.resource.data.simulated == true);
+                    || (isContractor()
+                        && request.resource.data.simulated == true
+                        && isMyContractor(request.resource.data.get('contractorId', null)));
       allow update: if isAdmin()
-                    || (isSso() && resource.data.siteId == mySiteId())
-                    || (isContractor() && resource.data.contractorId == myContractorId());
-      allow delete: if isSignedIn() && resource.data.simulated == true;
+                    || (isSso()
+                        && resource.data.siteId == mySiteId()
+                        && request.resource.data.siteId == resource.data.siteId)
+                    // A contractor closes out their incidents, nothing else.
+                    || (isContractor()
+                        && isMyContractor(resource.data.get('contractorId', null))
+                        && onlyChanges(['outcome', 'resolutionNotes', 'resolvedBy', 'resolvedAt']));
+      allow delete: if resource.data.get('simulated', false) == true
+                    && (isAdmin()
+                        || (isSso() && resource.data.siteId == mySiteId())
+                        || (isContractor() && isMyContractor(resource.data.get('contractorId', null))));
     }
 
     // ---- projects / sites ----
     match /projects/{projectId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin()
-                   || (isContractor() && request.resource.data.contractorId == request.auth.uid);
+      allow create: if isAdmin()
+                    || (isContractor() && request.resource.data.contractorId == request.auth.uid);
+      // Checked against the stored doc too, so a contractor can't take over someone
+      // else's project by writing their own contractorId into it.
+      allow update: if isAdmin()
+                    || (isContractor()
+                        && resource.data.contractorId == request.auth.uid
+                        && request.resource.data.contractorId == request.auth.uid);
+      allow delete: if isAdmin()
+                    || (isContractor() && resource.data.contractorId == request.auth.uid);
     }
 
     // ---- activity log ----

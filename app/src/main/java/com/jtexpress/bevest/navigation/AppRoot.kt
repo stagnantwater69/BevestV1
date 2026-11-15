@@ -41,6 +41,7 @@ import com.jtexpress.bevest.ui.admin.AdminArea
 import com.jtexpress.bevest.ui.auth.ForgotPasswordScreen
 import com.jtexpress.bevest.ui.auth.LoginScreen
 import com.jtexpress.bevest.ui.contractor.ContractorArea
+import com.jtexpress.bevest.ui.profile.ChangePasswordScreen
 import com.jtexpress.bevest.ui.common.ReflectiveBand
 import com.jtexpress.bevest.ui.common.SecondaryButton
 import com.jtexpress.bevest.ui.sso.SsoArea
@@ -125,7 +126,10 @@ private fun AppRootContent(session: SessionState, viewModel: RootViewModel) {
             onSignOut = viewModel::signOut,
         )
 
-        is SessionState.Active -> when (s.user.role) {
+        // A temporary password must be replaced before anything else.
+        is SessionState.Active -> if (s.user.mustChangePassword) {
+            ChangePasswordScreen(onDone = {}, forced = true, onBack = viewModel::signOut)
+        } else when (s.user.role) {
             UserRole.ADMIN -> AdminArea(s.user, viewModel::signOut)
             UserRole.CONTRACTOR -> ContractorArea(s.user, viewModel::signOut, viewModel.deepLinks)
             UserRole.SSO -> SsoArea(s.user, viewModel::signOut, viewModel.deepLinks)

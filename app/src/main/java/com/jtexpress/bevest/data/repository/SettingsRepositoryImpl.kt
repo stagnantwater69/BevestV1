@@ -2,9 +2,11 @@ package com.jtexpress.bevest.data.repository
 
 import com.google.firebase.firestore.FirebaseFirestore
 import com.jtexpress.bevest.data.firebase.FirebasePaths
+import com.jtexpress.bevest.data.firebase.retryForever
 import com.jtexpress.bevest.data.firebase.snapshots
 import com.jtexpress.bevest.data.firebase.toAppError
 import com.jtexpress.bevest.domain.repository.SettingsRepository
+import com.jtexpress.bevest.domain.safety.EngineMode
 import com.jtexpress.bevest.domain.safety.ThresholdConfig
 import com.jtexpress.bevest.utils.Outcome
 import kotlinx.coroutines.flow.Flow
@@ -35,9 +37,11 @@ class SettingsRepositoryImpl @Inject constructor(
                         ?: ThresholdConfig.DEFAULT.responseTimeoutSeconds,
                     offlineTimeoutSeconds = snap.getLong("offlineTimeoutSeconds")?.toInt()
                         ?: ThresholdConfig.DEFAULT.offlineTimeoutSeconds,
+                    unansweredTimeoutSeconds = snap.getLong("unansweredTimeoutSeconds")?.toInt()
+                        ?: ThresholdConfig.DEFAULT.unansweredTimeoutSeconds,
                 )
             }
-            .catch { emit(ThresholdConfig.DEFAULT) }
+            .retryForever()
             .onStart { emit(ThresholdConfig.DEFAULT) }
 
     override suspend fun updateThresholds(config: ThresholdConfig): Outcome<Unit> = try {
@@ -48,12 +52,18 @@ class SettingsRepositoryImpl @Inject constructor(
                 "warningDurationSeconds" to config.warningDurationSeconds,
                 "responseTimeoutSeconds" to config.responseTimeoutSeconds,
                 "offlineTimeoutSeconds" to config.offlineTimeoutSeconds,
+                "unansweredTimeoutSeconds" to config.unansweredTimeoutSeconds,
             ),
         ).await()
         Outcome.Success(Unit)
     } catch (e: Exception) {
         Outcome.Failure(e.toAppError())
     }
+
+    override fun observeEngineMode(): Flow<EngineMode> =
+        settings.document(FirebasePaths.ENGINE_DOC).snapshots()
+            .map { EngineMode.fromRaw(it.getString("mode")) }
+            .retryForever()
 
     override fun observeMaintenanceMode(): Flow<Boolean> =
         settings.document(FirebasePaths.SYSTEM_DOC).snapshots()

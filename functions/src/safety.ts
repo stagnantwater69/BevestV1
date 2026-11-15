@@ -31,6 +31,8 @@ export interface Reading {
   longitude?: number | null;
   battery?: number | null;
   timestamp?: number | null;
+  /** Written by an in-app or web simulator. */
+  simulated?: boolean | null;
 }
 
 export type SafetyStatus = "NORMAL" | "WARNING" | "DANGER" | "EMERGENCY" | "OFFLINE";

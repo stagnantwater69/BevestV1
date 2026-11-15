@@ -42,6 +42,7 @@ import com.jtexpress.bevest.ui.common.FilterRow
 import com.jtexpress.bevest.ui.common.ListSkeleton
 import com.jtexpress.bevest.ui.common.ReflectiveBand
 import com.jtexpress.bevest.ui.common.label
+import com.jtexpress.bevest.ui.common.responseLine
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.BevestShapes
 import com.jtexpress.bevest.ui.theme.ComponentHeight
@@ -263,6 +264,15 @@ fun AlertRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    alert.responseLine()?.let { line ->
+                        Text(
+                            line,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (alert.status == AlertStatus.ACKNOWLEDGED) palette.normal else color,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Column(
                     horizontalAlignment = Alignment.End,

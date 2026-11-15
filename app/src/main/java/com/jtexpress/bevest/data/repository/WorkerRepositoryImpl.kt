@@ -1,9 +1,11 @@
 package com.jtexpress.bevest.data.repository
 
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Query
 import com.google.firebase.storage.FirebaseStorage
 import com.jtexpress.bevest.data.firebase.FirebasePaths
+import com.jtexpress.bevest.data.firebase.retryReporting
 import com.jtexpress.bevest.data.firebase.snapshots
 import com.jtexpress.bevest.data.firebase.toAppError
 import com.jtexpress.bevest.data.mapper.toWorker
@@ -33,7 +35,7 @@ class WorkerRepositoryImpl @Inject constructor(
         else if (contractorId != null) query = query.whereEqualTo("contractorId", contractorId)
         return query.snapshots()
             .map { qs -> Outcome.Success(qs.documents.map { it.toWorker() }) as Outcome<List<Worker>> }
-            .catch { emit(Outcome.Failure(it.toAppError())) }
+            .retryReporting()
     }
 
     override fun observeWorker(workerId: String): Flow<Outcome<Worker>> =
@@ -52,17 +54,49 @@ class WorkerRepositoryImpl @Inject constructor(
         Outcome.Failure(e.toAppError())
     }
 
-    override suspend fun addWorker(worker: Worker): Outcome<Unit> = try {
-        val existing = workers.document(worker.workerId).get().await()
-        if (existing.exists()) {
-            Outcome.Failure(AppError.Validation("A worker with ID ${worker.workerId} already exists."))
-        } else {
-            workers.document(worker.workerId).set(worker.toMap()).await()
-            Outcome.Success(Unit)
+    private val workerCounter get() =
+        firestore.collection(FirebasePaths.COUNTERS).document(FirebasePaths.WORKER_COUNTER_DOC)
+
+    override suspend fun addWorker(worker: Worker): Outcome<Unit> {
+        val taken = Outcome.Failure(AppError.Validation("A worker with ID ${worker.workerId} already exists."))
+        val ref = workers.document(worker.workerId)
+        return try {
+            // In a transaction, so two officers can't both create the same ID.
+            val created = firestore.runTransaction { tx ->
+                if (tx.get(ref).exists()) return@runTransaction false
+                val last = tx.get(workerCounter).getLong("last") ?: 0L
+                tx.set(ref, worker.toMap())
+                workerNumber(worker.workerId)?.takeIf { it > last }?.let {
+                    tx.set(workerCounter, mapOf("last" to it))
+                }
+                true
+            }.await()
+            if (created) Outcome.Success(Unit) else taken
+        } catch (e: FirebaseFirestoreException) {
+            // The rules hide other sites' workers: reading an ID that exists elsewhere is
+            // denied, which means it's taken, not that this officer can't add workers.
+            if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED && idExistsElsewhere(ref)) taken
+            else Outcome.Failure(e.toAppError())
+        } catch (e: Exception) {
+            Outcome.Failure(e.toAppError())
         }
-    } catch (e: Exception) {
-        Outcome.Failure(e.toAppError())
     }
+
+    /** A plain read of a free ID is allowed; only an ID held by another site is denied. */
+    private suspend fun idExistsElsewhere(ref: com.google.firebase.firestore.DocumentReference): Boolean = try {
+        ref.get().await().exists()
+    } catch (e: FirebaseFirestoreException) {
+        e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED
+    }
+
+    override suspend fun lastIssuedWorkerNumber(): Int = try {
+        workerCounter.get().await().getLong("last")?.toInt() ?: 0
+    } catch (e: Exception) {
+        0
+    }
+
+    private fun workerNumber(id: String): Long? =
+        Regex("WRK-(\\d+)").find(id)?.groupValues?.get(1)?.toLongOrNull()
 
     override suspend fun updateWorker(worker: Worker): Outcome<Unit> = try {
         // Only the fields editable from the worker form. Vest assignment and live status

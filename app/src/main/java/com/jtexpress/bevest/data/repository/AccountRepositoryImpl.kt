@@ -40,8 +40,10 @@ class AccountRepositoryImpl @Inject constructor(
             FirebaseApp.initializeApp(context, options, name)
         }
         val secondaryAuth = FirebaseAuth.getInstance(secondary)
+        var created: com.google.firebase.auth.FirebaseUser? = null
         return try {
             val result = secondaryAuth.createUserWithEmailAndPassword(email.trim(), tempPassword).await()
+            created = result.user
             val uid = result.user?.uid ?: return Outcome.Failure(com.jtexpress.bevest.utils.AppError.Unknown())
             // A contractor's own uid is their contractorId (see firestore.rules).
             val resolvedContractorId =
@@ -56,11 +58,17 @@ class AccountRepositoryImpl @Inject constructor(
                     "contractorId" to resolvedContractorId,
                     "siteId" to siteId,
                     "active" to true,
+                    // The temporary password was seen by whoever created the account.
+                    "mustChangePassword" to true,
                 ),
             ).await()
             secondaryAuth.signOut()
             Outcome.Success(uid)
         } catch (e: Exception) {
+            // No profile means nobody can use the account, and the email stays taken, so
+            // a retry would fail too: remove the half-made sign-in. The secondary app is
+            // still signed in as the new user, which is allowed to delete itself.
+            created?.let { user -> runCatching { user.delete().await() } }
             Outcome.Failure(e.toAppError())
         } finally {
             runCatching { secondary.delete() }
