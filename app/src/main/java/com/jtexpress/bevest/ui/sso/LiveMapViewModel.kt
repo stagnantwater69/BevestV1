@@ -26,9 +26,9 @@ data class LiveMapState(
     val noSite: Boolean = false,
     val markers: List<WorkerLive> = emptyList(),
 ) {
-    /** Workers whose vests are reporting; offline workers are left off the map. */
+    /** Workers whose vests are reporting; offline workers with last-known GPS are still shown with a stale note. */
     val online get() = markers.filter { it.status != SafetyStatus.OFFLINE }
-    val located get() = online.filter { it.reading?.latitude != null && it.reading.longitude != null }
+    val located get() = markers.filter { it.reading?.latitude != null && it.reading.longitude != null }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -50,12 +50,14 @@ class LiveMapViewModel @Inject constructor(
     }
 
     val state: StateFlow<LiveMapState> = siteId.flatMapLatest { site ->
-        if (site.isNullOrBlank()) return@flatMapLatest flowOf(LiveMapState(loading = false, noSite = true))
         workerRepository.observeWorkers(contractorId = null, siteId = site).flatMapLatest { outcome ->
             when (outcome) {
                 is Outcome.Failure -> flowOf(LiveMapState(loading = false, error = outcome.error.message))
                 is Outcome.Success -> {
                     val workers = outcome.data
+                    if (site.isNullOrBlank() && workers.isEmpty()) {
+                        return@flatMapLatest flowOf(LiveMapState(loading = false, noSite = true))
+                    }
                     combine(
                         monitoringRepository.observeReadings(workers.map { it.workerId }),
                         settingsRepository.observeThresholds(),

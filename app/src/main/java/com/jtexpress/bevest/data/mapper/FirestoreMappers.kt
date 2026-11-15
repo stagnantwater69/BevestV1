@@ -19,6 +19,7 @@ import com.jtexpress.bevest.domain.model.VestAssignment
 import com.jtexpress.bevest.domain.model.VestStatus
 import com.jtexpress.bevest.domain.model.Worker
 import com.jtexpress.bevest.domain.model.calculateAgeFromBirthdate
+import com.jtexpress.bevest.utils.Validators
 
 private fun DocumentSnapshot.str(key: String): String = getString(key).orEmpty()
 private fun DocumentSnapshot.strOrNull(key: String): String? = getString(key)
@@ -41,7 +42,7 @@ fun DocumentSnapshot.toUser(): User = User(
     firstName = str("firstName"),
     lastName = str("lastName"),
     email = str("email"),
-    phone = str("phone"),
+    phone = Validators.formatPhoneWithCountryCode(str("phone")),
     role = UserRole.fromRaw(strOrNull("role")),
     contractorId = strOrNull("contractorId"),
     siteId = strOrNull("siteId"),
@@ -94,10 +95,11 @@ fun DocumentSnapshot.toWorker(): Worker {
         workerId = id,
         firstName = str("firstName"),
         lastName = str("lastName"),
-        phone = str("phone"),
+        phone = Validators.formatPhoneWithCountryCode(str("phone")),
         birthday = bday,
         age = savedAge,
-        floorNumber = strOrNull("floorNumber"),
+        floorNumber = strOrNull("floorNumber")?.takeIf { it.isNotBlank() },
+        jobPosition = strOrNull("jobPosition")?.takeIf { it.isNotBlank() },
         photoUrl = strOrNull("photoUrl"),
         contractorId = strOrNull("contractorId"),
         siteId = strOrNull("siteId"),
@@ -146,6 +148,9 @@ fun DocumentSnapshot.toAlert(): Alert = Alert(
     alertId = id,
     workerId = str("workerId"),
     vestId = str("vestId"),
+    siteId = strOrNull("siteId")?.takeIf { it.isNotBlank() },
+    siteName = strOrNull("siteName")?.takeIf { it.isNotBlank() },
+    floorNumber = strOrNull("floorNumber")?.takeIf { it.isNotBlank() },
     type = AlertType.fromRaw(strOrNull("type")),
     severity = AlertSeverity.fromRaw(strOrNull("severity")),
     status = AlertStatus.fromRaw(strOrNull("status")),
@@ -154,24 +159,36 @@ fun DocumentSnapshot.toAlert(): Alert = Alert(
     acknowledgedAt = millis("acknowledgedAt"),
     resolvedAt = millis("resolvedAt"),
     resolvedBy = strOrNull("resolvedBy"),
+    resolutionNotes = strOrNull("resolutionNotes"),
 )
 
-fun DocumentSnapshot.toIncident(): Incident = Incident(
-    incidentId = id,
-    workerId = str("workerId"),
-    vestId = str("vestId"),
-    alertId = strOrNull("alertId"),
-    type = AlertType.fromRaw(strOrNull("type")),
-    severity = AlertSeverity.fromRaw(strOrNull("severity")),
-    heartRate = int("heartRate"),
-    temperature = dbl("temperature"),
-    latitude = dbl("latitude"),
-    longitude = dbl("longitude"),
-    createdAt = millis("createdAt") ?: 0L,
-    outcome = strOrNull("outcome"),
-    resolutionNotes = strOrNull("resolutionNotes"),
-    resolvedBy = strOrNull("resolvedBy"),
-)
+fun DocumentSnapshot.toIncident(): Incident {
+    val rawNotes = strOrNull("resolutionNotes")?.takeIf { it.isNotBlank() }
+    val rawOutcome = strOrNull("outcome")?.takeIf { it.isNotBlank() }
+    val isResolvedStatus = strOrNull("status")?.equals("RESOLVED", ignoreCase = true) == true || millis("resolvedAt") != null
+    val effectiveNotes = rawNotes ?: rawOutcome ?: if (isResolvedStatus) "Resolved" else null
+    val effectiveOutcome = rawOutcome ?: rawNotes ?: if (isResolvedStatus) "Resolved" else null
+
+    return Incident(
+        incidentId = id,
+        workerId = str("workerId"),
+        vestId = str("vestId"),
+        alertId = strOrNull("alertId"),
+        siteId = strOrNull("siteId")?.takeIf { it.isNotBlank() },
+        siteName = strOrNull("siteName")?.takeIf { it.isNotBlank() },
+        floorNumber = strOrNull("floorNumber")?.takeIf { it.isNotBlank() },
+        type = AlertType.fromRaw(strOrNull("type")),
+        severity = AlertSeverity.fromRaw(strOrNull("severity")),
+        heartRate = int("heartRate"),
+        temperature = dbl("temperature"),
+        latitude = dbl("latitude"),
+        longitude = dbl("longitude"),
+        createdAt = millis("createdAt") ?: 0L,
+        outcome = effectiveOutcome,
+        resolutionNotes = effectiveNotes,
+        resolvedBy = strOrNull("resolvedBy"),
+    )
+}
 
 fun DocumentSnapshot.toProjectSite(): ProjectSite = ProjectSite(
     projectId = id,

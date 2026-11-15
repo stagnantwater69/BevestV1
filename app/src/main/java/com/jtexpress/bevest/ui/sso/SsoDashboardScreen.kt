@@ -5,6 +5,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -306,6 +308,7 @@ private fun StatusGroupSheet(
  * A worker in a list: avatar ringed with their status color, name, ID, live vitals,
  * freshness, and a status chip. Recognition first, detail second.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun WorkerLiveRow(
     live: WorkerLive,
@@ -336,7 +339,9 @@ fun WorkerLiveRow(
         shadowElevation = Elevation.card,
     ) {
         Row(
-            Modifier.padding(Spacing.lg),
+            Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.md),
         ) {
@@ -347,56 +352,67 @@ fun WorkerLiveRow(
             )
             Column(
                 Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                Text(
-                    live.worker.fullName.ifBlank { live.worker.workerId },
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                 ) {
-                    Text(
-                        live.worker.workerId,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    live.reading?.heartRate?.let { hr ->
-                        val hrTint = when (live.hrStatus) {
-                            SafetyStatus.DANGER, SafetyStatus.EMERGENCY -> palette.danger
-                            SafetyStatus.WARNING -> palette.warning
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                        VitalInline(
-                            icon = BevestIcons.HeartRate,
-                            value = "$hr",
-                            tint = hrTint,
-                            bold = live.hrStatus != SafetyStatus.NORMAL,
+                    Column(
+                        Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            live.worker.fullName.ifBlank { live.worker.workerId },
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                    }
-                    live.reading?.temperature?.let { t ->
-                        val tempTint = when (live.tempStatus) {
-                            SafetyStatus.DANGER, SafetyStatus.EMERGENCY -> palette.danger
-                            SafetyStatus.WARNING -> palette.warning
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                live.worker.workerId,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.align(Alignment.CenterVertically),
+                            )
+                            live.reading?.heartRate?.let { hr ->
+                                val hrTint = when (live.hrStatus) {
+                                    SafetyStatus.DANGER, SafetyStatus.EMERGENCY -> palette.danger
+                                    SafetyStatus.WARNING -> palette.warning
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                VitalInline(
+                                    icon = BevestIcons.HeartRate,
+                                    value = "$hr",
+                                    tint = hrTint,
+                                    bold = live.hrStatus != SafetyStatus.NORMAL,
+                                )
+                            }
+                            live.reading?.temperature?.let { t ->
+                                val tempTint = when (live.tempStatus) {
+                                    SafetyStatus.DANGER, SafetyStatus.EMERGENCY -> palette.danger
+                                    SafetyStatus.WARNING -> palette.warning
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                VitalInline(
+                                    icon = BevestIcons.Temperature,
+                                    value = "%.1f°".format(t),
+                                    tint = tempTint,
+                                    bold = live.tempStatus != SafetyStatus.NORMAL,
+                                )
+                            }
                         }
-                        VitalInline(
-                            icon = BevestIcons.Temperature,
-                            value = "%.1f°".format(t),
-                            tint = tempTint,
-                            bold = live.tempStatus != SafetyStatus.NORMAL,
-                        )
                     }
+                    StatusChip(live.status, compact = true)
                 }
                 LastUpdatedLabel(live.lastUpdate, live.stale)
             }
-            StatusChip(live.status, compact = true)
         }
     }
 }

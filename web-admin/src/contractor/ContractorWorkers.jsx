@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { FiX, FiMapPin, FiChevronRight, FiUsers, FiSearch } from 'react-icons/fi';
+import { FiX, FiMapPin, FiChevronRight, FiUsers, FiSearch, FiPhone, FiBriefcase } from 'react-icons/fi';
 import {
   TbHeartbeat, TbTemperature, TbRun, TbBattery2, TbBellRinging, TbDeviceWatch, TbBuildingFactory2, TbClockHour4,
 } from 'react-icons/tb';
@@ -10,6 +10,8 @@ import {
 import {
   PageHeader, SearchBox, FilterChips, Badge, EmptyState, ErrorState, Skeleton, IncidentRow,
 } from './ui';
+import { formatPhoneWithCountryCode } from '../PhoneInput';
+import OsmMap from './OsmMap';
 
 // WorkerFilter from WorkerDirectoryViewModel.kt, labelled as in WorkerDirectoryScreen.kt
 const FILTERS = [
@@ -33,10 +35,13 @@ const WorkerRow = ({ live, onClick }) => {
       <div className="ct-row-main">
         <span className="ct-row-title">{worker.fullName}</span>
         <span className="ct-row-sub">
-          {worker.id}{worker.siteId ? ` · Site ${worker.siteId}` : ''}
+          {worker.id}
+          {worker.jobPosition ? ` · ${worker.jobPosition}` : ''}
+          {worker.siteId ? ` · Site ${worker.siteId}` : ''}
         </span>
         <span className="ct-row-meta">
           {worker.assignedVestId ? `Vest ${worker.assignedVestId}` : 'No vest assigned'}
+          {worker.phone ? ` · ${formatPhoneWithCountryCode(worker.phone)}` : ''}
         </span>
       </div>
       <div className="ct-vitals-inline">
@@ -129,6 +134,22 @@ const WorkerDetailModal = ({ live, incidents, thresholds, now, onClose }) => {
           </div>
 
           <div className="profile-list-card">
+            {worker.jobPosition && (
+              <div className="profile-list-item">
+                <FiBriefcase className="item-icon" />
+                <div className="item-details">
+                  <span className="item-label">Job position</span>
+                  <span className="item-value">{worker.jobPosition}</span>
+                </div>
+              </div>
+            )}
+            <div className="profile-list-item">
+              <FiPhone className="item-icon" />
+              <div className="item-details">
+                <span className="item-label">Phone</span>
+                <span className="item-value">{formatPhoneWithCountryCode(worker.phone) || 'Not set'}</span>
+              </div>
+            </div>
             <div className="profile-list-item">
               <TbDeviceWatch className="item-icon" />
               <div className="item-details">
@@ -148,13 +169,13 @@ const WorkerDetailModal = ({ live, incidents, thresholds, now, onClose }) => {
               <div className="item-details">
                 <span className="item-label">Last known location</span>
                 <span className="item-value">
-                  {hasLocation ? `${reading.latitude.toFixed(5)}, ${reading.longitude.toFixed(5)}` : 'No location yet'}
+                  {hasLocation ? `${reading.latitude.toFixed(6)}, ${reading.longitude.toFixed(6)}` : 'No GPS fix yet'}
                 </span>
               </div>
               {hasLocation && (
                 <a
                   className="view-all"
-                  href={`https://www.google.com/maps?q=${reading.latitude},${reading.longitude}`}
+                  href={`https://www.openstreetmap.org/?mlat=${reading.latitude}&mlon=${reading.longitude}#map=18/${reading.latitude}/${reading.longitude}`}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -163,6 +184,27 @@ const WorkerDetailModal = ({ live, incidents, thresholds, now, onClose }) => {
               )}
             </div>
           </div>
+
+          {hasLocation && (
+            <div>
+              <h3 className="ct-subheading">Live GPS Map</h3>
+              <OsmMap
+                height={220}
+                zoom={18}
+                pins={[
+                  {
+                    id: worker.id,
+                    latitude: reading.latitude,
+                    longitude: reading.longitude,
+                    title: worker.fullName,
+                    status,
+                    stale: live.stale,
+                    subtitle: `HR: ${reading?.heartRate ?? '—'} bpm · Temp: ${reading?.temperature != null ? `${reading.temperature.toFixed(1)} °C` : '—'}`,
+                  },
+                ]}
+              />
+            </div>
+          )}
 
           <div>
             <h3 className="ct-subheading">Recent incidents</h3>

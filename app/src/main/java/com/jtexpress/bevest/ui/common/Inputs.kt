@@ -16,6 +16,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -26,10 +28,14 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -41,6 +47,7 @@ import com.jtexpress.bevest.ui.theme.IconSize
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Motion
 import com.jtexpress.bevest.ui.theme.Spacing
+import com.jtexpress.bevest.utils.Validators
 
 /**
  * Search input.
@@ -190,13 +197,53 @@ fun FormField(
     val palette = LocalStatusPalette.current
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val isPhone = keyboardType == KeyboardType.Phone
+    val displayValue = if (isPhone) Validators.stripCountryCode(value) else value
+    var passwordVisible by remember { mutableStateOf(false) }
 
     OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
+        value = displayValue,
+        onValueChange = { next ->
+            if (isPhone) {
+                val local = Validators.stripCountryCode(next)
+                onValueChange(if (local.isEmpty()) "" else "+63 $local")
+            } else {
+                onValueChange(next)
+            }
+        },
         enabled = enabled,
         label = {
             Text(if (required) "$label *" else label)
+        },
+        prefix = if (isPhone) {
+            {
+                Text(
+                    text = "+63 ",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            null
+        },
+        placeholder = if (isPhone) {
+            { Text("917 123 4567") }
+        } else {
+            null
+        },
+        trailingIcon = if (isPassword) {
+            {
+                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                    Icon(
+                        imageVector = if (passwordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                        contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                        modifier = Modifier.size(IconSize.medium),
+                    )
+                }
+            }
+        } else {
+            null
         },
         isError = error != null,
         supportingText = when {
@@ -210,7 +257,7 @@ fun FormField(
             else -> null
         },
         singleLine = singleLine,
-        visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
+        visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
         keyboardActions = KeyboardActions(
             onNext = { focus.moveFocus(androidx.compose.ui.focus.FocusDirection.Down) },

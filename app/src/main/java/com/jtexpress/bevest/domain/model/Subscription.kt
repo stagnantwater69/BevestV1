@@ -146,4 +146,20 @@ data class Subscription(
 ) {
     val isCustom: Boolean get() = planId == SubscriptionPlans.CUSTOM_ID
     val currentPrice: Long get() = if (billingCycle == BillingCycle.ANNUAL) annualPrice else monthlyPrice
+
+    fun hasEnded(nowMillis: Long = System.currentTimeMillis()): Boolean =
+        status.equals("Expired", ignoreCase = true) || (renewDate != null && nowMillis >= renewDate)
+
+    fun isDowngradeTo(targetPlanId: String): Boolean = tierRank(targetPlanId) < tierRank(planId)
+
+    /** Contractors under the Business Plan are allowed to upgrade to a higher tier (Enterprise or Custom). */
+    fun isUpgradeFromBusinessTo(targetPlanId: String): Boolean =
+        planId == SubscriptionPlans.BUSINESS_ID && tierRank(targetPlanId) > tierRank(SubscriptionPlans.BUSINESS_ID)
+
+    private fun tierRank(id: String): Int = when (id) {
+        SubscriptionPlans.BUSINESS_ID -> 1
+        SubscriptionPlans.ENTERPRISE_ID -> 2
+        SubscriptionPlans.CUSTOM_ID -> 3
+        else -> 0
+    }
 }

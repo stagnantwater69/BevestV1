@@ -59,70 +59,8 @@ class EmergencyAlertActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        showOverLockScreen()
         alert.value = read(intent)
-
-        setContent {
-            BevestTheme {
-                val content = alert.value
-                val red = LocalStatusPalette.current.emergency
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .background(red)
-                        .padding(horizontal = Spacing.xl, vertical = Spacing.xxl),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Icon(
-                        Icons.Filled.Warning,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(96.dp),
-                    )
-                    Spacer(Modifier.height(Spacing.xl))
-                    Text(
-                        content.title,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        textAlign = TextAlign.Center,
-                    )
-                    Spacer(Modifier.height(Spacing.md))
-                    Text(
-                        content.body,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White,
-                        textAlign = TextAlign.Center,
-                    )
-                    if (silenced.value) {
-                        Spacer(Modifier.height(Spacing.md))
-                        Text(
-                            "Alarm silenced",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = Color.White,
-                        )
-                    }
-                    Spacer(Modifier.height(Spacing.xxl))
-                    Button(
-                        onClick = ::respond,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = red),
-                        modifier = Modifier.fillMaxWidth().height(64.dp),
-                    ) {
-                        Text("Respond", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.height(Spacing.md))
-                    TextButton(onClick = ::stopAlarm, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                        Text("Stop alarm", style = MaterialTheme.typography.titleMedium, color = Color.White)
-                    }
-                    Text(
-                        "Volume buttons also silence the alarm",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.8f),
-                    )
-                }
-            }
-        }
+        respond()
     }
 
     /** A second emergency while this one is showing replaces it. */

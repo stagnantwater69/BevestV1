@@ -140,20 +140,20 @@ class SsoDashboardViewModel @Inject constructor(
     ) { site, _, isRefreshing ->
         site to isRefreshing
     }.flatMapLatest { (site, isRefreshing) ->
-        if (site.isNullOrBlank()) {
-            flowOf(SsoDashboardState(loading = false, noSite = true, refreshing = isRefreshing))
-        } else {
-            val workersFlow = workerRepository.observeWorkers(contractorId = null, siteId = site)
-            val thresholdsFlow = settingsRepository.observeThresholds()
-            val alertsFlow = alertRepository.observeActiveAlerts(site)
+        val workersFlow = workerRepository.observeWorkers(contractorId = null, siteId = site)
+        val thresholdsFlow = settingsRepository.observeThresholds()
+        val alertsFlow = alertRepository.observeActiveAlerts(site)
 
-            workersFlow.flatMapLatest { workersOutcome ->
-                when (workersOutcome) {
-                    is Outcome.Failure -> flowOf(
-                        SsoDashboardState(loading = false, error = workersOutcome.error.message, refreshing = isRefreshing),
-                    )
-                    is Outcome.Success -> {
-                        val workers = workersOutcome.data
+        workersFlow.flatMapLatest { workersOutcome ->
+            when (workersOutcome) {
+                is Outcome.Failure -> flowOf(
+                    SsoDashboardState(loading = false, error = workersOutcome.error.message, refreshing = isRefreshing),
+                )
+                is Outcome.Success -> {
+                    val workers = workersOutcome.data
+                    if (site.isNullOrBlank() && workers.isEmpty()) {
+                        flowOf(SsoDashboardState(loading = false, noSite = true, refreshing = isRefreshing))
+                    } else {
                         val ids = workers.map { it.workerId }
                         combine(
                             monitoringRepository.observeReadings(ids),

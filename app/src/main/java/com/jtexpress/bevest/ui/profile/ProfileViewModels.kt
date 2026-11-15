@@ -78,9 +78,10 @@ class EditProfileViewModel @Inject constructor(
 
     fun save() {
         val s = _state.value
+        val formattedPhone = Validators.formatPhoneWithCountryCode(s.phone)
         val fe = Validators.required(s.firstName, "First name")
         val le = Validators.required(s.lastName, "Last name")
-        val pe = Validators.phone(s.phone)
+        val pe = Validators.phone(formattedPhone)
         if (fe != null || le != null || pe != null) {
             _state.update { it.copy(firstNameError = fe, lastNameError = le, phoneError = pe) }
             return
@@ -88,7 +89,7 @@ class EditProfileViewModel @Inject constructor(
         val id = uid ?: return
         _state.update { it.copy(submitting = true, formError = null) }
         viewModelScope.launch {
-            when (val result = userRepository.updateProfile(id, s.firstName.trim(), s.lastName.trim(), s.phone.trim())) {
+            when (val result = userRepository.updateProfile(id, s.firstName.trim(), s.lastName.trim(), formattedPhone)) {
                 is Outcome.Success -> _state.update { it.copy(submitting = false, saved = true) }
                 is Outcome.Failure -> _state.update { it.copy(submitting = false, formError = result.error.message) }
             }

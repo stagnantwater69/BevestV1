@@ -568,7 +568,7 @@ const UserManagement = () => {
                       </td>
                       <td>
                         <span style={{ fontSize: '0.85rem', color: '#475569' }}>
-                          {user.phone || '--'}
+                          {formatPhoneWithCountryCode(user.phone) || '--'}
                         </span>
                       </td>
                       <td className="align-right">

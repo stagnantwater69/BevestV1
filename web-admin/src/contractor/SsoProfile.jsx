@@ -231,7 +231,7 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
         </div>
         <div className="ct-sso-details">
           <div className="ct-sso-detail"><FiMail /> {sso.email || '—'}</div>
-          <div className="ct-sso-detail"><FiPhone /> {sso.phone || 'No phone number'}</div>
+          <div className="ct-sso-detail"><FiPhone /> {formatPhoneWithCountryCode(sso.phone) || 'No phone number'}</div>
           <div className="ct-sso-detail">
             <FiMapPin />
             <span id="ct-sso-site-name">
@@ -277,7 +277,7 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
               </div>
               <div className="ct-row-main">
                 <span className="ct-row-title">{w.fullName}</span>
-                <span className="ct-row-sub">Worker ID: {w.id}{w.phone ? ` · ${w.phone}` : ''}</span>
+                <span className="ct-row-sub">Worker ID: {w.id}{w.phone ? ` · ${formatPhoneWithCountryCode(w.phone)}` : ''}</span>
               </div>
               <Badge
                 text={w.active ? 'Active' : 'Inactive'}

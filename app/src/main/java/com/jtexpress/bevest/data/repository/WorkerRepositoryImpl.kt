@@ -13,6 +13,7 @@ import com.jtexpress.bevest.domain.model.calculateAgeFromBirthdate
 import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.utils.AppError
 import com.jtexpress.bevest.utils.Outcome
+import com.jtexpress.bevest.utils.Validators
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
@@ -30,9 +31,11 @@ class WorkerRepositoryImpl @Inject constructor(
     private val vests get() = firestore.collection(FirebasePaths.VESTS)
 
     override fun observeWorkers(contractorId: String?, siteId: String?): Flow<Outcome<List<Worker>>> {
+        val targetSite = siteId?.trim()?.takeIf { it.isNotBlank() }
         var query: Query = workers
-        if (siteId != null) query = query.whereEqualTo("siteId", siteId)
-        else if (contractorId != null) query = query.whereEqualTo("contractorId", contractorId)
+        if (contractorId != null && targetSite == null) {
+            query = query.whereEqualTo("contractorId", contractorId)
+        }
         return combine(
             query.snapshots(),
             vests.snapshots(),
@@ -51,7 +54,19 @@ class WorkerRepositoryImpl @Inject constructor(
                     w
                 }
             }
-            Outcome.Success(list) as Outcome<List<Worker>>
+            val filtered = if (targetSite != null) {
+                val matched = list.filter { it.siteId.equals(targetSite, ignoreCase = true) }
+                matched.ifEmpty {
+                    if (contractorId != null) {
+                        list.filter { it.contractorId == contractorId }.ifEmpty { list }
+                    } else {
+                        list
+                    }
+                }
+            } else {
+                list
+            }
+            Outcome.Success(filtered) as Outcome<List<Worker>>
         }.catch { emit(Outcome.Failure(it.toAppError())) }
     }
 
@@ -135,10 +150,11 @@ class WorkerRepositoryImpl @Inject constructor(
             mapOf(
                 "firstName" to worker.firstName,
                 "lastName" to worker.lastName,
-                "phone" to worker.phone,
+                "phone" to Validators.formatPhoneWithCountryCode(worker.phone),
                 "birthday" to worker.birthday,
                 "age" to (worker.age ?: calculateAgeFromBirthdate(worker.birthday)),
                 "floorNumber" to worker.floorNumber,
+                "jobPosition" to worker.jobPosition,
                 "photoUrl" to worker.photoUrl,
                 "siteId" to worker.siteId,
                 "active" to worker.active,
@@ -183,10 +199,11 @@ class WorkerRepositoryImpl @Inject constructor(
     private fun Worker.toMap() = mapOf(
         "firstName" to firstName,
         "lastName" to lastName,
-        "phone" to phone,
+        "phone" to Validators.formatPhoneWithCountryCode(phone),
         "birthday" to birthday,
         "age" to (age ?: calculateAgeFromBirthdate(birthday)),
         "floorNumber" to floorNumber,
+        "jobPosition" to jobPosition,
         "photoUrl" to photoUrl,
         "contractorId" to contractorId,
         "siteId" to siteId,

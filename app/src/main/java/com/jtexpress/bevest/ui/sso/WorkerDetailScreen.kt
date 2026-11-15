@@ -27,7 +27,9 @@ import androidx.compose.material.icons.outlined.Apartment
 import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.Cake
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.WorkOutline
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -36,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -46,18 +49,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.MarkerState
-import com.google.maps.android.compose.rememberCameraPositionState
 import com.jtexpress.bevest.domain.model.MotionState
 import com.jtexpress.bevest.domain.model.SafetyResponseState
 import com.jtexpress.bevest.domain.model.SafetyStatus
@@ -74,6 +71,8 @@ import com.jtexpress.bevest.ui.common.ErrorState
 import com.jtexpress.bevest.ui.common.LastUpdatedLabel
 import com.jtexpress.bevest.ui.common.LivePulse
 import com.jtexpress.bevest.ui.common.MetricCard
+import com.jtexpress.bevest.ui.common.OsmMapView
+import com.jtexpress.bevest.ui.common.OsmPin
 import com.jtexpress.bevest.ui.common.ReflectiveBand
 import com.jtexpress.bevest.ui.common.SectionHeader
 import com.jtexpress.bevest.ui.common.StatusBadge
@@ -83,6 +82,7 @@ import com.jtexpress.bevest.ui.common.WifiSignalLevel
 import com.jtexpress.bevest.ui.common.WorkerAvatar
 import com.jtexpress.bevest.ui.common.detail
 import com.jtexpress.bevest.ui.common.label
+import com.jtexpress.bevest.ui.common.openExternalMap
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.BevestShapes
 import com.jtexpress.bevest.ui.theme.Elevation
@@ -235,6 +235,7 @@ fun WorkerDetailScreen(
                                 batteryLow -> "Needs charging soon"
                                 else -> "Normal"
                             },
+                            compact = true,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight(),
@@ -248,6 +249,7 @@ fun WorkerDetailScreen(
                             accent = if (!state.stale && reading != null) wifiLevel.color(palette) else null,
                             stale = state.stale,
                             supporting = if (!state.stale && reading != null && reading.wifiRssi != null) wifiLevel.label else null,
+                            compact = true,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight(),
@@ -285,11 +287,18 @@ fun WorkerDetailScreen(
                     )
 
                     // ---- Worker Info ----
-                    if (!worker.birthday.isNullOrBlank() || worker.effectiveAge != null || !worker.floorNumber.isNullOrBlank() || worker.phone.isNotBlank()) {
+                    if (!worker.jobPosition.isNullOrBlank() || !worker.birthday.isNullOrBlank() || worker.effectiveAge != null || !worker.floorNumber.isNullOrBlank() || worker.phone.isNotBlank()) {
                         SectionHeader(
                             title = "Worker details",
                             supporting = "Profile and work assignment information",
                         )
+                        if (!worker.jobPosition.isNullOrBlank()) {
+                            DetailRow(
+                                label = "Job position",
+                                value = worker.jobPosition,
+                                icon = Icons.Outlined.WorkOutline,
+                            )
+                        }
                         if (worker.phone.isNotBlank()) {
                             DetailRow(
                                 label = "Phone",
@@ -322,7 +331,12 @@ fun WorkerDetailScreen(
 
                     // ---- Location ----
                     SectionHeader("Location")
-                    LocationCard(reading, state.stale)
+                    LocationCard(
+                        reading = reading,
+                        workerName = worker.fullName.ifBlank { worker.workerId },
+                        status = state.status,
+                        stale = state.stale,
+                    )
 
                     // ---- Emergency control ----
                     if (canControl) {
@@ -495,11 +509,22 @@ private fun VitalSignsCombinedCard(
                             color = hrColor,
                         )
                     } else if (ageBracket != null) {
-                        Text(
-                            text = "Warn ≥${ageBracket.hrWarning} · Danger ≥${ageBracket.hrDanger}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text(
+                                text = "Warn ≥${ageBracket.hrWarning}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                            Text(
+                                text = "Danger ≥${ageBracket.hrDanger}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
                     }
                 }
 
@@ -562,11 +587,22 @@ private fun VitalSignsCombinedCard(
                             color = tempColor,
                         )
                     } else if (ageBracket != null) {
-                        Text(
-                            text = "Warn ≥${"%.1f".format(ageBracket.tempWarning)}° · Danger ≥${"%.1f".format(ageBracket.tempDanger)}°",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text(
+                                text = "Warn ≥${"%.1f".format(ageBracket.tempWarning)}°",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                            Text(
+                                text = "Danger ≥${"%.1f".format(ageBracket.tempDanger)}°",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
                     }
                 }
             }
@@ -583,14 +619,6 @@ private fun VitalSignsCombinedCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (age != null) {
-                    Text(
-                        text = "Age $age",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
             }
         }
     }
@@ -766,26 +794,37 @@ private fun IdentityHeader(
     ) {
         Column {
             Row(
-                Modifier.padding(Spacing.lg),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(Spacing.lg),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
                 WorkerAvatar(
                     name = name,
                     photoUrl = photoUrl,
                     status = status,
-                    size = 64.dp,
+                    size = 56.dp,
                 )
                 Column(
                     Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    Text(
-                        name,
-                        style = MaterialTheme.typography.titleLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    ) {
+                        Text(
+                            name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatusChip(status, compact = true)
+                    }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -800,6 +839,8 @@ private fun IdentityHeader(
                             vestId ?: "No vest assigned",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     Row(
@@ -810,7 +851,6 @@ private fun IdentityHeader(
                         LastUpdatedLabel(lastUpdate, stale)
                     }
                 }
-                StatusChip(status)
             }
             ReflectiveBand(thickness = 2.dp, emphasis = 0.7f)
             Text(
@@ -824,7 +864,13 @@ private fun IdentityHeader(
 }
 
 @Composable
-private fun LocationCard(reading: SensorReading?, stale: Boolean) {
+private fun LocationCard(
+    reading: SensorReading?,
+    workerName: String,
+    status: SafetyStatus,
+    stale: Boolean,
+) {
+    val context = LocalContext.current
     val palette = LocalStatusPalette.current
     val lat = reading?.latitude
     val lng = reading?.longitude
@@ -833,50 +879,78 @@ private fun LocationCard(reading: SensorReading?, stale: Boolean) {
         shape = BevestShapes.card,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shadowElevation = Elevation.card,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column {
             if (lat != null && lng != null) {
-                val position = LatLng(lat, lng)
-                val cameraPositionState = rememberCameraPositionState {
-                    this.position = CameraPosition.fromLatLngZoom(position, 16f)
+                val pin = remember(lat, lng, workerName, status, stale) {
+                    OsmPin(
+                        id = reading.workerId.ifBlank { workerName },
+                        latitude = lat,
+                        longitude = lng,
+                        title = workerName,
+                        snippet = buildString {
+                            append(status.label())
+                            if (stale) append(" · Last known position")
+                        },
+                        status = status,
+                    )
                 }
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(190.dp)
+                        .height(220.dp)
                         .clip(RoundedCornerShape(topStart = Radius.lg, topEnd = Radius.lg)),
                 ) {
-                    GoogleMap(
+                    OsmMapView(
+                        pins = listOf(pin),
                         modifier = Modifier.fillMaxSize(),
-                        cameraPositionState = cameraPositionState,
-                        uiSettings = MapUiSettings(zoomControlsEnabled = false),
-                    ) {
-                        Marker(state = MarkerState(position = position), title = "Worker")
-                    }
+                        initialZoom = 18.0,
+                        followSinglePin = true,
+                    )
                 }
                 Row(
-                    Modifier.padding(Spacing.lg).fillMaxWidth(),
+                    Modifier
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.md)
+                        .fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column {
+                    Column(Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                        ) {
+                            Text(
+                                "GPS COORDINATES",
+                                style = EyebrowStyle,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (stale) {
+                                Text(
+                                    "· Last known",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = palette.offline,
+                                )
+                            }
+                        }
                         Text(
-                            "COORDINATES",
-                            style = EyebrowStyle,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            "%.5f, %.5f".format(lat, lng),
+                            "%.6f, %.6f".format(lat, lng),
                             style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
                         )
                     }
-                    if (stale) {
-                        Text(
-                            "Last known",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = palette.offline,
+                    TextButton(
+                        onClick = { openExternalMap(context, lat, lng, workerName) },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
                         )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Open in Maps")
                     }
                 }
             } else {
@@ -897,7 +971,7 @@ private fun LocationCard(reading: SensorReading?, stale: Boolean) {
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
-                            "The vest hasn't reported a position yet.",
+                            "The vest hasn't reported a satellite position yet. Ensure the vest has a clear view of the sky.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

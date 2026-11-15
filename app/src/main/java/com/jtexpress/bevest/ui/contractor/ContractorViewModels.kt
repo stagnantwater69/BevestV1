@@ -284,10 +284,11 @@ class SsoProfileViewModel @Inject constructor(
     fun save() {
         val f = edit.value ?: return
         val uid = args.value?.second ?: return
+        val formattedPhone = Validators.formatPhoneWithCountryCode(f.phone)
         val errors = buildMap {
             Validators.required(f.firstName, "First name")?.let { put("firstName", it) }
             Validators.required(f.lastName, "Last name")?.let { put("lastName", it) }
-            Validators.phone(f.phone, required = false)?.let { put("phone", it) }
+            Validators.phone(formattedPhone, required = false)?.let { put("phone", it) }
             if (f.customSite && f.siteId.isBlank()) put("siteId", "Enter a site ID, or pick one from the list")
         }
         if (errors.isNotEmpty()) {
@@ -300,7 +301,7 @@ class SsoProfileViewModel @Inject constructor(
                 uid = uid,
                 firstName = f.firstName.trim(),
                 lastName = f.lastName.trim(),
-                phone = f.phone.trim(),
+                phone = formattedPhone,
                 siteId = f.siteId.trim().ifBlank { null },
             )
             edit.value = when (result) {
@@ -362,10 +363,12 @@ class AddSsoViewModel @Inject constructor(
 
     fun submit() {
         val s = _state.value
+        val formattedPhone = Validators.formatPhoneWithCountryCode(s.phone)
         val errors = buildMap {
             Validators.required(s.firstName, "First name")?.let { put("firstName", it) }
             Validators.required(s.lastName, "Last name")?.let { put("lastName", it) }
             Validators.email(s.email)?.let { put("email", it) }
+            Validators.phone(formattedPhone, required = false)?.let { put("phone", it) }
             Validators.password(s.tempPassword)?.let { put("tempPassword", it) }
         }
         if (errors.isNotEmpty()) {
@@ -379,7 +382,7 @@ class AddSsoViewModel @Inject constructor(
                 tempPassword = s.tempPassword,
                 firstName = s.firstName,
                 lastName = s.lastName,
-                phone = s.phone,
+                phone = formattedPhone,
                 role = UserRole.SSO,
                 contractorId = contractorId,
                 siteId = s.siteId.ifBlank { null },
@@ -435,13 +438,30 @@ class ContractorReportsViewModel @Inject constructor(
 private fun List<Worker>.namesById(): Map<String, String> =
     associate { it.workerId to it.fullName.ifBlank { it.workerId } }
 
+/** Worker ID → floor number, so incident rows can show the worker's floor number. */
+private fun List<Worker>.floorsById(): Map<String, String> =
+    mapNotNull { w -> w.floorNumber?.takeIf { it.isNotBlank() }?.let { w.workerId to it } }.toMap()
+
+enum class IncidentSortOrder {
+    LATEST,
+    OLDEST,
+}
+
 data class ReportDetailState(
     val loading: Boolean = true,
     val error: String? = null,
     val report: MonthlyReport? = null,
     val incidents: List<Incident> = emptyList(),
+    val sortOrder: IncidentSortOrder = IncidentSortOrder.LATEST,
     val workerNames: Map<String, String> = emptyMap(),
-)
+    val workerFloors: Map<String, String> = emptyMap(),
+) {
+    val sortedIncidents: List<Incident>
+        get() = when (sortOrder) {
+            IncidentSortOrder.LATEST -> incidents.sortedByDescending { it.createdAt }
+            IncidentSortOrder.OLDEST -> incidents.sortedBy { it.createdAt }
+        }
+}
 
 @HiltViewModel
 class MonthlyReportDetailViewModel @Inject constructor(
@@ -452,9 +472,14 @@ class MonthlyReportDetailViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val monthKey: String = savedStateHandle.get<String>("monthKey").orEmpty()
+    private val sortOrder = MutableStateFlow(IncidentSortOrder.LATEST)
     private val _state = MutableStateFlow(ReportDetailState())
     val state: StateFlow<ReportDetailState> = _state.asStateFlow()
     private var started = false
+
+    fun onSortChange(order: IncidentSortOrder) {
+        sortOrder.value = order
+    }
 
     fun start(contractorId: String) {
         if (started) return
@@ -465,14 +490,20 @@ class MonthlyReportDetailViewModel @Inject constructor(
             combine(
                 alertRepository.observeIncidents(contractorId = contractorId, siteId = null, limit = 500),
                 workerRepository.observeWorkers(contractorId = contractorId, siteId = null),
-            ) { outcome, workersOutcome ->
+                sortOrder,
+            ) { outcome, workersOutcome, sort ->
+                val workers = (workersOutcome as? Outcome.Success)?.data.orEmpty()
+                val floors = workers.floorsById()
                 val incidents = (outcome as? Outcome.Success)?.data.orEmpty()
                     .filter { com.jtexpress.bevest.utils.DateTimeUtils.monthKey(it.createdAt) == monthKey }
+                    .map { inc -> if (inc.floorNumber.isNullOrBlank()) inc.copy(floorNumber = floors[inc.workerId]) else inc }
                 ReportDetailState(
                     loading = false,
                     report = report,
                     incidents = incidents,
-                    workerNames = (workersOutcome as? Outcome.Success)?.data.orEmpty().namesById(),
+                    sortOrder = sort,
+                    workerNames = workers.namesById(),
+                    workerFloors = floors,
                 )
             }.collect { _state.value = it }
         }
@@ -484,9 +515,18 @@ data class IncidentHistoryState(
     val error: String? = null,
     val incidents: List<Incident> = emptyList(),
     val severityFilter: AlertSeverity? = null,
+    val sortOrder: IncidentSortOrder = IncidentSortOrder.LATEST,
     val workerNames: Map<String, String> = emptyMap(),
+    val workerFloors: Map<String, String> = emptyMap(),
 ) {
-    val visible get() = incidents.filter { severityFilter == null || it.severity == severityFilter }
+    val visible: List<Incident>
+        get() {
+            val filtered = incidents.filter { severityFilter == null || it.severity == severityFilter }
+            return when (sortOrder) {
+                IncidentSortOrder.LATEST -> filtered.sortedByDescending { it.createdAt }
+                IncidentSortOrder.OLDEST -> filtered.sortedBy { it.createdAt }
+            }
+        }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -498,10 +538,12 @@ class ContractorIncidentsViewModel @Inject constructor(
 
     private val contractorId = MutableStateFlow<String?>(null)
     private val filter = MutableStateFlow<AlertSeverity?>(null)
+    private val sortOrder = MutableStateFlow(IncidentSortOrder.LATEST)
     private var started = false
 
     fun start(id: String) { if (!started) { started = true; contractorId.value = id } }
     fun onFilter(severity: AlertSeverity?) { filter.value = severity }
+    fun onSortChange(order: IncidentSortOrder) { sortOrder.value = order }
 
     val state: StateFlow<IncidentHistoryState> = contractorId.flatMapLatest { id ->
         if (id == null) return@flatMapLatest flowOf(IncidentHistoryState())
@@ -509,15 +551,27 @@ class ContractorIncidentsViewModel @Inject constructor(
             reportRepository.observeIncidentHistory(id),
             workerRepository.observeWorkers(contractorId = id, siteId = null),
             filter,
-        ) { outcome, workersOutcome, f ->
+            sortOrder,
+        ) { outcome, workersOutcome, f, sort ->
+            val workers = (workersOutcome as? Outcome.Success)?.data.orEmpty()
+            val floors = workers.floorsById()
             when (outcome) {
                 is Outcome.Success -> IncidentHistoryState(
                     loading = false,
-                    incidents = outcome.data,
+                    incidents = outcome.data.map { inc ->
+                        if (inc.floorNumber.isNullOrBlank()) inc.copy(floorNumber = floors[inc.workerId]) else inc
+                    },
                     severityFilter = f,
-                    workerNames = (workersOutcome as? Outcome.Success)?.data.orEmpty().namesById(),
+                    sortOrder = sort,
+                    workerNames = workers.namesById(),
+                    workerFloors = floors,
                 )
-                is Outcome.Failure -> IncidentHistoryState(loading = false, error = outcome.error.message, severityFilter = f)
+                is Outcome.Failure -> IncidentHistoryState(
+                    loading = false,
+                    error = outcome.error.message,
+                    severityFilter = f,
+                    sortOrder = sort,
+                )
             }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), IncidentHistoryState())

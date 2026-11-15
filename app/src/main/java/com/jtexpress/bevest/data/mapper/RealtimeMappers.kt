@@ -41,22 +41,36 @@ private fun DataSnapshot.long(key: String): Long =
 /** Maps the agreed IoT payload (plan section 29). Confirm field names with the firmware team. */
 fun DataSnapshot.toSensorReading(workerId: String): SensorReading? {
     if (!exists()) return null
+    val rawOnline = bool("online")
+    val fall = bool("fallDetected")
+    val motion = MotionState.fromRaw(str("motionState"))
+    val response = SafetyResponseState.fromRaw(str("safetyResponse"))
     val effectiveTimestamp = long("timestampServer").takeIf { it > 1_000_000_000_000L }
         ?: long("timestamp").takeIf { it > 1_000_000_000_000L }
         ?: long("lastSeenServer").takeIf { it > 1_000_000_000_000L }
-        ?: 0L
+        ?: long("lastSeen").takeIf { it > 1_000_000_000_000L }
+        ?: if (rawOnline || fall || motion == MotionState.FALL_DETECTED || response != SafetyResponseState.NONE) {
+            System.currentTimeMillis()
+        } else {
+            0L
+        }
+    val rawLat = dbl("latitude") ?: dbl("gps_lat") ?: dbl("lat")
+    val rawLng = dbl("longitude") ?: dbl("gps_lng") ?: dbl("lng")
+    val hasValidCoords = rawLat != null && rawLng != null &&
+        (kotlin.math.abs(rawLat) > 0.0001 || kotlin.math.abs(rawLng) > 0.0001)
+
     return SensorReading(
         workerId = workerId,
         vestId = str("vestId").orEmpty(),
         heartRate = int("heartRate"),
         temperature = dbl("temperature"),
-        motionState = MotionState.fromRaw(str("motionState")),
-        fallDetected = bool("fallDetected"),
-        latitude = dbl("latitude"),
-        longitude = dbl("longitude"),
+        motionState = if (fall && motion != MotionState.FALL_DETECTED) MotionState.FALL_DETECTED else motion,
+        fallDetected = fall || motion == MotionState.FALL_DETECTED,
+        latitude = if (hasValidCoords) rawLat else null,
+        longitude = if (hasValidCoords) rawLng else null,
         batteryPercent = int("battery"),
         wifiRssi = int("wifiRssi") ?: int("rssi"),
-        safetyResponse = SafetyResponseState.fromRaw(str("safetyResponse")),
+        safetyResponse = response,
         timestamp = effectiveTimestamp,
     )
 }

@@ -98,12 +98,26 @@ fun ContractorSubscriptionScreen(
                 verticalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
                 state.message?.let { SuccessNote(it, gutter) }
+                if (state.pendingPlan == null && state.custom == null) {
+                    state.saveError?.let { ErrorNote(it, gutter) }
+                }
 
                 CurrentPlanCard(state, gutter)
 
                 SectionHeader(
                     title = "Available plans",
-                    supporting = "Scale your safety monitoring by choosing or changing your package",
+                    supporting = when {
+                        state.canChangePlan ->
+                            "Scale your safety monitoring by choosing or changing your package"
+                        state.subscription?.planId == SubscriptionPlans.BUSINESS_ID -> {
+                            val endDate = state.subscription.renewDate?.let(DateTimeUtils::formatDate) ?: "its renewal date"
+                            "You can upgrade to Enterprise or Custom tier at any time. Other changes are available after $endDate."
+                        }
+                        else -> {
+                            val endDate = state.subscription?.renewDate?.let(DateTimeUtils::formatDate) ?: "its renewal date"
+                            "You can only change or downgrade your subscription tier after your current plan ends on $endDate."
+                        }
+                    },
                     modifier = gutter,
                 )
                 FilterRow(
@@ -118,12 +132,17 @@ fun ContractorSubscriptionScreen(
                         cycle = state.cycle,
                         current = state.isCurrent(plan.id),
                         currentSelection = state.isCurrentSelection(plan.id),
+                        canSelect = state.canSwitchTo(plan.id),
+                        isUpgrade = state.isUpgradeFromBusiness(plan.id),
+                        isDowngrade = state.subscription?.isDowngradeTo(plan.id) == true,
                         onSelect = { viewModel.selectPlan(plan) },
                         modifier = gutter,
                     )
                 }
                 CustomPlanCard(
                     current = state.subscription?.takeIf { it.isCustom },
+                    canSelect = state.canSwitchTo(SubscriptionPlans.CUSTOM_ID),
+                    isUpgrade = state.isUpgradeFromBusiness(SubscriptionPlans.CUSTOM_ID),
                     onConfigure = viewModel::openCustom,
                     modifier = gutter,
                 )
@@ -279,6 +298,9 @@ private fun FixedPlanCard(
     cycle: BillingCycle,
     current: Boolean,
     currentSelection: Boolean,
+    canSelect: Boolean,
+    isUpgrade: Boolean,
+    isDowngrade: Boolean,
     onSelect: () -> Unit,
     modifier: Modifier,
 ) {
@@ -307,17 +329,37 @@ private fun FixedPlanCard(
             }
         },
         action = {
-            if (currentSelection) {
-                SecondaryButton(text = "Current plan", onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth())
-            } else {
-                PrimaryButton(text = "Get ${plan.name}", onClick = onSelect, modifier = Modifier.fillMaxWidth())
+            when {
+                currentSelection -> SecondaryButton(
+                    text = "Current plan",
+                    onClick = {},
+                    enabled = false,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                !canSelect -> SecondaryButton(
+                    text = if (isDowngrade) "Downgrade locked until plan ends" else "Locked until plan ends",
+                    onClick = {},
+                    enabled = false,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                else -> PrimaryButton(
+                    text = if (isUpgrade) "Upgrade to ${plan.name}" else "Get ${plan.name}",
+                    onClick = onSelect,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         },
     )
 }
 
 @Composable
-private fun CustomPlanCard(current: Subscription?, onConfigure: () -> Unit, modifier: Modifier) {
+private fun CustomPlanCard(
+    current: Subscription?,
+    canSelect: Boolean,
+    isUpgrade: Boolean,
+    onConfigure: () -> Unit,
+    modifier: Modifier,
+) {
     PlanCardFrame(
         tag = "SCALE",
         current = current != null,
@@ -336,11 +378,24 @@ private fun CustomPlanCard(current: Subscription?, onConfigure: () -> Unit, modi
             )
         },
         action = {
-            PrimaryButton(
-                text = if (current != null) "Adjust custom plan" else "Configure custom tier",
-                onClick = onConfigure,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (!canSelect) {
+                SecondaryButton(
+                    text = if (current != null) "Current plan" else "Locked until plan ends",
+                    onClick = {},
+                    enabled = false,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                PrimaryButton(
+                    text = when {
+                        current != null -> "Adjust custom plan"
+                        isUpgrade -> "Upgrade to custom tier"
+                        else -> "Configure custom tier"
+                    },
+                    onClick = onConfigure,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         },
     )
 }

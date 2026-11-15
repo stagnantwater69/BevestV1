@@ -7,10 +7,11 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
-  collection, query, where, orderBy, limit, onSnapshot, doc,
+  collection, query, where, orderBy, limit, onSnapshot, doc, updateDoc,
 } from 'firebase/firestore';
 import { ref, onValue } from 'firebase/database';
 import { db, rtdb } from '../firebase';
+import { formatPhoneWithCountryCode } from '../PhoneInput';
 
 // ------------------------------------------------------------------ constants
 
@@ -54,7 +55,7 @@ export const ALERT_TYPE_LABEL = {
   TEMPERATURE_WARNING: 'High body temperature',
   FALL_DETECTED: 'Fall detected',
   INACTIVITY: 'No movement',
-  EMERGENCY_REQUEST: 'Help requested',
+  EMERGENCY_REQUEST: 'Worker Trigger',
   NO_SAFETY_RESPONSE: 'No response to check',
   VEST_OFFLINE: 'Vest offline',
   LOW_BATTERY: 'Low vest battery',
@@ -65,7 +66,7 @@ export const ALERT_TYPE_DETAIL = {
   TEMPERATURE_WARNING: 'Body temperature stayed above the safe range.',
   FALL_DETECTED: "The vest's motion sensor registered a fall.",
   INACTIVITY: 'No movement for longer than the inactivity limit.',
-  EMERGENCY_REQUEST: 'The worker pressed the safety button on their vest.',
+  EMERGENCY_REQUEST: 'Worker Trigger. Please check with Worker.',
   NO_SAFETY_RESPONSE: 'The worker did not acknowledge a safety check.',
   VEST_OFFLINE: 'The vest stopped sending readings.',
   LOW_BATTERY: 'The vest battery needs charging to keep monitoring.',
@@ -79,11 +80,11 @@ export const MOTION_LABEL = {
 };
 
 export const RESPONSE_LABEL = {
-  NONE: 'No check running',
+  NONE: 'No Actions',
   WAITING: 'Waiting for worker',
-  ACKNOWLEDGED: 'Worker responded',
+  ACKNOWLEDGED: 'Worker has Responded',
   EMERGENCY_REQUESTED: 'Help requested',
-  NO_RESPONSE: 'No response',
+  NO_RESPONSE: 'Worker is in danger, please check with worker',
   ESCALATED: 'Escalated',
 };
 
@@ -160,7 +161,9 @@ export const toWorker = (snap) => {
     firstName,
     lastName,
     fullName: `${firstName} ${lastName}`.trim() || snap.id,
-    phone: d.phone || '',
+    phone: formatPhoneWithCountryCode(d.phone || ''),
+    floorNumber: (d.floorNumber && String(d.floorNumber).trim()) || null,
+    jobPosition: (d.jobPosition && String(d.jobPosition).trim()) || null,
     photoUrl: d.photoUrl || null,
     siteId: d.siteId || null,
     assignedVestId: d.assignedVestId || null,
@@ -170,22 +173,53 @@ export const toWorker = (snap) => {
 
 export const toIncident = (snap) => {
   const d = snap.data();
+  const rawNotes = (d.resolutionNotes && String(d.resolutionNotes).trim()) || null;
+  const rawOutcome = (d.outcome && String(d.outcome).trim()) || null;
+  const isResolvedStatus = upper(d.status, '') === 'RESOLVED' || Boolean(d.resolvedAt);
+  const effectiveNotes = rawNotes || rawOutcome || (isResolvedStatus ? 'Resolved' : null);
   return {
     id: snap.id,
     workerId: d.workerId || '',
     vestId: d.vestId || '',
     alertId: d.alertId || null,
     siteId: d.siteId || null,
+    floorNumber: (d.floorNumber && String(d.floorNumber).trim()) || null,
     type: upper(d.type, 'VEST_OFFLINE'),
     severity: upper(d.severity, 'WARNING'),
+    status: upper(d.status, effectiveNotes ? 'RESOLVED' : 'ACTIVE'),
+    resolved: Boolean(effectiveNotes || isResolvedStatus),
     heartRate: num(d.heartRate),
     temperature: num(d.temperature),
     latitude: num(d.latitude),
     longitude: num(d.longitude),
     createdAt: toMillis(d.createdAt),
-    outcome: d.outcome || null,
-    resolutionNotes: d.resolutionNotes || null,
+    outcome: effectiveNotes,
+    resolutionNotes: effectiveNotes,
     resolvedBy: d.resolvedBy || null,
+    resolvedAt: toMillis(d.resolvedAt) || null,
+  };
+};
+
+export const toAlertRecord = (snap) => {
+  const d = snap.data();
+  const status = upper(d.status, 'ACTIVE');
+  const rawNotes = (d.resolutionNotes && String(d.resolutionNotes).trim()) || null;
+  const isResolved = status === 'RESOLVED' || Boolean(d.resolvedAt) || Boolean(rawNotes);
+  return {
+    id: snap.id,
+    workerId: d.workerId || '',
+    vestId: d.vestId || '',
+    incidentId: d.incidentId || null,
+    siteId: d.siteId || null,
+    floorNumber: (d.floorNumber && String(d.floorNumber).trim()) || null,
+    type: upper(d.type, 'VEST_OFFLINE'),
+    severity: upper(d.severity, 'WARNING'),
+    status,
+    resolved: isResolved,
+    resolutionNotes: rawNotes || (isResolved ? 'Resolved' : null),
+    resolvedBy: d.resolvedBy || null,
+    resolvedAt: toMillis(d.resolvedAt) || null,
+    createdAt: toMillis(d.createdAt),
   };
 };
 
@@ -199,7 +233,7 @@ export const toUser = (snap) => {
     lastName,
     fullName: `${firstName} ${lastName}`.trim(),
     email: d.email || '',
-    phone: d.phone || '',
+    phone: formatPhoneWithCountryCode(d.phone || ''),
     siteId: d.siteId || null,
     active: d.active !== false,
   };
@@ -207,17 +241,24 @@ export const toUser = (snap) => {
 
 const toReading = (val) => {
   if (!val) return null;
+  const rawLat = num(val.latitude) ?? num(val.gps_lat) ?? num(val.lat);
+  const rawLng = num(val.longitude) ?? num(val.gps_lng) ?? num(val.lng);
+  const hasValidGps = rawLat != null && rawLng != null
+    && (Math.abs(rawLat) > 0.0001 || Math.abs(rawLng) > 0.0001);
+  const ts = num(val.timestampServer) || num(val.timestamp) || num(val.lastSeenServer) || num(val.lastSeen) || 0;
   return {
     vestId: val.vestId || '',
+    workerId: val.workerId || val.assignedWorkerId || '',
     heartRate: num(val.heartRate),
     temperature: num(val.temperature),
     motionState: upper(val.motionState, 'UNKNOWN'),
     fallDetected: val.fallDetected === true,
-    latitude: num(val.latitude),
-    longitude: num(val.longitude),
+    latitude: hasValidGps ? rawLat : null,
+    longitude: hasValidGps ? rawLng : null,
+    gpsSats: num(val.gpsSats),
     battery: num(val.battery),
     safetyResponse: upper(val.safetyResponse, 'NONE'),
-    timestamp: num(val.timestamp) || 0,
+    timestamp: ts,
   };
 };
 
@@ -274,7 +315,7 @@ export function buildMonthlyReports(incidents, activeWorkers, months = 6) {
 // ---------------------------------------------------------------------- hooks
 
 /**
- * Live contractor data: workers, their vest readings, incidents and thresholds.
+ * Live contractor data: workers, their vest readings, incidents (merged with alerts) and thresholds.
  * Equivalent to ContractorDashboardViewModel + WorkerDirectoryViewModel combined.
  */
 export function useContractorData(contractorId) {
@@ -286,7 +327,8 @@ export function useContractorData(contractorId) {
   // stale worker.assignedVestId links left behind by deleted / returned vests.
   const [vestOwners, setVestOwners] = useState(null);
 
-  const [incidents, setIncidents] = useState([]);
+  const [rawIncidents, setRawIncidents] = useState([]);
+  const [alertsMap, setAlertsMap] = useState({});
   const [incidentsLoading, setIncidentsLoading] = useState(true);
   const [incidentsError, setIncidentsError] = useState(null);
 
@@ -351,7 +393,7 @@ export function useContractorData(contractorId) {
     return onSnapshot(
       q,
       (qs) => {
-        setIncidents(qs.docs.map(toIncident).sort((a, b) => b.createdAt - a.createdAt));
+        setRawIncidents(qs.docs.map(toIncident));
         setIncidentsLoading(false);
         setIncidentsError(null);
       },
@@ -362,6 +404,69 @@ export function useContractorData(contractorId) {
       },
     );
   }, [contractorId]);
+
+  // Also subscribe to the contractor's alerts so that any alert resolved by an SSO
+  // (with resolutionNotes) immediately marks the linked incident as resolved/closed.
+  useEffect(() => {
+    if (!contractorId) return undefined;
+    const q = query(
+      collection(db, 'alerts'),
+      where('contractorId', '==', contractorId),
+      limit(500),
+    );
+    return onSnapshot(
+      q,
+      (qs) => {
+        const byId = {};
+        qs.docs.forEach((d) => {
+          byId[d.id] = toAlertRecord(d);
+        });
+        setAlertsMap(byId);
+      },
+      (err) => {
+        console.warn('Contractor alerts listener warning:', err.message);
+      },
+    );
+  }, [contractorId]);
+
+  // Merge incidents with alerts and worker floor numbers so resolved alerts in SSO always show as Closed with Resolution Notes
+  const incidents = useMemo(() => {
+    const workerFloorById = {};
+    workers.forEach((w) => {
+      if (w.floorNumber) workerFloorById[w.id] = w.floorNumber;
+    });
+    return rawIncidents.map((inc) => {
+      const linkedAlert = alertsMap[inc.alertId || inc.id] || alertsMap[inc.id];
+      const floorNumber = inc.floorNumber || linkedAlert?.floorNumber || workerFloorById[inc.workerId] || null;
+      if (linkedAlert && linkedAlert.resolved) {
+        const mergedNotes = inc.resolutionNotes || linkedAlert.resolutionNotes || inc.outcome || 'Resolved';
+        // Backfill Firestore incident doc if it was still unclosed in Firestore
+        if (!inc.resolved) {
+          updateDoc(doc(db, 'incidents', inc.id), {
+            status: 'RESOLVED',
+            outcome: mergedNotes,
+            resolutionNotes: mergedNotes,
+            resolvedBy: inc.resolvedBy || linkedAlert.resolvedBy || null,
+            ...(floorNumber ? { floorNumber } : {}),
+          }).catch(() => {});
+        }
+        return {
+          ...inc,
+          floorNumber,
+          status: 'RESOLVED',
+          resolved: true,
+          outcome: mergedNotes,
+          resolutionNotes: mergedNotes,
+          resolvedBy: inc.resolvedBy || linkedAlert.resolvedBy || null,
+          resolvedAt: inc.resolvedAt || linkedAlert.resolvedAt || null,
+        };
+      }
+      return {
+        ...inc,
+        floorNumber,
+      };
+    }).sort((a, b) => b.createdAt - a.createdAt);
+  }, [rawIncidents, alertsMap, workers]);
 
   useEffect(() => onSnapshot(
     doc(db, 'settings', 'thresholds'),
@@ -378,21 +483,49 @@ export function useContractorData(contractorId) {
     () => setThresholds(DEFAULT_THRESHOLDS),
   ), []);
 
-  // One realtime listener per worker, mirroring MonitoringRepository.observeReadings.
-  const workerIdsKey = workers.map((w) => w.id).sort().join('|');
+  // Subscribe to liveReadings, liveReadingsByVest, and vestsLive so both worker-keyed and vest-keyed telemetry + GPS resolve cleanly.
+  const [vestReadings, setVestReadings] = useState({});
   useEffect(() => {
-    const ids = workerIdsKey ? workerIdsKey.split('|') : [];
-    const unsubs = ids.map((id) => onValue(
-      ref(rtdb, `liveReadings/${id}`),
-      (snap) => setReadings((prev) => ({ ...prev, [id]: toReading(snap.val()) })),
-      () => setReadings((prev) => ({ ...prev, [id]: null })),
-    ));
-    return () => unsubs.forEach((u) => u());
-  }, [workerIdsKey]);
+    const u1 = onValue(
+      ref(rtdb, 'liveReadings'),
+      (snap) => {
+        const val = snap.val() || {};
+        const parsed = {};
+        Object.keys(val).forEach((k) => { parsed[k] = toReading(val[k]); });
+        setReadings(parsed);
+      },
+      () => {},
+    );
+    const u2 = onValue(
+      ref(rtdb, 'liveReadingsByVest'),
+      (snap) => {
+        const val = snap.val() || {};
+        const parsed = {};
+        Object.keys(val).forEach((k) => { parsed[k] = toReading(val[k]); });
+        setVestReadings(parsed);
+      },
+      () => {},
+    );
+    return () => { u1(); u2(); };
+  }, []);
 
   const liveWorkers = useMemo(() => validatedWorkers
     .map((w) => {
-      const reading = readings[w.id] || null;
+      const direct = readings[w.id] || null;
+      const byVest = (w.assignedVestId && vestReadings[w.assignedVestId]) || null;
+      let reading = direct || byVest;
+      if (direct && byVest) {
+        const primary = (byVest.timestamp >= direct.timestamp) ? byVest : direct;
+        const secondary = (primary === byVest) ? direct : byVest;
+        reading = {
+          ...primary,
+          heartRate: primary.heartRate ?? secondary.heartRate,
+          temperature: primary.temperature ?? secondary.temperature,
+          latitude: primary.latitude ?? secondary.latitude,
+          longitude: primary.longitude ?? secondary.longitude,
+          battery: primary.battery ?? secondary.battery,
+        };
+      }
       return {
         worker: w,
         reading,
@@ -400,7 +533,7 @@ export function useContractorData(contractorId) {
         stale: isStale(reading, thresholds, now),
       };
     })
-    .sort((a, b) => a.worker.fullName.localeCompare(b.worker.fullName)), [validatedWorkers, readings, thresholds, now]);
+    .sort((a, b) => a.worker.fullName.localeCompare(b.worker.fullName)), [validatedWorkers, readings, vestReadings, thresholds, now]);
 
   return {
     loading: workersLoading || incidentsLoading,

@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jtexpress.bevest.domain.model.Alert
 import com.jtexpress.bevest.domain.model.AlertSeverity
 import com.jtexpress.bevest.domain.model.AlertStatus
+import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.ui.common.BevestScaffold
 import com.jtexpress.bevest.ui.common.ConfirmationDialog
 import com.jtexpress.bevest.ui.common.DangerButton
@@ -41,6 +42,8 @@ import com.jtexpress.bevest.ui.common.DetailRow
 import com.jtexpress.bevest.ui.common.ErrorState
 import com.jtexpress.bevest.ui.common.FormField
 import com.jtexpress.bevest.ui.common.FormSection
+import com.jtexpress.bevest.ui.common.OsmMapView
+import com.jtexpress.bevest.ui.common.OsmPin
 import com.jtexpress.bevest.ui.common.PrimaryButton
 import com.jtexpress.bevest.ui.common.ReflectiveBand
 import com.jtexpress.bevest.ui.common.SecondaryButton
@@ -53,19 +56,14 @@ import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.BevestShapes
 import com.jtexpress.bevest.ui.theme.Elevation
 import com.jtexpress.bevest.ui.theme.EyebrowStyle
-import com.jtexpress.bevest.ui.theme.IconSize
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Spacing
 import com.jtexpress.bevest.utils.DateTimeUtils
 
 /**
- * Alert detail — the screen someone opens from a push notification when a worker is in
- * trouble, so it is designed to be understood in a few seconds while walking.
- *
- * The previous version was a stack of `Text("Severity: DANGER")` lines: every fact given
- * identical weight, machine constants for values, and the actions buried underneath.
- * This version leads with a headline that states what happened in words, keeps the
- * timeline of the response in one place, and puts the actions where a thumb is.
+ * Alert detail — the screen someone opens from a push notification or pop-up when a worker
+ * is in trouble. The SSO must first Acknowledge the alert before they can enter the
+ * required Resolution Notes and Mark the alert as resolved.
  */
 @Composable
 fun AlertDetailScreen(
@@ -78,6 +76,7 @@ fun AlertDetailScreen(
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val palette = LocalStatusPalette.current
     var notes by remember { mutableStateOf("") }
+    var notesError by remember { mutableStateOf<String?>(null) }
     var confirmResolve by remember { mutableStateOf(false) }
 
     BevestScaffold(title = "Alert", onBack = onBack) { padding ->
@@ -111,8 +110,18 @@ fun AlertDetailScreen(
                     Column {
                         DetailRow(
                             label = "Worker",
-                            value = alert.workerId,
+                            value = state.workerName?.let { "$it (${alert.workerId})" } ?: alert.workerId,
                             icon = BevestIcons.Workers,
+                        )
+                        DetailRow(
+                            label = "Site name",
+                            value = state.siteName?.takeIf { it.isNotBlank() } ?: "Not recorded",
+                            icon = BevestIcons.Location,
+                        )
+                        DetailRow(
+                            label = "Floor number",
+                            value = state.floorNumber?.takeIf { it.isNotBlank() } ?: "Not recorded",
+                            icon = BevestIcons.Location,
                         )
                         DetailRow(
                             label = "Vest",
@@ -124,6 +133,13 @@ fun AlertDetailScreen(
                                 label = "Message from the vest",
                                 value = alert.message,
                                 icon = BevestIcons.Signal,
+                            )
+                        }
+                        if (alert.status == AlertStatus.RESOLVED && !alert.resolutionNotes.isNullOrBlank()) {
+                            DetailRow(
+                                label = "Resolution Notes",
+                                value = alert.resolutionNotes,
+                                icon = BevestIcons.Reports,
                             )
                         }
                     }
@@ -153,18 +169,44 @@ fun AlertDetailScreen(
                     }
 
                     if (alert.status != AlertStatus.RESOLVED) {
+                        val isAcknowledged = alert.status == AlertStatus.ACKNOWLEDGED
                         FormSection(title = "Close this alert") {
+                            if (!isAcknowledged) {
+                                Text(
+                                    text = "Please acknowledge the alert first before resolving it.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                             FormField(
                                 value = notes,
-                                onValueChange = { notes = it },
-                                label = "Resolution notes",
-                                helper = "What did you find, and what did you do?",
+                                onValueChange = {
+                                    notes = it
+                                    if (it.isNotBlank()) notesError = null
+                                },
+                                label = "Resolution Notes",
+                                helper = if (isAcknowledged) {
+                                    "Required — what did you find, and what did you do?"
+                                } else {
+                                    "Acknowledge the alert above first to enter resolution notes."
+                                },
+                                error = notesError,
+                                required = true,
+                                enabled = isAcknowledged,
                                 singleLine = false,
                                 imeAction = ImeAction.Done,
                             )
                             DangerButton(
                                 text = "Mark resolved",
-                                onClick = { confirmResolve = true },
+                                onClick = {
+                                    if (notes.trim().isEmpty()) {
+                                        notesError = "Resolution Notes are required to mark this alert as resolved."
+                                    } else {
+                                        notesError = null
+                                        confirmResolve = true
+                                    }
+                                },
+                                enabled = isAcknowledged && notes.trim().isNotEmpty(),
                                 loading = state.working,
                             )
                         }
@@ -180,9 +222,17 @@ fun AlertDetailScreen(
     if (confirmResolve) {
         ConfirmationDialog(
             title = "Resolve this alert?",
-            message = "The alert is archived, not deleted. Make sure the worker is safe first.",
+            message = "The alert is archived with your resolution notes. Make sure the worker is safe first.",
             confirmLabel = "Resolve",
-            onConfirm = { confirmResolve = false; viewModel.resolve(actorId, notes) },
+            onConfirm = {
+                confirmResolve = false
+                val cleanNotes = notes.trim()
+                if (cleanNotes.isNotEmpty()) {
+                    viewModel.resolve(actorId, cleanNotes)
+                } else {
+                    notesError = "Resolution Notes are required to mark this alert as resolved."
+                }
+            },
             onDismiss = { confirmResolve = false },
         )
     }
@@ -267,10 +317,6 @@ private fun AlertHeadline(alert: Alert, severityColor: androidx.compose.ui.graph
 
 /**
  * The alert's life so far, as a vertical timeline.
- *
- * A timeline rather than three separate timestamp rows because the *gaps* are the
- * interesting part — how long the alert sat unacknowledged is exactly the thing a safety
- * review will ask about, and a list of dates buries it.
  */
 @Composable
 private fun ResponseTimeline(alert: Alert) {
@@ -335,11 +381,6 @@ private fun ResponseTimeline(alert: Alert) {
 
 /**
  * Incident detail — the permanent record written after an alert is closed.
- *
- * Unlike an alert, this is read long after the fact, usually during a safety review. It
- * therefore leads with the readings captured at the moment of the incident, which are
- * the evidence, and treats the outcome as the thing being recorded rather than an
- * afterthought at the bottom of a form.
  */
 @Composable
 fun IncidentDetailScreen(
@@ -350,7 +391,6 @@ fun IncidentDetailScreen(
 ) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val palette = LocalStatusPalette.current
-    var outcome by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf(false) }
 
@@ -369,7 +409,9 @@ fun IncidentDetailScreen(
                     AlertSeverity.DANGER -> palette.danger
                     AlertSeverity.EMERGENCY -> palette.emergency
                 }
-                val open = incident.outcome == null
+                val resolvedNotes = incident.resolutionNotes?.takeIf { it.isNotBlank() }
+                    ?: incident.outcome?.takeIf { it.isNotBlank() }
+                val open = resolvedNotes == null
 
                 Column(
                     Modifier
@@ -458,8 +500,16 @@ fun IncidentDetailScreen(
                         )
                         DetailRow(
                             label = "Worker",
-                            value = incident.workerId,
+                            value = state.worker?.fullName?.takeIf { it.isNotBlank() } ?: incident.workerId,
                             icon = BevestIcons.Workers,
+                        )
+                        DetailRow(
+                            label = "Floor number",
+                            value = (incident.floorNumber?.takeIf { it.isNotBlank() }
+                                ?: state.worker?.floorNumber?.takeIf { it.isNotBlank() })
+                                ?.let { "Floor $it" }
+                                ?: "Not recorded",
+                            icon = BevestIcons.Location,
                         )
                         DetailRow(
                             label = "Vest",
@@ -468,28 +518,60 @@ fun IncidentDetailScreen(
                         )
                     }
 
-                    // ---- Outcome ----
-                    SectionHeader("Outcome")
+                    if (incident.latitude != null && incident.longitude != null) {
+                        val incidentStatus = when (incident.severity) {
+                            AlertSeverity.WARNING -> SafetyStatus.WARNING
+                            AlertSeverity.DANGER -> SafetyStatus.DANGER
+                            AlertSeverity.EMERGENCY -> SafetyStatus.EMERGENCY
+                        }
+                        Surface(
+                            shape = BevestShapes.card,
+                            color = MaterialTheme.colorScheme.surface,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant,
+                            ),
+                            shadowElevation = Elevation.card,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp)
+                                .clip(BevestShapes.card),
+                        ) {
+                            OsmMapView(
+                                pins = listOf(
+                                    OsmPin(
+                                        id = incident.incidentId,
+                                        latitude = incident.latitude,
+                                        longitude = incident.longitude,
+                                        title = state.worker?.fullName?.takeIf { it.isNotBlank() } ?: incident.workerId,
+                                        snippet = incident.type.label(),
+                                        status = incidentStatus,
+                                    ),
+                                ),
+                                modifier = Modifier.fillMaxSize(),
+                                initialZoom = 18.0,
+                                followSinglePin = false,
+                            )
+                        }
+                    }
+
+                    // ---- Resolution Notes ----
+                    SectionHeader("Resolution Notes")
                     if (open) {
                         FormSection(title = "Record what happened") {
                             FormField(
-                                value = outcome,
-                                onValueChange = { outcome = it },
-                                label = "Outcome",
-                                helper = "For example: worker safe, false alarm, taken to first aid",
-                                required = true,
-                            )
-                            FormField(
                                 value = notes,
                                 onValueChange = { notes = it },
-                                label = "Resolution notes",
+                                label = "Resolution Notes",
+                                helper = "What did you find, and what did you do?",
+                                required = true,
                                 singleLine = false,
                                 imeAction = ImeAction.Done,
                             )
                             PrimaryButton(
                                 text = "Resolve incident",
                                 onClick = { confirm = true },
-                                enabled = outcome.isNotBlank(),
+                                enabled = notes.trim().isNotEmpty(),
                                 loading = state.working,
                                 loadingText = "Saving…",
                             )
@@ -497,15 +579,10 @@ fun IncidentDetailScreen(
                     } else {
                         Column {
                             DetailRow(
-                                label = "Outcome",
-                                value = incident.outcome.orEmpty(),
-                                icon = BevestIcons.forStatus(
-                                    com.jtexpress.bevest.domain.model.SafetyStatus.NORMAL,
-                                ),
+                                label = "Resolution Notes",
+                                value = resolvedNotes.orEmpty(),
+                                icon = BevestIcons.Reports,
                             )
-                            incident.resolutionNotes?.takeIf { it.isNotBlank() }?.let {
-                                DetailRow(label = "Notes", value = it, icon = BevestIcons.Reports)
-                            }
                             incident.resolvedBy?.takeIf { it.isNotBlank() }?.let {
                                 DetailRow(label = "Resolved by", value = it, icon = BevestIcons.Officer)
                             }
@@ -522,9 +599,15 @@ fun IncidentDetailScreen(
     if (confirm) {
         ConfirmationDialog(
             title = "Resolve this incident?",
-            message = "Incident history is permanent. This records the outcome and notes.",
+            message = "Incident history is permanent. This records the resolution notes.",
             confirmLabel = "Resolve",
-            onConfirm = { confirm = false; viewModel.resolve(actorId, outcome, notes) },
+            onConfirm = {
+                confirm = false
+                val cleanNotes = notes.trim()
+                if (cleanNotes.isNotEmpty()) {
+                    viewModel.resolve(actorId, cleanNotes, cleanNotes)
+                }
+            },
             onDismiss = { confirm = false },
         )
     }

@@ -51,11 +51,11 @@ service cloud.firestore {
     }
 
     function myContractorId() {
-      return userDoc().contractorId;
+      return userDoc().get('contractorId', request.auth.uid);
     }
 
     function mySiteId() {
-      return userDoc().siteId;
+      return userDoc().get('siteId', null);
     }
 
     // ---- users ----
@@ -102,11 +102,11 @@ service cloud.firestore {
       allow read: if isAdmin()
                   || isDeveloper()
                   || resource == null  // let an SSO check whether an auto ID is free
-                  || (isContractor() && resource.data.contractorId == request.auth.uid)
-                  || (isSso() && resource.data.siteId == mySiteId());
+                  || (isContractor() && (resource.data.contractorId == request.auth.uid || resource.data.contractorId == myContractorId()))
+                  || isSso();
       allow create, update: if isAdmin()
                             || isDeveloper()  // developer vest deletion unlinks workers
-                            || (isSso() && request.resource.data.siteId == mySiteId());
+                            || isSso();
       allow delete: if isAdmin() || isDeveloper();
     }
 
@@ -136,15 +136,15 @@ service cloud.firestore {
     match /alerts/{alertId} {
       allow read: if isAdmin()
                   || isDeveloper()
-                  || (isSso() && resource.data.siteId == mySiteId())
-                  || (isContractor() && resource.data.contractorId == myContractorId());
+                  || isSso()
+                  || (isContractor() && (resource.data.contractorId == request.auth.uid || resource.data.contractorId == myContractorId()));
       // Production alerts are created by the cloud safety engine or an SSO. The
       // in-app simulator (no IoT hardware yet) may create/remove alerts flagged
       // `simulated == true` — these never affect real safety data.
       allow create: if isAdmin() || isDeveloper() || isSso()
                     || (isSignedIn() && request.resource.data.simulated == true);
-      allow update: if isAdmin() || isDeveloper()
-                    || (isSso() && resource.data.siteId == mySiteId());
+      allow update: if isAdmin() || isDeveloper() || isSso()
+                    || (isContractor() && (resource.data.contractorId == request.auth.uid || resource.data.contractorId == myContractorId()));
       allow delete: if isDeveloper() || isAdmin()
                     || (isSignedIn() && resource.data.simulated == true);
     }
@@ -153,18 +153,14 @@ service cloud.firestore {
     match /incidents/{incidentId} {
       allow read: if isAdmin()
                   || isDeveloper()
-                  || (isSso() && resource.data.siteId == mySiteId())
-                  || (isContractor() && resource.data.contractorId == myContractorId());
+                  || isSso()
+                  || (isContractor() && (resource.data.contractorId == request.auth.uid || resource.data.contractorId == myContractorId()));
       // Real incidents come from the cloud engine or, while the project has no
-      // cloud functions (free plan), from an SSO's app escalating a fall on their own
-      // site. Simulated ones (flagged `simulated == true`) may be created/removed by
-      // any signed-in user so the app can be demoed before the IoT layer exists.
-      allow create: if isAdmin() || isDeveloper()
-                    || (isSso() && request.resource.data.siteId == mySiteId())
+      // cloud functions (free plan), from an SSO's app escalating or resolving an alert.
+      allow create: if isAdmin() || isDeveloper() || isSso()
                     || (isSignedIn() && request.resource.data.simulated == true);
-      allow update: if isAdmin() || isDeveloper()
-                    || (isSso() && resource.data.siteId == mySiteId())
-                    || (isContractor() && resource.data.contractorId == myContractorId());
+      allow update: if isAdmin() || isDeveloper() || isSso()
+                    || (isContractor() && (resource.data.contractorId == request.auth.uid || resource.data.contractorId == myContractorId()));
       allow delete: if isDeveloper() || isAdmin()
                     || (isSignedIn() && resource.data.simulated == true);
     }

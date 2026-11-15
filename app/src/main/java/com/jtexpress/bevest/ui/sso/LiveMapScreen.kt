@@ -14,6 +14,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,18 +24,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.MarkerState
-import com.google.maps.android.compose.rememberCameraPositionState
-import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.ui.common.BevestScaffold
 import com.jtexpress.bevest.ui.common.EmptyState
 import com.jtexpress.bevest.ui.common.ErrorState
+import com.jtexpress.bevest.ui.common.OsmMapView
+import com.jtexpress.bevest.ui.common.OsmPin
 import com.jtexpress.bevest.ui.common.ReflectiveBand
 import com.jtexpress.bevest.ui.common.SkeletonBox
 import com.jtexpress.bevest.ui.common.label
@@ -94,37 +88,35 @@ fun LiveMapScreen(
             )
 
             else -> {
-                val first = state.located.first()
-                val center = LatLng(first.reading!!.latitude!!, first.reading.longitude!!)
-                val cameraPositionState = rememberCameraPositionState {
-                    position = CameraPosition.fromLatLngZoom(center, 15f)
+                val onlineLocatedCount = state.online.count {
+                    it.reading?.latitude != null && it.reading.longitude != null
                 }
-                val missing = state.online.size - state.located.size
+                val missing = (state.online.size - onlineLocatedCount).coerceAtLeast(0)
+                val pins = remember(state.located) {
+                    state.located.map { live ->
+                        OsmPin(
+                            id = live.worker.workerId,
+                            latitude = live.reading!!.latitude!!,
+                            longitude = live.reading.longitude!!,
+                            title = live.worker.fullName.ifBlank { live.worker.workerId },
+                            snippet = buildString {
+                                append(live.status.label())
+                                if (live.stale) append(" · last known position")
+                                append(" · Tap again to open worker")
+                            },
+                            status = live.status,
+                        )
+                    }
+                }
 
                 Box(Modifier.fillMaxSize().padding(padding)) {
-                    GoogleMap(
+                    OsmMapView(
+                        pins = pins,
                         modifier = Modifier.fillMaxSize(),
-                        cameraPositionState = cameraPositionState,
-                        uiSettings = MapUiSettings(zoomControlsEnabled = false),
-                    ) {
-                        state.located.forEach { live ->
-                            val pos = LatLng(live.reading!!.latitude!!, live.reading.longitude!!)
-                            Marker(
-                                state = MarkerState(position = pos),
-                                title = live.worker.fullName.ifBlank { live.worker.workerId },
-                                snippet = buildString {
-                                    append(live.status.label())
-                                    if (live.stale) append(" · last known position")
-                                },
-                                // Hue-matched to the status palette so a pin means the
-                                // same thing here as a chip does everywhere else.
-                                icon = BitmapDescriptorFactory.defaultMarker(
-                                    markerHue(live.status),
-                                ),
-                                onInfoWindowClick = { onOpenWorker(live.worker.workerId) },
-                            )
-                        }
-                    }
+                        initialZoom = 17.5,
+                        followSinglePin = true,
+                        onPinClick = { pin -> onOpenWorker(pin.id) },
+                    )
 
                     MapLegend(
                         located = state.located.size,
@@ -137,19 +129,6 @@ fun LiveMapScreen(
             }
         }
     }
-}
-
-/**
- * Google Maps only accepts a hue for its default marker, so the exact palette colors
- * cannot be used. These are the nearest hues that keep the same ordering and the same
- * red/amber/green reading an officer expects.
- */
-private fun markerHue(status: SafetyStatus): Float = when (status) {
-    SafetyStatus.NORMAL -> BitmapDescriptorFactory.HUE_GREEN
-    SafetyStatus.WARNING -> BitmapDescriptorFactory.HUE_ORANGE
-    SafetyStatus.DANGER -> BitmapDescriptorFactory.HUE_RED
-    SafetyStatus.EMERGENCY -> BitmapDescriptorFactory.HUE_ROSE
-    SafetyStatus.OFFLINE -> BitmapDescriptorFactory.HUE_AZURE
 }
 
 @Composable

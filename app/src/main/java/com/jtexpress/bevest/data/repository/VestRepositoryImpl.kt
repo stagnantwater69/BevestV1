@@ -91,8 +91,8 @@ class VestRepositoryImpl @Inject constructor(
                 ?: child.safeLong("timestamp")
                 ?: child.safeLong("lastSeen")
             val diff = if (lastSeen != null) now - lastSeen else Long.MAX_VALUE
-            val isRecent = lastSeen != null && diff <= 45_000L && diff >= -120_000L
-            val isLive = rawOnline && isRecent
+            val isRecent = lastSeen != null && diff <= 90_000L && diff >= -86_400_000L
+            val isLive = rawOnline && (isRecent || lastSeen == null || lastSeen <= 100_000_000_000L)
 
             val info = LiveInfo(
                 online = isLive,
@@ -133,23 +133,55 @@ class VestRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun buildLiveMap(rtSnap: DataSnapshot?, readingsSnap: DataSnapshot?): Map<String, LiveInfo> {
+    private fun publishMacToVestVariants(cleanMac: String?, vestId: String) {
+        val norm = cleanMac?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase().orEmpty()
+        if (norm.isBlank()) return
+        try {
+            database.getReference("macToVest/$norm").setValue(vestId)
+            if (norm.length == 12) {
+                val baseNum = norm.toLongOrNull(16)
+                if (baseNum != null) {
+                    for (delta in -2L..2L) {
+                        if (delta == 0L) continue
+                        val neighbor = (baseNum + delta).toString(16).uppercase().padStart(12, '0')
+                        if (neighbor.length == 12) {
+                            database.getReference("macToVest/$neighbor").setValue(vestId)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun buildLiveMap(
+        rtSnap: DataSnapshot?,
+        readingsSnap: DataSnapshot?,
+        macRtSnap: DataSnapshot? = null,
+    ): Map<String, LiveInfo> {
         val map = mutableMapOf<String, LiveInfo>()
         val now = System.currentTimeMillis()
         processSnapshot(rtSnap, map, now)
+        processSnapshot(macRtSnap, map, now)
         processSnapshot(readingsSnap, map, now)
         return map
     }
 
-    private fun resolveLive(base: Vest, liveMap: Map<String, LiveInfo>, totalDirectoryVests: Int): LiveInfo? {
+    private fun resolveLive(
+        base: Vest,
+        liveMap: Map<String, LiveInfo>,
+        totalDirectoryVests: Int,
+        allDirectoryVests: List<Vest> = emptyList(),
+    ): LiveInfo? {
         // 1. Direct key match (case-insensitive)
         liveMap.entries.firstOrNull { it.key.equals(base.vestId, ignoreCase = true) }?.value?.let { return it }
 
-        // 2. Hardware MAC match
+        // 2. Hardware MAC match (accounts for ESP32 Wi-Fi STA vs BLE MAC ±2 offset)
         val cleanMac = base.macAddress?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase().orEmpty()
         if (cleanMac.isNotBlank()) {
             liveMap[cleanMac]?.let { return it }
-            liveMap.values.firstOrNull { it.mac.equals(cleanMac, ignoreCase = true) }?.let { return it }
+            liveMap.values.firstOrNull {
+                !it.mac.isNullOrBlank() && Validators.isMatchingEsp32Mac(it.mac, cleanMac)
+            }?.let { return it }
         }
 
         // 3. Serial Number match
@@ -168,6 +200,40 @@ class VestRepositoryImpl @Inject constructor(
             }?.value?.let { return it }
         }
 
+        // 5. Fallback: if this is the only vest in the directory (or an assigned vest) and an
+        // unclaimed ESP32 hardware stream is broadcasting in RTDB (e.g. under DEFAULT_VEST_ID "VEST-001"),
+        // bridge it to this vest so hardware telemetry and online presence are never lost.
+        if (totalDirectoryVests == 1 || !base.assignedWorkerId.isNullOrBlank()) {
+            val otherVestIds = allDirectoryVests
+                .filter { !it.vestId.equals(base.vestId, ignoreCase = true) }
+                .map { it.vestId.uppercase() }
+                .toSet()
+            val otherMacs = allDirectoryVests
+                .filter { !it.vestId.equals(base.vestId, ignoreCase = true) }
+                .mapNotNull { it.macAddress?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()?.takeIf { m -> m.isNotBlank() } }
+
+            val unclaimed = liveMap.values
+                .filter { info ->
+                    val vId = info.vestId?.uppercase().orEmpty()
+                    val m = info.mac?.uppercase().orEmpty()
+                    vId !in otherVestIds && (m.isBlank() || otherMacs.none { Validators.isMatchingEsp32Mac(it, m) })
+                }
+                .sortedWith(compareByDescending<LiveInfo> { it.online }.thenByDescending { it.lastSeen ?: 0L })
+                .firstOrNull()
+
+            if (unclaimed != null) {
+                if (!unclaimed.mac.isNullOrBlank()) {
+                    publishMacToVestVariants(unclaimed.mac, base.vestId)
+                }
+                if (!base.assignedWorkerId.isNullOrBlank() && !unclaimed.vestId.isNullOrBlank()) {
+                    try {
+                        database.getReference("vestsLive/${unclaimed.vestId}/assignedWorkerId").setValue(base.assignedWorkerId)
+                    } catch (_: Exception) {}
+                }
+                return unclaimed
+            }
+        }
+
         return null
     }
 
@@ -176,17 +242,16 @@ class VestRepositoryImpl @Inject constructor(
             vests.whereEqualTo("inCompanyDirectory", true).snapshots(),
             database.getReference(FirebasePaths.VESTS_RT).valueEventsOrNull(),
             database.getReference("liveReadingsByVest").valueEventsOrNull(),
+            database.getReference("vestsLiveByMac").valueEventsOrNull(),
             ticker,
-        ) { qs, rtSnap, readingsSnap, _ ->
+        ) { qs, rtSnap, readingsSnap, macRtSnap, _ ->
             // Auto-publish MAC to Vest ID and Worker mapping for every claimed vest
             qs.documents.forEach { doc ->
                 val vId = doc.id
                 val mac = doc.getString("cleanMac")
                     ?: doc.getString("macAddress")?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()
                 if (!mac.isNullOrBlank()) {
-                    try {
-                        database.getReference("macToVest/$mac").setValue(vId)
-                    } catch (_: Exception) {}
+                    publishMacToVestVariants(mac, vId)
                 }
                 val assignedWorker = doc.getString("assignedWorkerId")?.takeIf { it.isNotBlank() }
                 if (assignedWorker != null) {
@@ -198,11 +263,12 @@ class VestRepositoryImpl @Inject constructor(
                 }
             }
 
-            val rtLoaded = rtSnap != null || readingsSnap != null
-            val liveMap = buildLiveMap(rtSnap, readingsSnap)
-            val mapped = qs.documents.map { doc ->
-                val base = doc.toVest()
-                val live = resolveLive(base, liveMap, qs.documents.size)
+            val rtLoaded = rtSnap != null || readingsSnap != null || macRtSnap != null
+            val liveMap = buildLiveMap(rtSnap, readingsSnap, macRtSnap)
+            val baseVests = qs.documents.map { it.toVest() }
+            val mapped = qs.documents.mapIndexed { idx, doc ->
+                val base = baseVests[idx]
+                val live = resolveLive(base, liveMap, baseVests.size, baseVests)
                 // Device is online if either RTDB or Firestore reports a fresh heartbeat within 45s
                 val liveOnline = (live?.online == true) || base.online
                 val effectiveStatus = when {
@@ -248,20 +314,19 @@ class VestRepositoryImpl @Inject constructor(
             vests.document(vestId).snapshots(),
             database.getReference(FirebasePaths.VESTS_RT).valueEventsOrNull(),
             database.getReference("liveReadingsByVest").valueEventsOrNull(),
+            database.getReference("vestsLiveByMac").valueEventsOrNull(),
             ticker,
-        ) { snap, rtSnap, readingsSnap, _ ->
+        ) { snap, rtSnap, readingsSnap, macRtSnap, _ ->
             if (!snap.exists()) {
                 Outcome.Failure(AppError.NotFound("This vest is not registered."))
             } else {
                 val base = snap.toVest()
                 val cleanMac = base.macAddress?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()
                 if (!cleanMac.isNullOrBlank()) {
-                    try {
-                        database.getReference("macToVest/$cleanMac").setValue(base.vestId)
-                    } catch (_: Exception) {}
+                    publishMacToVestVariants(cleanMac, base.vestId)
                 }
-                val rtLoaded = rtSnap != null || readingsSnap != null
-                val liveMap = buildLiveMap(rtSnap, readingsSnap)
+                val rtLoaded = rtSnap != null || readingsSnap != null || macRtSnap != null
+                val liveMap = buildLiveMap(rtSnap, readingsSnap, macRtSnap)
                 val live = resolveLive(base, liveMap, 1)
                 val liveOnline = (live?.online == true) || base.online
                 val effectiveStatus = when {
@@ -378,9 +443,7 @@ class VestRepositoryImpl @Inject constructor(
                     // Auto-sync MAC to Vest ID in Realtime Database for firmware auto-detection
                     val effectiveMac = if (cleanInputMac.isNotBlank()) cleanInputMac else cleanDbMac
                     if (effectiveMac.isNotBlank()) {
-                        try {
-                            database.getReference("macToVest/$effectiveMac").setValue(vestId)
-                        } catch (_: Exception) {}
+                        publishMacToVestVariants(effectiveMac, vestId)
                     }
 
                     Outcome.Success(Unit)
@@ -425,7 +488,7 @@ class VestRepositoryImpl @Inject constructor(
                 ?: vSnap.getString("macAddress")?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()
             if (!mac.isNullOrBlank()) {
                 database.getReference("vestsLiveByMac/$mac/assignedWorkerId").setValue(workerId)
-                database.getReference("macToVest/$mac").setValue(vestId)
+                publishMacToVestVariants(mac, vestId)
             }
         } catch (_: Exception) {}
         Outcome.Success(Unit)

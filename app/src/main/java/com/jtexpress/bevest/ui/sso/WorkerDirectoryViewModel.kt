@@ -103,18 +103,18 @@ class WorkerDirectoryViewModel @Inject constructor(
     }.flatMapLatest { (s, isRefreshing) ->
         if (s == null) return@flatMapLatest flowOf(WorkerDirectoryState(refreshing = isRefreshing))
         val (contractorId, siteId) = s
-        if (contractorId == null && siteId == null) {
-            return@flatMapLatest flowOf(WorkerDirectoryState(loading = false, noSite = true, refreshing = isRefreshing))
-        }
         workerRepository.observeWorkers(contractorId, siteId).flatMapLatest { outcome ->
             when (outcome) {
                 is Outcome.Failure -> flowOf(WorkerDirectoryState(loading = false, error = outcome.error.message, refreshing = isRefreshing))
                 is Outcome.Success -> {
                     val workers = outcome.data
-                    val alertsFlow = if (siteId != null) {
-                        alertRepository.observeActiveAlerts(siteId)
+                    if (contractorId == null && siteId.isNullOrBlank() && workers.isEmpty()) {
+                        return@flatMapLatest flowOf(WorkerDirectoryState(loading = false, noSite = true, refreshing = isRefreshing))
+                    }
+                    val alertsFlow = if (contractorId != null) {
+                        alertRepository.observeContractorActiveAlerts(contractorId)
                     } else {
-                        alertRepository.observeContractorActiveAlerts(contractorId!!)
+                        alertRepository.observeActiveAlerts(siteId)
                     }
                     combine(
                         monitoringRepository.observeReadings(workers.map { it.workerId }),

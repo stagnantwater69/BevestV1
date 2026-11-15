@@ -10,6 +10,7 @@ import com.jtexpress.bevest.data.firebase.toAppError
 import com.jtexpress.bevest.domain.model.UserRole
 import com.jtexpress.bevest.domain.repository.AccountRepository
 import com.jtexpress.bevest.utils.Outcome
+import com.jtexpress.bevest.utils.Validators
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
@@ -51,7 +52,7 @@ class AccountRepositoryImpl @Inject constructor(
                     "firstName" to firstName.trim(),
                     "lastName" to lastName.trim(),
                     "email" to email.trim(),
-                    "phone" to phone.trim(),
+                    "phone" to Validators.formatPhoneWithCountryCode(phone),
                     "role" to role.name,
                     "contractorId" to resolvedContractorId,
                     "siteId" to siteId,
