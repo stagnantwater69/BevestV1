@@ -1,5 +1,6 @@
 package com.jtexpress.bevest.ui.sso
 
+import android.app.DatePickerDialog
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -14,7 +15,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -23,17 +23,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.outlined.Badge
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,7 +50,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -68,10 +66,9 @@ import com.jtexpress.bevest.ui.common.FormSkeleton
 import com.jtexpress.bevest.ui.common.PrimaryButton
 import com.jtexpress.bevest.ui.common.WorkerAvatar
 import com.jtexpress.bevest.ui.theme.BevestIcons
-import com.jtexpress.bevest.ui.theme.EyebrowStyle
-import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Radius
 import com.jtexpress.bevest.ui.theme.Spacing
+import java.util.Calendar
 
 @Composable
 fun AddEditWorkerScreen(
@@ -100,6 +97,30 @@ fun AddEditWorkerScreen(
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             if (bytes != null) viewModel.onPhotoPicked(bytes)
         }
+    }
+
+    val openDatePicker = {
+        val cal = Calendar.getInstance()
+        val parts = state.birthday.split("-", "/")
+        val initYear = parts.getOrNull(0)?.toIntOrNull()?.takeIf { it in 1900..2100 }
+            ?: (cal.get(Calendar.YEAR) - 25)
+        val initMonth = (parts.getOrNull(1)?.toIntOrNull()?.minus(1))?.takeIf { it in 0..11 }
+            ?: cal.get(Calendar.MONTH)
+        val initDay = parts.getOrNull(2)?.toIntOrNull()?.takeIf { it in 1..31 }
+            ?: cal.get(Calendar.DAY_OF_MONTH)
+
+        DatePickerDialog(
+            context,
+            { _, year, monthZeroBased, dayOfMonth ->
+                val formatted = "%04d-%02d-%02d".format(year, monthZeroBased + 1, dayOfMonth)
+                viewModel.onBirthday(formatted)
+            },
+            initYear,
+            initMonth,
+            initDay,
+        ).apply {
+            datePicker.maxDate = System.currentTimeMillis()
+        }.show()
     }
 
     BevestScaffold(
@@ -173,14 +194,60 @@ fun AddEditWorkerScreen(
                         keyboardType = KeyboardType.Phone,
                         imeAction = ImeAction.Next,
                     )
-                    FormField(
-                        state.birthday,
-                        viewModel::onBirthday,
-                        "Birthday",
-                        helper = "e.g. YYYY-MM-DD or MM/DD/YYYY",
-                        keyboardType = KeyboardType.Text,
-                        imeAction = ImeAction.Next,
+
+                    // Birthdate Date Picker + Auto-calculated Age
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = state.birthday,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Birthdate") },
+                            placeholder = { Text("Select birthdate (YYYY-MM-DD)") },
+                            supportingText = {
+                                Text(
+                                    if (state.age != null) {
+                                        "Calculated Age: ${state.age} years old (saved automatically)"
+                                    } else {
+                                        "Tap to select birthdate — age is calculated automatically"
+                                    },
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Outlined.CalendarMonth, contentDescription = null)
+                            },
+                            trailingIcon = {
+                                IconButton(onClick = openDatePicker) {
+                                    Icon(
+                                        Icons.Outlined.CalendarMonth,
+                                        contentDescription = "Pick birthdate",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            },
+                            shape = RoundedCornerShape(Radius.md),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clip(RoundedCornerShape(Radius.md))
+                                .clickable(onClick = openDatePicker),
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = state.age?.let { "$it years old" } ?: "Auto-calculated from birthdate",
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = false,
+                        label = { Text("Age") },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.Badge, contentDescription = null)
+                        },
+                        shape = RoundedCornerShape(Radius.md),
+                        modifier = Modifier.fillMaxWidth(),
                     )
+
                     FormField(
                         state.floorNumber,
                         viewModel::onFloorNumber,

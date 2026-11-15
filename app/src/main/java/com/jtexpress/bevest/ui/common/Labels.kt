@@ -42,7 +42,7 @@ fun AlertType.label(): String = when (this) {
     AlertType.TEMPERATURE_WARNING -> "High body temperature"
     AlertType.FALL_DETECTED -> "Fall detected"
     AlertType.INACTIVITY -> "No movement"
-    AlertType.EMERGENCY_REQUEST -> "Help requested"
+    AlertType.EMERGENCY_REQUEST -> "Worker Trigger"
     AlertType.NO_SAFETY_RESPONSE -> "No response to check"
     AlertType.VEST_OFFLINE -> "Vest offline"
     AlertType.LOW_BATTERY -> "Low vest battery"
@@ -53,8 +53,8 @@ fun AlertType.detail(): String = when (this) {
     AlertType.TEMPERATURE_WARNING -> "Body temperature stayed above the safe range."
     AlertType.FALL_DETECTED -> "The vest's motion sensor registered a fall."
     AlertType.INACTIVITY -> "No movement for longer than the inactivity limit."
-    AlertType.EMERGENCY_REQUEST -> "The worker pressed the safety button on their vest."
-    AlertType.NO_SAFETY_RESPONSE -> "The worker did not acknowledge a safety check."
+    AlertType.EMERGENCY_REQUEST -> "Worker Trigger. Please check with Worker."
+    AlertType.NO_SAFETY_RESPONSE -> "Worker is in danger, please check with worker."
     AlertType.VEST_OFFLINE -> "The vest stopped sending readings."
     AlertType.LOW_BATTERY -> "The vest battery needs charging to keep monitoring."
 }
@@ -96,12 +96,12 @@ fun VestStatus.detail(): String = when (this) {
 }
 
 fun SafetyResponseState.label(): String = when (this) {
-    SafetyResponseState.NONE -> "No check running"
+    SafetyResponseState.NONE -> "No Actions"
     SafetyResponseState.WAITING -> "Waiting for worker"
-    SafetyResponseState.ACKNOWLEDGED -> "Worker responded"
-    SafetyResponseState.EMERGENCY_REQUESTED -> "Help requested"
-    SafetyResponseState.NO_RESPONSE -> "No response"
-    SafetyResponseState.ESCALATED -> "Escalated"
+    SafetyResponseState.ACKNOWLEDGED -> "Worker has Responded"
+    SafetyResponseState.EMERGENCY_REQUESTED -> "Worker Trigger"
+    SafetyResponseState.NO_RESPONSE -> "Worker is in danger, please check with worker"
+    SafetyResponseState.ESCALATED -> "Worker is in danger, please check with worker"
 }
 
 fun UserRole.label(): String = when (this) {

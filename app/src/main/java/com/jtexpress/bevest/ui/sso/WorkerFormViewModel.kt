@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.jtexpress.bevest.domain.model.ProjectSite
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.model.Worker
+import com.jtexpress.bevest.domain.model.calculateAgeFromBirthdate
 import com.jtexpress.bevest.domain.repository.ProjectRepository
 import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.utils.AppError
@@ -28,6 +29,7 @@ data class WorkerFormState(
     val lastName: String = "",
     val phone: String = "",
     val birthday: String = "",
+    val age: Int? = null,
     val floorNumber: String = "",
     val photoUrl: String? = null,
     val active: Boolean = true,
@@ -81,20 +83,25 @@ class WorkerFormViewModel @Inject constructor(
                 }
             } else {
                 when (val r = workerRepository.getWorker(editingId)) {
-                    is Outcome.Success -> _state.update {
-                        it.copy(
-                            loaded = true,
-                            workerId = r.data.workerId,
-                            firstName = r.data.firstName,
-                            lastName = r.data.lastName,
-                            phone = r.data.phone,
-                            birthday = r.data.birthday.orEmpty(),
-                            floorNumber = r.data.floorNumber.orEmpty(),
-                            photoUrl = r.data.photoUrl,
-                            active = r.data.active,
-                            projects = projects,
-                            selectedProjectId = r.data.siteId ?: site,
-                        )
+                    is Outcome.Success -> {
+                        val bday = r.data.birthday.orEmpty()
+                        val computedAge = calculateAgeFromBirthdate(bday) ?: r.data.age
+                        _state.update {
+                            it.copy(
+                                loaded = true,
+                                workerId = r.data.workerId,
+                                firstName = r.data.firstName,
+                                lastName = r.data.lastName,
+                                phone = r.data.phone,
+                                birthday = bday,
+                                age = computedAge,
+                                floorNumber = r.data.floorNumber.orEmpty(),
+                                photoUrl = r.data.photoUrl,
+                                active = r.data.active,
+                                projects = projects,
+                                selectedProjectId = r.data.siteId ?: site,
+                            )
+                        }
                     }
                     is Outcome.Failure -> _state.update {
                         it.copy(loaded = true, formError = r.error.message, projects = projects)
@@ -123,7 +130,12 @@ class WorkerFormViewModel @Inject constructor(
     fun onFirstName(v: String) = _state.update { it.copy(firstName = v, firstNameError = null) }
     fun onLastName(v: String) = _state.update { it.copy(lastName = v, lastNameError = null) }
     fun onPhone(v: String) = _state.update { it.copy(phone = v, phoneError = null) }
-    fun onBirthday(v: String) = _state.update { it.copy(birthday = v) }
+    fun onBirthday(v: String) = _state.update {
+        it.copy(
+            birthday = v,
+            age = calculateAgeFromBirthdate(v),
+        )
+    }
     fun onFloorNumber(v: String) = _state.update { it.copy(floorNumber = v) }
     fun onProjectSelected(projectId: String) =
         _state.update { it.copy(selectedProjectId = projectId, projectError = null, formError = null) }
@@ -157,12 +169,15 @@ class WorkerFormViewModel @Inject constructor(
     }
 
     private suspend fun saveEdit(s: WorkerFormState, siteId: String?) {
+        val bday = s.birthday.trim().takeIf { it.isNotBlank() }
+        val computedAge = calculateAgeFromBirthdate(bday) ?: s.age
         val worker = Worker(
             workerId = s.workerId,
             firstName = s.firstName.trim(),
             lastName = s.lastName.trim(),
             phone = s.phone.trim(),
-            birthday = s.birthday.trim().takeIf { it.isNotBlank() },
+            birthday = bday,
+            age = computedAge,
             floorNumber = s.floorNumber.trim().takeIf { it.isNotBlank() },
             photoUrl = s.photoUrl,
             contractorId = contractorId,
@@ -180,13 +195,16 @@ class WorkerFormViewModel @Inject constructor(
 
     private suspend fun saveNew(s: WorkerFormState, siteId: String?) {
         var candidate = s.workerId
+        val bday = s.birthday.trim().takeIf { it.isNotBlank() }
+        val computedAge = calculateAgeFromBirthdate(bday) ?: s.age
         repeat(15) {
             val worker = Worker(
                 workerId = candidate,
                 firstName = s.firstName.trim(),
                 lastName = s.lastName.trim(),
                 phone = s.phone.trim(),
-                birthday = s.birthday.trim().takeIf { it.isNotBlank() },
+                birthday = bday,
+                age = computedAge,
                 floorNumber = s.floorNumber.trim().takeIf { it.isNotBlank() },
                 photoUrl = s.photoUrl,
                 contractorId = contractorId,

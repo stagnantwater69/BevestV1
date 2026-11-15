@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 
 enum class WorkerFilter { ALL, ACTIVE, WARNING, DANGER, OFFLINE, UNASSIGNED }
@@ -129,7 +128,15 @@ class WorkerDirectoryViewModel @Inject constructor(
                         val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
                         val live = workers.map { w ->
                             val r = readings[w.workerId]
-                            WorkerLive(w, r, engine.evaluate(r, alerts, w.workerId, now), engine.isStale(r, now))
+                            val age = w.effectiveAge
+                            WorkerLive(
+                                worker = w,
+                                reading = r,
+                                status = engine.evaluate(r, alerts, w.workerId, now, age),
+                                stale = engine.isStale(r, now),
+                                hrStatus = engine.evaluateHeartRate(r?.heartRate, age),
+                                tempStatus = engine.evaluateTemperature(r?.temperature, age),
+                            )
                         }.sortedBy { it.worker.fullName }
                         WorkerDirectoryState(loading = false, refreshing = isRefreshing, all = live, query = q, filter = f)
                     }

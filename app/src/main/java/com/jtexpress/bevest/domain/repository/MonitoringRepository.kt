@@ -2,6 +2,7 @@ package com.jtexpress.bevest.domain.repository
 
 import com.jtexpress.bevest.domain.model.SafetyResponseState
 import com.jtexpress.bevest.domain.model.SensorReading
+import com.jtexpress.bevest.domain.model.VitalLogEntry
 import com.jtexpress.bevest.utils.Outcome
 import kotlinx.coroutines.flow.Flow
 
@@ -11,6 +12,9 @@ interface MonitoringRepository {
 
     /** Live readings for many workers at once, keyed by workerId. */
     fun observeReadings(workerIds: List<String>): Flow<Map<String, SensorReading>>
+
+    /** Per-minute Heart Rate & Body Temperature logs for one worker, newest first. */
+    fun observeVitalLogs(workerId: String): Flow<List<VitalLogEntry>>
 
     /** Manually start a safety response for a worker (plan section 12 & 17). */
     suspend fun initiateSafetyResponse(workerId: String, byUserId: String): Outcome<Unit>

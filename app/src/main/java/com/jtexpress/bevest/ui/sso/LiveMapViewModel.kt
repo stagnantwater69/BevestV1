@@ -68,7 +68,15 @@ class LiveMapViewModel @Inject constructor(
                             loading = false,
                             markers = workers.map { w ->
                                 val r = readings[w.workerId]
-                                WorkerLive(w, r, engine.evaluate(r, alerts, w.workerId, now), engine.isStale(r, now))
+                                val age = w.effectiveAge
+                                WorkerLive(
+                                    worker = w,
+                                    reading = r,
+                                    status = engine.evaluate(r, alerts, w.workerId, now, age),
+                                    stale = engine.isStale(r, now),
+                                    hrStatus = engine.evaluateHeartRate(r?.heartRate, age),
+                                    tempStatus = engine.evaluateTemperature(r?.temperature, age),
+                                )
                             },
                         )
                     }

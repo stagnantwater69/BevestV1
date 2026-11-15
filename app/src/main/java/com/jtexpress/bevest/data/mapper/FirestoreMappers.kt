@@ -18,10 +18,15 @@ import com.jtexpress.bevest.domain.model.Vest
 import com.jtexpress.bevest.domain.model.VestAssignment
 import com.jtexpress.bevest.domain.model.VestStatus
 import com.jtexpress.bevest.domain.model.Worker
+import com.jtexpress.bevest.domain.model.calculateAgeFromBirthdate
 
 private fun DocumentSnapshot.str(key: String): String = getString(key).orEmpty()
 private fun DocumentSnapshot.strOrNull(key: String): String? = getString(key)
-private fun DocumentSnapshot.int(key: String): Int? = getLong(key)?.toInt()
+private fun DocumentSnapshot.int(key: String): Int? = when (val v = get(key)) {
+    is Number -> v.toInt()
+    is String -> v.toIntOrNull()
+    else -> null
+}
 private fun DocumentSnapshot.dbl(key: String): Double? = getDouble(key)
 private fun DocumentSnapshot.bool(key: String, default: Boolean = false): Boolean = getBoolean(key) ?: default
 private fun DocumentSnapshot.millis(key: String): Long? = when (val v = get(key)) {
@@ -82,20 +87,25 @@ private fun Map<*, *>.toSubscription(createdAt: Long?): Subscription? {
     )
 }
 
-fun DocumentSnapshot.toWorker(): Worker = Worker(
-    workerId = id,
-    firstName = str("firstName"),
-    lastName = str("lastName"),
-    phone = str("phone"),
-    birthday = strOrNull("birthday"),
-    floorNumber = strOrNull("floorNumber"),
-    photoUrl = strOrNull("photoUrl"),
-    contractorId = strOrNull("contractorId"),
-    siteId = strOrNull("siteId"),
-    assignedVestId = strOrNull("assignedVestId"),
-    currentStatus = SafetyStatus.fromRaw(strOrNull("currentStatus")),
-    active = bool("active", true),
-)
+fun DocumentSnapshot.toWorker(): Worker {
+    val bday = strOrNull("birthday")
+    val savedAge = int("age") ?: calculateAgeFromBirthdate(bday)
+    return Worker(
+        workerId = id,
+        firstName = str("firstName"),
+        lastName = str("lastName"),
+        phone = str("phone"),
+        birthday = bday,
+        age = savedAge,
+        floorNumber = strOrNull("floorNumber"),
+        photoUrl = strOrNull("photoUrl"),
+        contractorId = strOrNull("contractorId"),
+        siteId = strOrNull("siteId"),
+        assignedVestId = strOrNull("assignedVestId"),
+        currentStatus = SafetyStatus.fromRaw(strOrNull("currentStatus")),
+        active = bool("active", true),
+    )
+}
 
 fun DocumentSnapshot.toVest(): Vest {
     val rawOnline = bool("online")

@@ -165,11 +165,14 @@ class SsoDashboardViewModel @Inject constructor(
                             val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
                             val live = workers.map { w ->
                                 val r = readings[w.workerId]
+                                val age = w.effectiveAge
                                 WorkerLive(
                                     worker = w,
                                     reading = r,
-                                    status = engine.evaluate(r, alerts, w.workerId, now),
+                                    status = engine.evaluate(r, alerts, w.workerId, now, age),
                                     stale = engine.isStale(r, now),
+                                    hrStatus = engine.evaluateHeartRate(r?.heartRate, age),
+                                    tempStatus = engine.evaluateTemperature(r?.temperature, age),
                                 )
                             }.sortedByDescending { it.status.ordinal }
                             SsoDashboardState(

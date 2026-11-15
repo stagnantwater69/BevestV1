@@ -51,12 +51,28 @@ class SafetyStatusEngineTest {
 
     @Test
     fun `high heart rate is warning`() {
-        assertEquals(SafetyStatus.WARNING, engine.evaluate(reading(hr = 130), now))
+        assertEquals(SafetyStatus.WARNING, engine.evaluate(reading(hr = 110), now))
     }
 
     @Test
     fun `high temperature is warning`() {
-        assertEquals(SafetyStatus.WARNING, engine.evaluate(reading(temp = 39.1), now))
+        assertEquals(SafetyStatus.WARNING, engine.evaluate(reading(temp = 38.0), now))
+    }
+
+    @Test
+    fun `heart rate in danger range is danger`() {
+        assertEquals(SafetyStatus.DANGER, engine.evaluate(reading(hr = 130), now))
+    }
+
+    @Test
+    fun `temperature in danger range is danger`() {
+        assertEquals(SafetyStatus.DANGER, engine.evaluate(reading(temp = 39.1), now))
+    }
+
+    @Test
+    fun `age bracket lowers the heart rate thresholds`() {
+        assertEquals(SafetyStatus.WARNING, engine.evaluate(reading(hr = 90), now, workerAge = 65))
+        assertEquals(SafetyStatus.NORMAL, engine.evaluate(reading(hr = 90), now, workerAge = 25))
     }
 
     @Test
@@ -132,6 +148,12 @@ class SafetyStatusEngineTest {
         val r = reading(fall = true, motion = MotionState.FALL_DETECTED)
         val alerts = listOf(alert(AlertSeverity.EMERGENCY, AlertStatus.ACKNOWLEDGED))
         assertEquals(SafetyStatus.WARNING, engine.evaluate(r, alerts, "w1", now))
+    }
+
+    @Test
+    fun `acknowledged alert does not hide a new vitals danger`() {
+        val alerts = listOf(alert(AlertSeverity.DANGER, AlertStatus.ACKNOWLEDGED))
+        assertEquals(SafetyStatus.DANGER, engine.evaluate(reading(hr = 130), alerts, "w1", now))
     }
 
     @Test

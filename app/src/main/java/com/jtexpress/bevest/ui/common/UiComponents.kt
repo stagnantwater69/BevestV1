@@ -371,6 +371,7 @@ fun MetricCard(
     stale: Boolean = false,
     supporting: String? = null,
     trace: List<Int>? = null,
+    onClick: (() -> Unit)? = null,
 ) {
     val palette = LocalStatusPalette.current
     val tint = when {
@@ -378,8 +379,14 @@ fun MetricCard(
         accent != null -> accent
         else -> MaterialTheme.colorScheme.onSurface
     }
+    val valueTextStyle = when {
+        value.length > 24 -> MaterialTheme.typography.titleMedium
+        value.length > 14 -> MaterialTheme.typography.titleLarge
+        else -> VitalStyle
+    }
     BevestCard(
         modifier = modifier.fillMaxWidth(),
+        onClick = onClick,
         accent = if (!stale) accent else null,
         shape = BevestShapes.status,
         contentPadding = PaddingValues(Spacing.lg),
@@ -402,11 +409,13 @@ fun MetricCard(
                     label.uppercase(),
                     style = EyebrowStyle,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         value,
-                        style = VitalStyle,
+                        style = valueTextStyle,
                         color = tint,
                         modifier = Modifier.alignByBaseline(),
                     )
@@ -416,6 +425,7 @@ fun MetricCard(
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.alignByBaseline(),
+                            maxLines = 1,
                         )
                     }
                 }
@@ -424,11 +434,15 @@ fun MetricCard(
                         "Not live",
                         style = MaterialTheme.typography.labelSmall,
                         color = palette.offline,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     supporting != null -> Text(
                         supporting,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
