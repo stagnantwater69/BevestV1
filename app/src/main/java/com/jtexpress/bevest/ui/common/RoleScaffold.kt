@@ -42,6 +42,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.jtexpress.bevest.navigation.NavMotion
+import com.jtexpress.bevest.navigation.Routes
 import com.jtexpress.bevest.ui.theme.BevestShapes
 import com.jtexpress.bevest.ui.theme.ComponentHeight
 import com.jtexpress.bevest.ui.theme.IconSize
@@ -76,10 +77,15 @@ fun RoleScaffold(
                 tabs = tabs,
                 currentRoute = currentRoute,
                 onSelect = { route ->
-                    navController.navigate(route) {
-                        popUpTo(startRoute) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
+                    if (currentRoute != route) {
+                        val popped = navController.popBackStack(route, inclusive = false)
+                        if (!popped) {
+                            navController.navigate(route) {
+                                popUpTo(startRoute) { saveState = false }
+                                launchSingleTop = true
+                                restoreState = false
+                            }
+                        }
                     }
                 },
             )
@@ -140,13 +146,35 @@ private fun BevestBottomBar(
                 tabs.forEach { tab ->
                     BottomBarItem(
                         tab = tab,
-                        selected = currentRoute == tab.route,
+                        selected = isTabSelected(tab.route, currentRoute),
                         onClick = { onSelect(tab.route) },
                         modifier = Modifier.weight(1f),
                     )
                 }
             }
         }
+    }
+}
+
+private fun isTabSelected(tabRoute: String, currentRoute: String?): Boolean {
+    if (currentRoute == null) return false
+    if (currentRoute == tabRoute) return true
+    return when (tabRoute) {
+        Routes.SSO_WORKERS -> currentRoute.startsWith(Routes.SSO_WORKER_DETAIL) ||
+            currentRoute.startsWith(Routes.SSO_ADD_WORKER) ||
+            currentRoute.startsWith(Routes.SSO_EDIT_WORKER)
+        Routes.SSO_ALERTS -> currentRoute.startsWith(Routes.SSO_ALERT_DETAIL) ||
+            currentRoute.startsWith(Routes.SSO_INCIDENT_DETAIL)
+        Routes.SSO_VESTS -> currentRoute.startsWith(Routes.SSO_VEST_DETAIL) ||
+            currentRoute.startsWith(Routes.SSO_PAIR_VEST)
+        Routes.CONTRACTOR_SSOS -> currentRoute.startsWith(Routes.CONTRACTOR_SSO_DETAIL) ||
+            currentRoute.startsWith(Routes.CONTRACTOR_ADD_SSO)
+        Routes.CONTRACTOR_REPORTS -> currentRoute.startsWith(Routes.CONTRACTOR_REPORT_DETAIL) ||
+            currentRoute.startsWith(Routes.CONTRACTOR_INCIDENTS)
+        Routes.ADMIN_USERS -> currentRoute.startsWith(Routes.ADMIN_USER_DETAIL) ||
+            currentRoute.startsWith(Routes.ADMIN_ADD_USER)
+        Routes.ADMIN_SYSTEM -> currentRoute.startsWith(Routes.ADMIN_ACTIVITY)
+        else -> false
     }
 }
 

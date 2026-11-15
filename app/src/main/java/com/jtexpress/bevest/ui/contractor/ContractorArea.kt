@@ -18,13 +18,18 @@ import com.jtexpress.bevest.ui.common.RoleScaffold
 import com.jtexpress.bevest.ui.common.profileDestinations
 
 /**
- * Jump to another bottom tab the way the bar itself does, so a dashboard shortcut lands
- * on the tab (highlighted, with its own back stack) instead of pushing a copy of it.
+ * Jump to another bottom tab the way the bar itself does, routing straight to the
+ * original root tab destination without restoring nested child stacks.
  */
-private fun NavHostController.openTab(route: String) = navigate(route) {
-    popUpTo(Routes.CONTRACTOR_DASHBOARD) { saveState = true }
-    launchSingleTop = true
-    restoreState = true
+private fun NavHostController.openTab(route: String) {
+    val popped = popBackStack(route, inclusive = false)
+    if (!popped) {
+        navigate(route) {
+            popUpTo(Routes.CONTRACTOR_DASHBOARD) { saveState = false }
+            launchSingleTop = true
+            restoreState = false
+        }
+    }
 }
 
 @Composable

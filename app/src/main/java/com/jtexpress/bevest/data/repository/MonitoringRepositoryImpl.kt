@@ -53,6 +53,9 @@ class MonitoringRepositoryImpl @Inject constructor(
     /** Tracks when the app explicitly reset a worker's safetyResponse to NONE so stale RTDB echoes are ignored briefly. */
     private val lastClearedAt = ConcurrentHashMap<String, Long>()
 
+    /** Tracks any active or assigned hardware vestId mapped to a workerId. */
+    private val activeVestByWorker = ConcurrentHashMap<String, String>()
+
     /** Tracks any bridged hardware vestId (e.g. VEST-001) mapped to a workerId so commands reach the ESP32. */
     private val bridgedVestByWorker = ConcurrentHashMap<String, String>()
 
@@ -175,7 +178,7 @@ class MonitoringRepositoryImpl @Inject constructor(
 
     private fun scheduleWaitingTimeout(workerId: String, started: Long) {
         repoScope.launch {
-            // Re-assert WAITING during the first 12 seconds if the ESP32's periodic heartbeat
+            // Re-assert WAITING during the first 12 seconds only if the ESP32's periodic heartbeat
             // overwrote /vestsLive/{vestId}/safetyResponse with NONE before checkRemoteSafetyResponse() polled it.
             val checkIntervalsMs = listOf(900L, 1_100L, 1_500L, 2_000L, 2_500L, 3_000L, 4_200L)
             for (stepMs in checkIntervalsMs) {
@@ -186,26 +189,44 @@ class MonitoringRepositoryImpl @Inject constructor(
                     return@launch
                 }
                 val bundle = latestRtdbBundle
-                val vestId = bridgedVestByWorker[workerId]
+                val vestId = activeVestByWorker[workerId] ?: bridgedVestByWorker[workerId]
                 val vestLiveState = if (!vestId.isNullOrBlank()) {
                     bundle?.vestsLiveSnap?.child(vestId)?.safeStr("safetyResponse")
                 } else null
                 val readingState = if (!vestId.isNullOrBlank()) {
                     bundle?.vestReadingsSnap?.child(vestId)?.safeStr("safetyResponse")
                 } else null
+                val directWorkerState = bundle?.liveReadingsSnap?.child(workerId)?.safeStr("safetyResponse")
 
-                if (vestLiveState == SafetyResponseState.ACKNOWLEDGED.name ||
+                // Check if this worker's mapped vest or reading indicates acknowledgment or emergency
+                val hasAck = vestLiveState == SafetyResponseState.ACKNOWLEDGED.name ||
                     readingState == SafetyResponseState.ACKNOWLEDGED.name ||
-                    vestLiveState == SafetyResponseState.EMERGENCY_REQUESTED.name ||
-                    readingState == SafetyResponseState.EMERGENCY_REQUESTED.name
-                ) {
+                    directWorkerState == SafetyResponseState.ACKNOWLEDGED.name ||
+                    safetyResponseOverride.value[workerId] == SafetyResponseState.ACKNOWLEDGED
+
+                val hasEmergency = vestLiveState == SafetyResponseState.EMERGENCY_REQUESTED.name ||
+                    readingState == SafetyResponseState.EMERGENCY_REQUESTED.name ||
+                    directWorkerState == SafetyResponseState.EMERGENCY_REQUESTED.name ||
+                    safetyResponseOverride.value[workerId] == SafetyResponseState.EMERGENCY_REQUESTED
+
+                if (hasAck) {
+                    waitingStartedAt.remove(workerId)
+                    setSafetyResponse(workerId, SafetyResponseState.ACKNOWLEDGED)
+                    return@launch
+                }
+                if (hasEmergency) {
+                    waitingStartedAt.remove(workerId)
+                    setSafetyResponse(workerId, SafetyResponseState.EMERGENCY_REQUESTED)
                     return@launch
                 }
 
-                // If the vest has not yet transitioned its RTDB node to WAITING, re-push WAITING
-                if (vestLiveState != SafetyResponseState.WAITING.name ||
-                    readingState != SafetyResponseState.WAITING.name
-                ) {
+                // ONLY re-assert WAITING if a node explicitly reverted to NONE due to a vest heartbeat overwrite.
+                // Never re-push WAITING blindly!
+                val revertedToNone = vestLiveState == SafetyResponseState.NONE.name ||
+                    readingState == SafetyResponseState.NONE.name ||
+                    directWorkerState == SafetyResponseState.NONE.name
+
+                if (revertedToNone && !hasAck && !hasEmergency && !acknowledgedStartedAt.containsKey(workerId)) {
                     pushSafetyResponseToRtdb(workerId, SafetyResponseState.WAITING)
                 }
             }
@@ -235,21 +256,20 @@ class MonitoringRepositoryImpl @Inject constructor(
         overrideMap: Map<String, SafetyResponseState> = emptyMap(),
     ): SensorReading? {
         val overrideState = overrideMap[workerId]
-        if (assignedVestId.isNullOrBlank()) {
-            // Even without a paired vest, if an SSO initiated a safety check that is waiting or timed out,
-            // emit a synthetic reading so the 15s countdown and No Safety Response alert work reliably.
-            if (overrideState != null && overrideState != SafetyResponseState.NONE) {
-                return SensorReading(
-                    workerId = workerId,
-                    vestId = "",
-                    safetyResponse = overrideState,
-                    timestamp = System.currentTimeMillis(),
-                )
-            }
-            return null
+        val candidates = mutableListOf<SensorReading>()
+
+        val targetVestIds = mutableSetOf<String>()
+        assignedVestId?.takeIf { it.isNotBlank() && it.startsWith("VEST-", ignoreCase = true) }?.let { targetVestIds.add(it) }
+        if (!assignedVestId.isNullOrBlank() || allowUnclaimedBridge) {
+            activeVestByWorker[workerId]?.takeIf { it.isNotBlank() && it.startsWith("VEST-", ignoreCase = true) }?.let { targetVestIds.add(it) }
+            bridgedVestByWorker[workerId]?.takeIf { it.isNotBlank() && it.startsWith("VEST-", ignoreCase = true) }?.let { targetVestIds.add(it) }
         }
 
-        val candidates = mutableListOf<SensorReading>()
+        val targetMacs = mutableSetOf<String>()
+        cleanMac?.takeIf { it.isNotBlank() }?.let { targetMacs.add(it) }
+        if (!cleanMac.isNullOrBlank() || !assignedVestId.isNullOrBlank() || allowUnclaimedBridge) {
+            bridgedMacByWorker[workerId]?.takeIf { it.isNotBlank() }?.let { targetMacs.add(it) }
+        }
 
         fun matchesDirectly(child: DataSnapshot): Boolean {
             val key = child.key.orEmpty()
@@ -258,12 +278,10 @@ class MonitoringRepositoryImpl @Inject constructor(
             val childMac = (child.safeStr("mac") ?: child.safeStr("macAddress"))
                 ?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase().orEmpty()
 
-            if (key.equals(assignedVestId, ignoreCase = true) ||
-                childVestId.equals(assignedVestId, ignoreCase = true)
-            ) {
+            if (targetVestIds.isNotEmpty() && targetVestIds.any { it.equals(key, ignoreCase = true) || it.equals(childVestId, ignoreCase = true) }) {
                 return true
             }
-            if (isMacMatch(childMac, cleanMac) || isMacMatch(key, cleanMac)) {
+            if (targetMacs.isNotEmpty() && targetMacs.any { isMacMatch(childMac, it) || (isMacMatch(key, it) && childVestId.isBlank()) }) {
                 return true
             }
             if ((key.equals(workerId, ignoreCase = true) || childWorkerId.equals(workerId, ignoreCase = true)) &&
@@ -278,9 +296,12 @@ class MonitoringRepositoryImpl @Inject constructor(
             if (snap == null || !snap.exists()) return
             for (child in snap.children) {
                 if (matchesDirectly(child)) {
-                    val childVest = child.safeStr("vestId") ?: child.key.orEmpty()
-                    if (childVest.isNotBlank() && !childVest.equals(assignedVestId, ignoreCase = true)) {
-                        bridgedVestByWorker[workerId] = childVest
+                    val childVest = (child.safeStr("vestId") ?: child.key.orEmpty()).takeIf { it.startsWith("VEST-", ignoreCase = true) }.orEmpty()
+                    if (childVest.isNotBlank()) {
+                        activeVestByWorker[workerId] = childVest
+                        if (assignedVestId == null || !childVest.equals(assignedVestId, ignoreCase = true)) {
+                            bridgedVestByWorker[workerId] = childVest
+                        }
                     }
                     val childMac = (child.safeStr("mac") ?: child.safeStr("macAddress"))
                         ?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase().orEmpty()
@@ -288,7 +309,8 @@ class MonitoringRepositoryImpl @Inject constructor(
                         bridgedMacByWorker[workerId] = childMac
                     }
                     child.toSensorReading(workerId)?.let {
-                        candidates.add(it.copy(vestId = assignedVestId))
+                        val effectiveVest = assignedVestId ?: childVest.takeIf { v -> v.isNotBlank() } ?: ""
+                        candidates.add(it.copy(vestId = effectiveVest))
                     }
                 }
             }
@@ -302,30 +324,35 @@ class MonitoringRepositoryImpl @Inject constructor(
         collectDirectFrom(rtdb.vestsLiveByMacSnap)
 
         // 2. Fallback: if no direct match was found and this worker is eligible to adopt an unclaimed
-        // hardware stream (e.g. ESP32 transmitting under DEFAULT_VEST_ID "VEST-001"), bridge it!
+        // hardware stream (e.g. ESP32 transmitting under DEFAULT_VEST_ID "VEST-2026-5669"), bridge it!
         if (candidates.isEmpty() && allowUnclaimedBridge) {
             fun collectUnclaimedFrom(snap: DataSnapshot?) {
                 if (snap == null || !snap.exists()) return
-                for (child in snap.children) {
-                    val childVestId = (child.safeStr("vestId") ?: child.key.orEmpty()).uppercase()
+                val allChildren = snap.children.toList()
+                for (child in allChildren) {
+                    val rawVestId = child.safeStr("vestId") ?: child.key.orEmpty()
+                    if (!rawVestId.startsWith("VEST-", ignoreCase = true)) continue
+                    val childVestId = rawVestId.uppercase()
                     val childMac = (child.safeStr("mac") ?: child.safeStr("macAddress"))
                         ?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase().orEmpty()
                     val claimedByOther = childVestId in otherVestIds ||
                         (childMac.isNotBlank() && otherMacs.any { isMacMatch(it, childMac) })
                     if (!claimedByOther) {
-                        val rawVestId = child.safeStr("vestId") ?: child.key.orEmpty()
-                        if (rawVestId.isNotBlank()) {
-                            bridgedVestByWorker[workerId] = rawVestId
-                        }
+                        bridgedVestByWorker[workerId] = rawVestId
+                        activeVestByWorker[workerId] = rawVestId
                         if (childMac.isNotBlank()) {
                             bridgedMacByWorker[workerId] = childMac
-                            try {
-                                database.getReference("macToVest/$childMac").setValue(assignedVestId)
-                            } catch (_: Exception) {}
+                            if (!assignedVestId.isNullOrBlank()) {
+                                try {
+                                    database.getReference("macToVest/$childMac").setValue(assignedVestId)
+                                } catch (_: Exception) {}
+                            }
                         }
+                        val effectiveVest = assignedVestId ?: rawVestId
                         child.toSensorReading(workerId)?.let {
-                            candidates.add(it.copy(vestId = assignedVestId))
+                            candidates.add(it.copy(vestId = effectiveVest))
                         }
+                        return
                     }
                 }
             }
@@ -344,7 +371,7 @@ class MonitoringRepositoryImpl @Inject constructor(
             if (overrideState != null && overrideState != SafetyResponseState.NONE) {
                 return SensorReading(
                     workerId = workerId,
-                    vestId = assignedVestId,
+                    vestId = assignedVestId ?: targetVestIds.firstOrNull().orEmpty(),
                     safetyResponse = overrideState,
                     timestamp = now,
                 )
@@ -360,15 +387,18 @@ class MonitoringRepositoryImpl @Inject constructor(
 
         // Merge fallDetected across all matched nodes (including /vestsLive which holds fallDetected=true for 6s)
         val anyFall = !recentlyCleared && candidates.any {
-            it.fallDetected || it.motionState == MotionState.FALL_DETECTED
+            (it.fallDetected || it.motionState == MotionState.FALL_DETECTED) &&
+                (it.timestamp > 0L && (now - it.timestamp) < 30_000L)
         }
 
         // Priority for safetyResponse across all matched RTDB nodes:
         // EMERGENCY_REQUESTED / NO_RESPONSE > ACKNOWLEDGED > WAITING > NONE
+        // Only accept EMERGENCY_REQUESTED or NO_RESPONSE if recent (within 30 seconds) to avoid stale lockup
+        val freshCandidates = candidates.filter { it.timestamp > 0L && (now - it.timestamp) < 30_000L }
         val cloudResponse = when {
-            !recentlyCleared && candidates.any { it.safetyResponse == SafetyResponseState.EMERGENCY_REQUESTED } ->
+            !recentlyCleared && freshCandidates.any { it.safetyResponse == SafetyResponseState.EMERGENCY_REQUESTED } ->
                 SafetyResponseState.EMERGENCY_REQUESTED
-            !recentlyCleared && candidates.any { it.safetyResponse == SafetyResponseState.NO_RESPONSE } ->
+            !recentlyCleared && freshCandidates.any { it.safetyResponse == SafetyResponseState.NO_RESPONSE } ->
                 SafetyResponseState.NO_RESPONSE
             candidates.any { it.safetyResponse == SafetyResponseState.ACKNOWLEDGED } ->
                 SafetyResponseState.ACKNOWLEDGED
@@ -387,7 +417,7 @@ class MonitoringRepositoryImpl @Inject constructor(
             isActivelyWaiting -> when {
                 canAcceptVestResponseDuringWait && cloudResponse == SafetyResponseState.ACKNOWLEDGED -> {
                     waitingStartedAt.remove(workerId)
-                    val ackStart = acknowledgedStartedAt.getOrPut(workerId) {
+                    acknowledgedStartedAt.getOrPut(workerId) {
                         now.also {
                             repoScope.launch {
                                 delay(5_000L)
@@ -463,7 +493,7 @@ class MonitoringRepositoryImpl @Inject constructor(
             .filter { it.latitude != null && it.longitude != null }
             .maxByOrNull { it.timestamp }
         val resolvedReading = rawBest.copy(
-            vestId = assignedVestId,
+            vestId = assignedVestId ?: rawBest.vestId.takeIf { it.isNotBlank() } ?: activeVestByWorker[workerId].orEmpty(),
             latitude = rawBest.latitude ?: bestGps?.latitude,
             longitude = rawBest.longitude ?: bestGps?.longitude,
             fallDetected = anyFall,
@@ -495,9 +525,19 @@ class MonitoringRepositoryImpl @Inject constructor(
         ) { workerSnap, vestsSnap, rtdb, overrideMap ->
             val allVestDocs = vestsSnap?.documents.orEmpty()
             val validVests = allVestDocs.associateBy { it.id }
+            val matchingVests = allVestDocs.filter { it.getString("assignedWorkerId") == workerId }
             val assignedFromWorker = workerSnap?.getString("assignedVestId")?.takeIf { it.isNotBlank() }
-            val assignedFromVest = allVestDocs.firstOrNull { it.getString("assignedWorkerId") == workerId }?.id
+            val assignedFromVest = matchingVests.firstOrNull { it.getString("status") == "ACTIVE" }?.id
+                ?: matchingVests.maxByOrNull { it.getLong("lastSeen") ?: 0L }?.id
+                ?: matchingVests.firstOrNull()?.id
             val assignedVestId = assignedFromWorker ?: assignedFromVest
+            if (!assignedVestId.isNullOrBlank()) {
+                activeVestByWorker[workerId] = assignedVestId
+            } else {
+                activeVestByWorker.remove(workerId)
+                bridgedVestByWorker.remove(workerId)
+                bridgedMacByWorker.remove(workerId)
+            }
 
             val vestDoc = assignedVestId?.let { validVests[it] }
             val cleanMac = (vestDoc?.getString("cleanMac") ?: vestDoc?.getString("macAddress"))
@@ -513,6 +553,9 @@ class MonitoringRepositoryImpl @Inject constructor(
                     ?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()?.takeIf { m -> m.isNotBlank() }
             }
 
+            val canBridgeSingleWorker = !assignedVestId.isNullOrBlank() ||
+                overrideMap[workerId] != null
+
             findReadingForVest(
                 workerId = workerId,
                 assignedVestId = assignedVestId,
@@ -520,7 +563,7 @@ class MonitoringRepositoryImpl @Inject constructor(
                 rtdb = rtdb,
                 otherVestIds = otherVestIds,
                 otherMacs = otherMacs,
-                allowUnclaimedBridge = !assignedVestId.isNullOrBlank(),
+                allowUnclaimedBridge = canBridgeSingleWorker,
                 overrideMap = overrideMap,
             )
         }
@@ -552,17 +595,30 @@ class MonitoringRepositoryImpl @Inject constructor(
             for (wId in workerIds) {
                 val wDoc = workerDocs[wId]
                 val fromWorker = wDoc?.getString("assignedVestId")?.takeIf { it.isNotBlank() }
-                val fromVest = allVestDocs.firstOrNull { it.getString("assignedWorkerId") == wId }?.id
+                val matchingVests = allVestDocs.filter { it.getString("assignedWorkerId") == wId }
+                val fromVest = matchingVests.firstOrNull { it.getString("status") == "ACTIVE" }?.id
+                    ?: matchingVests.maxByOrNull { it.getLong("lastSeen") ?: 0L }?.id
+                    ?: matchingVests.firstOrNull()?.id
                 val vId = fromWorker ?: fromVest
                 if (!vId.isNullOrBlank()) {
                     workerVestMap[wId] = vId
+                    activeVestByWorker[wId] = vId
+                } else {
+                    activeVestByWorker.remove(wId)
+                    bridgedVestByWorker.remove(wId)
+                    bridgedMacByWorker.remove(wId)
                 }
             }
 
             var bridgedUsed = false
             for (workerId in workerIds) {
                 val assignedVestId = workerVestMap[workerId]
-                val vestDoc = assignedVestId?.let { validVests[it] }
+                if (assignedVestId.isNullOrBlank()) {
+                    // Unassigned worker: has no vest in company directory, so emit null (OFFLINE/UNASSIGNED).
+                    // Never adopt, bridge, or borrow active vest telemetry from other workers!
+                    continue
+                }
+                val vestDoc = validVests[assignedVestId]
                 val cleanMac = (vestDoc?.getString("cleanMac") ?: vestDoc?.getString("macAddress"))
                     ?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()
 
@@ -722,6 +778,7 @@ class MonitoringRepositoryImpl @Inject constructor(
                 }
             }
 
+            activeVestByWorker[workerId]?.takeIf { it.isNotBlank() }?.let { targetVestIds.add(it) }
             bridgedVestByWorker[workerId]?.takeIf { it.isNotBlank() }?.let { targetVestIds.add(it) }
             bridgedMacByWorker[workerId]?.takeIf { it.isNotBlank() }?.let { addMacWithVariants(it) }
 
@@ -769,18 +826,20 @@ class MonitoringRepositoryImpl @Inject constructor(
                         targetVestIds.any { it.equals(key, ignoreCase = true) || it.equals(cVestId, ignoreCase = true) } ||
                         targetMacs.any { isMacMatch(it, cMac) || isMacMatch(it, key) }
 
-                    // If only one physical vest is streaming in RTDB (e.g. VEST-001) and this worker has a vest assigned,
+                    // If only one physical vest is streaming in RTDB (e.g. VEST-2026-5669),
                     // also include that active hardware stream so the physical vest always receives the command.
-                    val isSingleActiveHardwareVest = allChildren.size == 1 && targetVestIds.isNotEmpty()
+                    val isSingleActiveHardwareVest = allChildren.size == 1
 
-                    if (matchesWorkerOrVest || isSingleActiveHardwareVest) {
-                        if (key.isNotBlank() && !key.startsWith("WRK-", ignoreCase = true) && key.length != 12) {
+                    if (matchesWorkerOrVest || (isSingleActiveHardwareVest && targetVestIds.isNotEmpty())) {
+                        if (key.isNotBlank() && key.startsWith("VEST-", ignoreCase = true)) {
                             targetVestIds.add(key)
                             bridgedVestByWorker[workerId] = key
+                            activeVestByWorker[workerId] = key
                         }
-                        if (cVestId.isNotBlank()) {
+                        if (cVestId.isNotBlank() && cVestId.startsWith("VEST-", ignoreCase = true)) {
                             targetVestIds.add(cVestId)
                             bridgedVestByWorker[workerId] = cVestId
+                            activeVestByWorker[workerId] = cVestId
                         }
                         if (cMac.isNotBlank()) {
                             addMacWithVariants(cMac)
@@ -794,6 +853,7 @@ class MonitoringRepositoryImpl @Inject constructor(
             scanSnap(bundle?.vestsLiveByMacSnap)
 
             for (vId in targetVestIds) {
+                if (!vId.startsWith("VEST-", ignoreCase = true)) continue
                 database.getReference("vestsLive/$vId/safetyResponse").setValue(state.name)
                 database.getReference("liveReadingsByVest/$vId").updateChildren(updates)
                 if (clearFall) {
