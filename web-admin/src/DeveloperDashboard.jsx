@@ -8,7 +8,7 @@ import {
   FiBriefcase, FiUserPlus, FiLock, FiMail, FiPhone
 } from 'react-icons/fi';
 import { 
-  collection, doc, getDocs, setDoc, updateDoc, deleteDoc,
+  collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   query, where, onSnapshot 
 } from 'firebase/firestore';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
@@ -438,27 +438,74 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
   };
 
+  /**
+   * Removes every trace of a vest assignment from Firestore + RTDB:
+   *  - vestAssignments docs for the vest (history + any open record)
+   *  - workers.assignedVestId pointing at the vest (and the vest's own assignedWorkerId)
+   *  - RTDB vestToWorker / workerToVest mappings
+   * Returns counts so the caller can report what was cleaned.
+   */
+  const purgeVestAssignments = async (vestId, knownWorkerId = null) => {
+    const result = { workers: 0, assignments: 0, errors: [] };
+    const workerIds = new Set();
+    if (knownWorkerId) workerIds.add(knownWorkerId);
+
+    // 1. Workers that still point at this vest
+    try {
+      const workersSnap = await getDocs(query(collection(db, 'workers'), where('assignedVestId', '==', vestId)));
+      workersSnap.docs.forEach(w => workerIds.add(w.id));
+    } catch (err) {
+      result.errors.push(`workers query: ${err.message}`);
+    }
+
+    // 2. Assignment records for this vest (also reveals workers via workerId)
+    try {
+      const asgSnap = await getDocs(query(collection(db, 'vestAssignments'), where('vestId', '==', vestId)));
+      asgSnap.docs.forEach(a => {
+        const wId = a.data()?.workerId;
+        if (wId && !a.data()?.unassignedAt) workerIds.add(wId);
+      });
+      await Promise.all(asgSnap.docs.map(a => deleteDoc(a.ref)));
+      result.assignments = asgSnap.size;
+    } catch (err) {
+      result.errors.push(`vestAssignments: ${err.message}`);
+    }
+
+    // 3. Unlink each worker (only if they still point at THIS vest)
+    for (const wId of workerIds) {
+      try {
+        const wDoc = await getDoc(doc(db, 'workers', wId));
+        if (wDoc.exists() && (!wDoc.data()?.assignedVestId || wDoc.data().assignedVestId === vestId)) {
+          await updateDoc(wDoc.ref, { assignedVestId: null });
+          result.workers += 1;
+        }
+      } catch (err) {
+        result.errors.push(`worker ${wId}: ${err.message}`);
+      }
+      try { await remove(ref(rtdb, `workerToVest/${wId}`)); } catch (_) {}
+    }
+
+    try { await remove(ref(rtdb, `vestToWorker/${vestId}`)); } catch (_) {}
+    return result;
+  };
+
   const handleDeleteVest = async (vestId) => {
     if (!vestId) return;
-    const ok = window.confirm(`Permanently delete Vest "${vestId}" from the Bevest hardware database?\n\nThis will remove the QR, MAC address, and Serial Number registration, unassign any assigned worker, and clean up live telemetry. This action cannot be undone.`);
+    const ok = window.confirm(`Permanently delete Vest "${vestId}" from the Bevest hardware database?\n\nThis will remove the QR, MAC address, and Serial Number registration, unassign any assigned worker, delete its vest assignment records, and clean up live telemetry. This action cannot be undone.`);
     if (!ok) return;
 
     try {
-      // 1. Unassign any workers assigned to this vest
-      try {
-        const workersSnap = await getDocs(query(collection(db, 'workers'), where('assignedVestId', '==', vestId)));
-        const unassignPromises = workersSnap.docs.map(wDoc => updateDoc(wDoc.ref, { assignedVestId: null }));
-        await Promise.all(unassignPromises);
-      } catch (workerErr) {
-        console.warn('Worker unassign warning:', workerErr);
-      }
+      const targetVest = catalog.find(v => (v.id === vestId || v.vestId === vestId));
+
+      // 1. Unassign workers + delete vestAssignments records
+      const purge = await purgeVestAssignments(vestId, targetVest?.assignedWorkerId || null);
+      if (purge.errors.length) console.warn('Assignment cleanup warnings:', purge.errors);
 
       // 2. Remove Realtime Database live nodes & MAC mappings
       try {
         await remove(ref(rtdb, `vestsLive/${vestId}`));
         await remove(ref(rtdb, `liveReadingsByVest/${vestId}`));
-        const targetVest = catalog.find(v => (v.id === vestId || v.vestId === vestId));
-        const cleanMac = targetVest?.cleanMac || (targetVest?.macAddress ? targetVest.macAddress.replace(/[^A-F0-9]/g, '') : null);
+        const cleanMac = targetVest?.cleanMac || (targetVest?.macAddress ? targetVest.macAddress.toUpperCase().replace(/[^A-F0-9]/g, '') : null);
         if (cleanMac) {
           await remove(ref(rtdb, `macToVest/${cleanMac}`));
           await remove(ref(rtdb, `vestsLiveByMac/${cleanMac}`));
@@ -470,11 +517,67 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
       // 3. Delete from Firestore
       await deleteDoc(doc(db, 'vests', vestId));
-      await logActivity(`Deleted smart vest ${vestId} from central hardware database`, devEmail);
-      showToast('success', `✓ Vest ${vestId} permanently removed and any assigned workers unlinked.`);
+      await logActivity(`Deleted smart vest ${vestId} from central hardware database (unlinked ${purge.workers} worker(s), removed ${purge.assignments} assignment record(s))`, devEmail);
+      if (purge.errors.length) {
+        showToast('error', `Vest ${vestId} deleted, but some assignment cleanup failed (${purge.errors[0]}). Deploy the latest firestore.rules and run "Repair Orphaned Assignments".`);
+      } else {
+        showToast('success', `✓ Vest ${vestId} removed. Unlinked ${purge.workers} worker(s) and deleted ${purge.assignments} assignment record(s).`);
+      }
     } catch (err) {
       console.error('Error deleting vest:', err);
       showToast('error', 'Failed to delete vest: ' + err.message);
+    }
+  };
+
+  /**
+   * One-click repair for data left behind by earlier deletions: any worker whose
+   * assignedVestId points at a vest that no longer exists is unlinked, and any
+   * vestAssignments record for a missing vest is deleted.
+   */
+  const [repairing, setRepairing] = useState(false);
+  const handleRepairOrphanedAssignments = async () => {
+    const ok = window.confirm('Scan all workers and vest assignment records, and remove any that point to a vest that no longer exists in the hardware database?');
+    if (!ok) return;
+    setRepairing(true);
+    try {
+      const vestsSnap = await getDocs(collection(db, 'vests'));
+      const vestById = {};
+      vestsSnap.docs.forEach(v => { vestById[v.id] = v.data() || {}; });
+
+      let workersFixed = 0;
+      let assignmentsRemoved = 0;
+
+      const workersSnap = await getDocs(collection(db, 'workers'));
+      for (const w of workersSnap.docs) {
+        const vId = w.data()?.assignedVestId;
+        if (!vId) continue;
+        const vest = vestById[vId];
+        // Orphan if the vest is gone, or the vest says it belongs to someone else / nobody
+        const orphan = !vest || (vest.assignedWorkerId || null) !== w.id;
+        if (orphan) {
+          await updateDoc(w.ref, { assignedVestId: null });
+          try { await remove(ref(rtdb, `workerToVest/${w.id}`)); } catch (_) {}
+          workersFixed += 1;
+        }
+      }
+
+      const asgSnap = await getDocs(collection(db, 'vestAssignments'));
+      for (const a of asgSnap.docs) {
+        const vId = a.data()?.vestId;
+        if (!vId || !vestById[vId]) {
+          await deleteDoc(a.ref);
+          try { await remove(ref(rtdb, `vestToWorker/${vId}`)); } catch (_) {}
+          assignmentsRemoved += 1;
+        }
+      }
+
+      await logActivity(`Repaired orphaned assignments: unlinked ${workersFixed} worker(s), removed ${assignmentsRemoved} assignment record(s)`, devEmail);
+      showToast('success', `✓ Repair complete. Unlinked ${workersFixed} worker(s) and removed ${assignmentsRemoved} orphaned assignment record(s).`);
+    } catch (err) {
+      console.error('Repair orphaned assignments failed:', err);
+      showToast('error', 'Repair failed: ' + err.message + ' (make sure the latest firestore.rules are deployed)');
+    } finally {
+      setRepairing(false);
     }
   };
 
@@ -899,6 +1002,17 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   onClick={() => setShowBatchModal(true)}
                 >
                   <FiLayers /> Batch Generate QR Codes
+                </button>
+              )}
+              {activeTab === 'hardware' && (
+                <button
+                  type="button"
+                  className="dev-btn-orange"
+                  onClick={handleRepairOrphanedAssignments}
+                  disabled={repairing}
+                  title="Unlink workers and delete assignment records that point to deleted vests"
+                >
+                  <FiRefreshCw /> {repairing ? 'Repairing…' : 'Repair Orphaned Assignments'}
                 </button>
               )}
               {activeTab === 'subscriptions' && (

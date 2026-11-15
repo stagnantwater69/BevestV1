@@ -43,4 +43,15 @@ interface VestRepository {
     suspend fun replaceVest(oldVestId: String, newVestId: String, assignedBy: String): Outcome<Unit>
 
     fun observeAssignments(vestId: String): Flow<Outcome<List<VestAssignment>>>
+
+    /**
+     * Option 1 (Hybrid Cloud + BLE): Remotely sends new Wi-Fi credentials to an online vest via RTDB
+     * so it can switch networks immediately or pre-save credentials for the next construction site.
+     */
+    suspend fun updateVestWifiRemotely(vestId: String, ssid: String, pass: String): Outcome<Unit>
+
+    /**
+     * Remotely instructs an online vest to disconnect from its current Wi-Fi and enter BLE Pairing Mode.
+     */
+    suspend fun triggerVestBleModeRemotely(vestId: String): Outcome<Unit>
 }
