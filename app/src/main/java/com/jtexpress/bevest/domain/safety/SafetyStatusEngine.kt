@@ -61,7 +61,7 @@ class SafetyStatusEngine(
             return SafetyStatus.EMERGENCY
         }
 
-        if (reading.fallDetected || reading.motionState == MotionState.FALL_DETECTED) {
+        if (isFall(reading)) {
             return SafetyStatus.DANGER
         }
 
@@ -121,7 +121,9 @@ class SafetyStatusEngine(
                 live == SafetyStatus.EMERGENCY
             ) {
                 SafetyStatus.EMERGENCY
-            } else if (live == SafetyStatus.DANGER) {
+            } else if (live == SafetyStatus.DANGER && !isFall(reading)) {
+                // The acknowledgement covers the fall; a vitals reading in the
+                // Danger range is a new problem and still counts as danger.
                 SafetyStatus.DANGER
             } else {
                 SafetyStatus.WARNING
@@ -129,6 +131,9 @@ class SafetyStatusEngine(
         }
         return live
     }
+
+    private fun isFall(reading: SensorReading?): Boolean =
+        reading != null && (reading.fallDetected || reading.motionState == MotionState.FALL_DETECTED)
 
     /** OFFLINE sits last in the enum but is not more severe than an open danger. */
     private fun severityRank(s: SafetyStatus): Int = when (s) {
