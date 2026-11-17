@@ -26,24 +26,24 @@ class SafetyStatusEngine(
         )
     }
 
-    /** Evaluates Heart Rate against the worker's age-adjusted Warning and Danger thresholds. */
+    /** Evaluates Heart Rate against the worker's age-adjusted Low & High Warning and Danger thresholds. */
     fun evaluateHeartRate(heartRate: Int?, workerAge: Int? = null): SafetyStatus {
         if (heartRate == null || heartRate <= 0) return SafetyStatus.NORMAL
         val bracket = config.forAge(workerAge)
         return when {
-            heartRate >= bracket.hrDanger -> SafetyStatus.DANGER
-            heartRate >= bracket.hrWarning -> SafetyStatus.WARNING
+            heartRate >= bracket.hrDanger || heartRate <= bracket.hrLowDanger -> SafetyStatus.DANGER
+            heartRate >= bracket.hrWarning || heartRate <= bracket.hrLowWarning -> SafetyStatus.WARNING
             else -> SafetyStatus.NORMAL
         }
     }
 
-    /** Evaluates Body Temperature against the worker's age-adjusted Warning and Danger thresholds. */
+    /** Evaluates Body Temperature against the worker's age-adjusted Low & High Warning and Danger thresholds. */
     fun evaluateTemperature(temperature: Double?, workerAge: Int? = null): SafetyStatus {
         if (temperature == null || temperature <= 0.0) return SafetyStatus.NORMAL
         val bracket = config.forAge(workerAge)
         return when {
-            temperature >= bracket.tempDanger -> SafetyStatus.DANGER
-            temperature >= bracket.tempWarning -> SafetyStatus.WARNING
+            temperature >= bracket.tempDanger || temperature <= bracket.tempLowDanger -> SafetyStatus.DANGER
+            temperature >= bracket.tempWarning || temperature <= bracket.tempLowWarning -> SafetyStatus.WARNING
             else -> SafetyStatus.NORMAL
         }
     }

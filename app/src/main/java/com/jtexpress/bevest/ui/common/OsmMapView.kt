@@ -61,6 +61,32 @@ data class OsmPin(
 )
 
 /**
+ * Opens the given GPS coordinates directly in Google Maps (new browser tab or Google Maps app).
+ */
+fun openInGoogleMaps(
+    context: Context,
+    latitude: Double,
+    longitude: Double,
+    label: String = "Worker Location",
+) {
+    val googleMapsWebUri = Uri.parse(
+        "https://www.google.com/maps/search/?api=1&query=$latitude,$longitude",
+    )
+    val webIntent = Intent(Intent.ACTION_VIEW, googleMapsWebUri).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    try {
+        context.startActivity(webIntent)
+    } catch (_: Exception) {
+        val encodedLabel = Uri.encode(label)
+        val geoUri = Uri.parse("geo:$latitude,$longitude?q=$latitude,$longitude($encodedLabel)")
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, geoUri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+}
+
+/**
  * Launches the phone's external map app (Google Maps / Waze / default handler)
  * pinned to the given GPS coordinates.
  */
@@ -69,19 +95,7 @@ fun openExternalMap(
     latitude: Double,
     longitude: Double,
     label: String = "Worker Location",
-) {
-    val encodedLabel = Uri.encode(label)
-    val geoUri = Uri.parse("geo:$latitude,$longitude?q=$latitude,$longitude($encodedLabel)")
-    val mapIntent = Intent(Intent.ACTION_VIEW, geoUri).apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    try {
-        context.startActivity(mapIntent)
-    } catch (_: Exception) {
-        val webUri = Uri.parse("https://www.openstreetmap.org/?mlat=$latitude&mlon=$longitude#map=18/$latitude/$longitude")
-        context.startActivity(Intent(Intent.ACTION_VIEW, webUri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    }
-}
+) = openInGoogleMaps(context, latitude, longitude, label)
 
 /**
  * Free, zero-API-key interactive OpenStreetMap view powered by OSMDroid.

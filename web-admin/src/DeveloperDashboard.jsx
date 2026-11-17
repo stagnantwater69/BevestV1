@@ -215,17 +215,30 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
   // Vital Signs Age-Based Thresholds State
   const DEFAULT_VITAL_BRACKETS = [
-    { id: '18-29', label: '18 – 29 yrs', minAge: 18, maxAge: 29, hrWarning: 100, hrDanger: 120, tempWarning: 37.8, tempDanger: 38.5 },
-    { id: '30-39', label: '30 – 39 yrs', minAge: 30, maxAge: 39, hrWarning: 98,  hrDanger: 118, tempWarning: 37.8, tempDanger: 38.5 },
-    { id: '40-49', label: '40 – 49 yrs', minAge: 40, maxAge: 49, hrWarning: 95,  hrDanger: 115, tempWarning: 37.7, tempDanger: 38.4 },
-    { id: '50-59', label: '50 – 59 yrs', minAge: 50, maxAge: 59, hrWarning: 92,  hrDanger: 110, tempWarning: 37.6, tempDanger: 38.3 },
-    { id: '60+',   label: '60+ yrs',     minAge: 60, maxAge: 120, hrWarning: 88, hrDanger: 105, tempWarning: 37.5, tempDanger: 38.2 }
+    { id: '18-29', label: '18 – 29 yrs', minAge: 18, maxAge: 29, hrLowDanger: 45, hrLowWarning: 55, hrWarning: 100, hrDanger: 120, tempLowDanger: 35.0, tempLowWarning: 35.8, tempWarning: 37.8, tempDanger: 38.5 },
+    { id: '30-39', label: '30 – 39 yrs', minAge: 30, maxAge: 39, hrLowDanger: 45, hrLowWarning: 55, hrWarning: 98,  hrDanger: 118, tempLowDanger: 35.0, tempLowWarning: 35.8, tempWarning: 37.8, tempDanger: 38.5 },
+    { id: '40-49', label: '40 – 49 yrs', minAge: 40, maxAge: 49, hrLowDanger: 45, hrLowWarning: 55, hrWarning: 95,  hrDanger: 115, tempLowDanger: 35.0, tempLowWarning: 35.8, tempWarning: 37.7, tempDanger: 38.4 },
+    { id: '50-59', label: '50 – 59 yrs', minAge: 50, maxAge: 59, hrLowDanger: 45, hrLowWarning: 55, hrWarning: 92,  hrDanger: 110, tempLowDanger: 35.0, tempLowWarning: 35.8, tempWarning: 37.6, tempDanger: 38.3 },
+    { id: '60+',   label: '60+ yrs',     minAge: 60, maxAge: 120, hrLowDanger: 45, hrLowWarning: 55, hrWarning: 88, hrDanger: 105, tempLowDanger: 35.0, tempLowWarning: 35.8, tempWarning: 37.5, tempDanger: 38.2 }
   ];
+  const FALL_SENSITIVITY_PRESETS = {
+    HIGH:   { label: 'High Sensitivity',   desc: 'Detects lighter falls & lower-G impacts (more sensitive)', fallFreefallG: 0.75, fallImpactG: 2.2, fallSevereImpactG: 3.5 },
+    MEDIUM: { label: 'Medium (Default)',   desc: 'Balanced detection for standard field work',               fallFreefallG: 0.65, fallImpactG: 2.8, fallSevereImpactG: 4.5 },
+    LOW:    { label: 'Low Sensitivity',    desc: 'Requires stronger impact — fewer false positives',         fallFreefallG: 0.50, fallImpactG: 3.5, fallSevereImpactG: 5.5 }
+  };
   const [vitalBrackets, setVitalBrackets] = useState(DEFAULT_VITAL_BRACKETS);
+  const [defaultHrLowDanger, setDefaultHrLowDanger] = useState(45);
+  const [defaultHrLowWarning, setDefaultHrLowWarning] = useState(55);
   const [defaultHrWarning, setDefaultHrWarning] = useState(100);
   const [defaultHrDanger, setDefaultHrDanger] = useState(120);
+  const [defaultTempLowDanger, setDefaultTempLowDanger] = useState(35.0);
+  const [defaultTempLowWarning, setDefaultTempLowWarning] = useState(35.8);
   const [defaultTempWarning, setDefaultTempWarning] = useState(37.8);
   const [defaultTempDanger, setDefaultTempDanger] = useState(38.5);
+  const [fallSensitivity, setFallSensitivity] = useState('MEDIUM');
+  const [fallFreefallG, setFallFreefallG] = useState(0.65);
+  const [fallImpactG, setFallImpactG] = useState(2.8);
+  const [fallSevereImpactG, setFallSevereImpactG] = useState(4.5);
   const [vitalMeta, setVitalMeta] = useState({
     inactivitySeconds: 180,
     offlineTimeoutSeconds: 60,
@@ -459,16 +472,28 @@ const DeveloperDashboard = ({ user, onLogout }) => {
           label: b.label || `${b.minAge} – ${b.maxAge} yrs`,
           minAge: Number(b.minAge) || 18,
           maxAge: Number(b.maxAge) || 99,
+          hrLowDanger: b.hrLowDanger != null ? Number(b.hrLowDanger) : 45,
+          hrLowWarning: b.hrLowWarning != null ? Number(b.hrLowWarning) : 55,
           hrWarning: Number(b.hrWarning) || 100,
           hrDanger: Number(b.hrDanger) || 120,
+          tempLowDanger: b.tempLowDanger != null ? Number(b.tempLowDanger) : 35.0,
+          tempLowWarning: b.tempLowWarning != null ? Number(b.tempLowWarning) : 35.8,
           tempWarning: Number(b.tempWarning) || 37.8,
           tempDanger: Number(b.tempDanger) || 38.5
         })));
       }
+      if (d.heartRateLowDanger != null) setDefaultHrLowDanger(Number(d.heartRateLowDanger));
+      if (d.heartRateLowWarning != null) setDefaultHrLowWarning(Number(d.heartRateLowWarning));
       if (d.heartRateHigh != null) setDefaultHrWarning(Number(d.heartRateHigh));
       if (d.heartRateDanger != null) setDefaultHrDanger(Number(d.heartRateDanger));
+      if (d.temperatureLowDanger != null) setDefaultTempLowDanger(Number(d.temperatureLowDanger));
+      if (d.temperatureLowWarning != null) setDefaultTempLowWarning(Number(d.temperatureLowWarning));
       if (d.temperatureHigh != null) setDefaultTempWarning(Number(d.temperatureHigh));
       if (d.temperatureDanger != null) setDefaultTempDanger(Number(d.temperatureDanger));
+      if (d.fallSensitivity) setFallSensitivity(String(d.fallSensitivity));
+      if (d.fallFreefallG != null) setFallFreefallG(Number(d.fallFreefallG));
+      if (d.fallImpactG != null) setFallImpactG(Number(d.fallImpactG));
+      if (d.fallSevereImpactG != null) setFallSevereImpactG(Number(d.fallSevereImpactG));
       setVitalMeta({
         inactivitySeconds: Number(d.inactivitySeconds) || 180,
         offlineTimeoutSeconds: Number(d.offlineTimeoutSeconds) || 60,
@@ -527,8 +552,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
           label: `${minAge} – ${maxAge} yrs`,
           minAge,
           maxAge,
+          hrLowDanger: 45,
+          hrLowWarning: 55,
           hrWarning: 95,
           hrDanger: 115,
+          tempLowDanger: 35.0,
+          tempLowWarning: 35.8,
           tempWarning: 37.7,
           tempDanger: 38.4
         }
@@ -544,6 +573,15 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     setVitalBrackets(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleSelectFallPreset = (presetKey) => {
+    const preset = FALL_SENSITIVITY_PRESETS[presetKey];
+    if (!preset) return;
+    setFallSensitivity(presetKey);
+    setFallFreefallG(preset.fallFreefallG);
+    setFallImpactG(preset.fallImpactG);
+    setFallSevereImpactG(preset.fallSevereImpactG);
+  };
+
   const handleSaveVitalThresholds = async () => {
     setSavingVitals(true);
     try {
@@ -552,17 +590,29 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         label: String(b.label || `${b.minAge} – ${b.maxAge} yrs`),
         minAge: Number(b.minAge) || 18,
         maxAge: Number(b.maxAge) || 99,
+        hrLowDanger: Number(b.hrLowDanger) || 45,
+        hrLowWarning: Number(b.hrLowWarning) || 55,
         hrWarning: Number(b.hrWarning) || 100,
         hrDanger: Number(b.hrDanger) || 120,
+        tempLowDanger: Number(b.tempLowDanger) || 35.0,
+        tempLowWarning: Number(b.tempLowWarning) || 35.8,
         tempWarning: Number(b.tempWarning) || 37.8,
         tempDanger: Number(b.tempDanger) || 38.5
       }));
 
       const payload = {
+        heartRateLowDanger: Number(defaultHrLowDanger) || 45,
+        heartRateLowWarning: Number(defaultHrLowWarning) || 55,
         heartRateHigh: Number(defaultHrWarning) || 100,
         heartRateDanger: Number(defaultHrDanger) || 120,
+        temperatureLowDanger: Number(defaultTempLowDanger) || 35.0,
+        temperatureLowWarning: Number(defaultTempLowWarning) || 35.8,
         temperatureHigh: Number(defaultTempWarning) || 37.8,
         temperatureDanger: Number(defaultTempDanger) || 38.5,
+        fallSensitivity: String(fallSensitivity || 'MEDIUM'),
+        fallFreefallG: Number(fallFreefallG) || 0.65,
+        fallImpactG: Number(fallImpactG) || 2.8,
+        fallSevereImpactG: Number(fallSevereImpactG) || 4.5,
         inactivitySeconds: Number(vitalMeta.inactivitySeconds) || 180,
         offlineTimeoutSeconds: Number(vitalMeta.offlineTimeoutSeconds) || 60,
         responseTimeoutSeconds: Number(vitalMeta.responseTimeoutSeconds) || 60,
@@ -613,17 +663,33 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     const ok = window.confirm('Reset all age-based Heart Rate and Body Temperature thresholds back to factory defaults?');
     if (!ok) return;
     setVitalBrackets(DEFAULT_VITAL_BRACKETS);
+    setDefaultHrLowDanger(45);
+    setDefaultHrLowWarning(55);
     setDefaultHrWarning(100);
     setDefaultHrDanger(120);
+    setDefaultTempLowDanger(35.0);
+    setDefaultTempLowWarning(35.8);
     setDefaultTempWarning(37.8);
     setDefaultTempDanger(38.5);
+    setFallSensitivity('MEDIUM');
+    setFallFreefallG(0.65);
+    setFallImpactG(2.8);
+    setFallSevereImpactG(4.5);
     setSavingVitals(true);
     try {
       const payload = {
+        heartRateLowDanger: 45,
+        heartRateLowWarning: 55,
         heartRateHigh: 100,
         heartRateDanger: 120,
+        temperatureLowDanger: 35.0,
+        temperatureLowWarning: 35.8,
         temperatureHigh: 37.8,
         temperatureDanger: 38.5,
+        fallSensitivity: 'MEDIUM',
+        fallFreefallG: 0.65,
+        fallImpactG: 2.8,
+        fallSevereImpactG: 4.5,
         inactivitySeconds: 180,
         offlineTimeoutSeconds: 60,
         responseTimeoutSeconds: 60,
@@ -2741,14 +2807,40 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                         </div>
                       </div>
 
-                      {/* Heart Rate Warning & Danger */}
+                      {/* Heart Rate Low & High Warning & Danger */}
                       <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '0.85rem', marginBottom: '0.85rem', border: '1px solid #e2e8f0' }}>
                         <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                           ❤️ Heart Rate Thresholds (BPM)
                         </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', alignItems: 'end', marginBottom: '0.65rem' }}>
+                          <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                            <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>LOW DANGER (RED) ≤</label>
+                            <input
+                              type="number"
+                              className="dev-input"
+                              min={25}
+                              max={90}
+                              value={bracket.hrLowDanger ?? 45}
+                              onChange={(e) => handleVitalBracketChange(idx, 'hrLowDanger', e.target.value)}
+                              style={{ borderColor: '#fca5a5', backgroundColor: '#fef2f2', fontWeight: 700, width: '100%', boxSizing: 'border-box', height: '42px' }}
+                            />
+                          </div>
+                          <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                            <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>LOW WARN (YELLOW) ≤</label>
+                            <input
+                              type="number"
+                              className="dev-input"
+                              min={30}
+                              max={100}
+                              value={bracket.hrLowWarning ?? 55}
+                              onChange={(e) => handleVitalBracketChange(idx, 'hrLowWarning', e.target.value)}
+                              style={{ borderColor: '#fcd34d', backgroundColor: '#fffbeb', fontWeight: 700, width: '100%', boxSizing: 'border-box', height: '42px' }}
+                            />
+                          </div>
+                        </div>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', alignItems: 'end' }}>
                           <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-                            <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>WARNING (YELLOW) ≥</label>
+                            <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>HIGH WARN (YELLOW) ≥</label>
                             <input
                               type="number"
                               className="dev-input"
@@ -2760,7 +2852,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                             />
                           </div>
                           <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-                            <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DANGER (RED) ≥</label>
+                            <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>HIGH DANGER (RED) ≥</label>
                             <input
                               type="number"
                               className="dev-input"
@@ -2774,14 +2866,42 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                         </div>
                       </div>
 
-                      {/* Body Temperature Warning & Danger */}
+                      {/* Body Temperature Low & High Warning & Danger */}
                       <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '0.85rem', border: '1px solid #e2e8f0' }}>
                         <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                           🌡️ Body Temperature Thresholds (°C)
                         </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', alignItems: 'end', marginBottom: '0.65rem' }}>
+                          <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                            <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>LOW DANGER (RED) ≤</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              className="dev-input"
+                              min={30.0}
+                              max={37.0}
+                              value={bracket.tempLowDanger ?? 35.0}
+                              onChange={(e) => handleVitalBracketChange(idx, 'tempLowDanger', e.target.value)}
+                              style={{ borderColor: '#fca5a5', backgroundColor: '#fef2f2', fontWeight: 700, width: '100%', boxSizing: 'border-box', height: '42px' }}
+                            />
+                          </div>
+                          <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                            <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>LOW WARN (YELLOW) ≤</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              className="dev-input"
+                              min={31.0}
+                              max={37.5}
+                              value={bracket.tempLowWarning ?? 35.8}
+                              onChange={(e) => handleVitalBracketChange(idx, 'tempLowWarning', e.target.value)}
+                              style={{ borderColor: '#fcd34d', backgroundColor: '#fffbeb', fontWeight: 700, width: '100%', boxSizing: 'border-box', height: '42px' }}
+                            />
+                          </div>
+                        </div>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', alignItems: 'end' }}>
                           <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-                            <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>WARNING (YELLOW) ≥</label>
+                            <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>HIGH WARN (YELLOW) ≥</label>
                             <input
                               type="number"
                               step="0.1"
@@ -2794,7 +2914,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                             />
                           </div>
                           <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-                            <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DANGER (RED) ≥</label>
+                            <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>HIGH DANGER (RED) ≥</label>
                             <input
                               type="number"
                               step="0.1"
@@ -2814,7 +2934,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               </div>
 
               {/* Fallback Thresholds (when worker age is not specified) */}
-              <div className="dev-card">
+              <div className="dev-card" style={{ marginBottom: '1.5rem' }}>
                 <div className="dev-card-header">
                   <h3 className="dev-card-title">
                     <FiShield /> Default Fallback Thresholds (When Worker Age is Unspecified)
@@ -2823,9 +2943,29 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 0, marginBottom: '1rem' }}>
                   Used automatically on the SSO app if a worker profile does not yet have a birthdate or saved age.
                 </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', alignItems: 'end' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '1rem', alignItems: 'end', marginBottom: '1rem' }}>
                   <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-                    <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT HR WARNING (BPM)</label>
+                    <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT HR LOW DANGER ≤</label>
+                    <input
+                      type="number"
+                      className="dev-input"
+                      value={defaultHrLowDanger}
+                      onChange={(e) => setDefaultHrLowDanger(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                    />
+                  </div>
+                  <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                    <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT HR LOW WARN ≤</label>
+                    <input
+                      type="number"
+                      className="dev-input"
+                      value={defaultHrLowWarning}
+                      onChange={(e) => setDefaultHrLowWarning(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                    />
+                  </div>
+                  <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                    <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT HR HIGH WARN ≥</label>
                     <input
                       type="number"
                       className="dev-input"
@@ -2835,7 +2975,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     />
                   </div>
                   <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-                    <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT HR DANGER (BPM)</label>
+                    <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT HR HIGH DANGER ≥</label>
                     <input
                       type="number"
                       className="dev-input"
@@ -2844,8 +2984,32 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
                     />
                   </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '1rem', alignItems: 'end' }}>
                   <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-                    <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT TEMP WARNING (°C)</label>
+                    <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT TEMP LOW DANGER ≤</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      className="dev-input"
+                      value={defaultTempLowDanger}
+                      onChange={(e) => setDefaultTempLowDanger(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                    />
+                  </div>
+                  <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                    <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT TEMP LOW WARN ≤</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      className="dev-input"
+                      value={defaultTempLowWarning}
+                      onChange={(e) => setDefaultTempLowWarning(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                    />
+                  </div>
+                  <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                    <label className="dev-form-label" style={{ color: '#b45309', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT TEMP HIGH WARN ≥</label>
                     <input
                       type="number"
                       step="0.1"
@@ -2856,7 +3020,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     />
                   </div>
                   <div className="dev-form-group" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-                    <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT TEMP DANGER (°C)</label>
+                    <label className="dev-form-label" style={{ color: '#b91c1c', whiteSpace: 'nowrap', fontSize: '0.72rem', marginBottom: '0.4rem' }}>DEFAULT TEMP HIGH DANGER ≥</label>
                     <input
                       type="number"
                       step="0.1"
@@ -2867,14 +3031,110 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     />
                   </div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.75rem' }}>
+              </div>
+
+              {/* Fall Detection Sensitivity Thresholds (Synced to ESP32 Vests) */}
+              <div className="dev-card">
+                <div className="dev-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <div>
+                    <h3 className="dev-card-title" style={{ marginBottom: '0.25rem' }}>
+                      <FiAlertTriangle /> Fall Detection Sensitivity (ESP32 MPU6050)
+                    </h3>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      Adjust how sensitive the vest accelerometer is when detecting falls. Syncs live to connected ESP32 vests via Firebase RTDB.
+                    </p>
+                  </div>
+                  <span style={{
+                    padding: '0.3rem 0.75rem',
+                    borderRadius: '999px',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    background: fallSensitivity === 'HIGH' ? '#fef2f2' : fallSensitivity === 'LOW' ? '#eff6ff' : '#fff7ed',
+                    color: fallSensitivity === 'HIGH' ? '#dc2626' : fallSensitivity === 'LOW' ? '#2563eb' : '#ea580c',
+                    border: '1px solid currentColor'
+                  }}>
+                    MODE: {fallSensitivity}
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+                  {Object.entries(FALL_SENSITIVITY_PRESETS).map(([key, preset]) => {
+                    const selected = fallSensitivity === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => handleSelectFallPreset(key)}
+                        style={{
+                          textAlign: 'left',
+                          padding: '0.85rem',
+                          borderRadius: '10px',
+                          border: selected ? '2px solid #ea580c' : '1px solid var(--border-color)',
+                          background: selected ? '#fff7ed' : '#ffffff',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: selected ? '#c2410c' : 'var(--text-main)', marginBottom: '0.25rem' }}>
+                          {preset.label}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          {preset.desc}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', alignItems: 'end' }}>
+                  <div className="dev-form-group" style={{ marginBottom: 0 }}>
+                    <label className="dev-form-label" style={{ fontSize: '0.72rem', marginBottom: '0.4rem' }}>FREE-FALL DROP THRESHOLD (&lt; G)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min={0.25}
+                      max={0.95}
+                      className="dev-input"
+                      value={fallFreefallG}
+                      onChange={(e) => { setFallFreefallG(e.target.value); setFallSensitivity('CUSTOM'); }}
+                      style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                    />
+                  </div>
+                  <div className="dev-form-group" style={{ marginBottom: 0 }}>
+                    <label className="dev-form-label" style={{ fontSize: '0.72rem', marginBottom: '0.4rem' }}>IMPACT AFTER FREE-FALL (&gt; G)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min={1.4}
+                      max={6.5}
+                      className="dev-input"
+                      value={fallImpactG}
+                      onChange={(e) => { setFallImpactG(e.target.value); setFallSensitivity('CUSTOM'); }}
+                      style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                    />
+                  </div>
+                  <div className="dev-form-group" style={{ marginBottom: 0 }}>
+                    <label className="dev-form-label" style={{ fontSize: '0.72rem', marginBottom: '0.4rem' }}>SEVERE DIRECT IMPACT (&gt; G)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min={2.2}
+                      max={8.0}
+                      className="dev-input"
+                      value={fallSevereImpactG}
+                      onChange={(e) => { setFallSevereImpactG(e.target.value); setFallSensitivity('CUSTOM'); }}
+                      style={{ width: '100%', boxSizing: 'border-box', height: '42px' }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
                   <button
                     type="button"
                     className="dev-btn-orange"
                     onClick={handleSaveVitalThresholds}
                     disabled={savingVitals}
                   >
-                    <FiSave /> {savingVitals ? 'Saving...' : 'Save All Vital Signs Thresholds'}
+                    <FiSave /> {savingVitals ? 'Saving...' : 'Save All Vital & Fall Thresholds'}
                   </button>
                 </div>
               </div>

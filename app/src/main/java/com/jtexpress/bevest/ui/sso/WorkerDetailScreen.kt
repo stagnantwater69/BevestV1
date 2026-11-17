@@ -511,14 +511,14 @@ private fun VitalSignsCombinedCard(
                     } else if (ageBracket != null) {
                         Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                             Text(
-                                text = "Warn ≥${ageBracket.hrWarning}",
+                                text = "Warn ≤${ageBracket.hrLowWarning} / ≥${ageBracket.hrWarning}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 softWrap = false,
                             )
                             Text(
-                                text = "Danger ≥${ageBracket.hrDanger}",
+                                text = "Danger ≤${ageBracket.hrLowDanger} / ≥${ageBracket.hrDanger}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -589,14 +589,14 @@ private fun VitalSignsCombinedCard(
                     } else if (ageBracket != null) {
                         Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                             Text(
-                                text = "Warn ≥${"%.1f".format(ageBracket.tempWarning)}°",
+                                text = "Warn ≤${"%.1f".format(ageBracket.tempLowWarning)}° / ≥${"%.1f".format(ageBracket.tempWarning)}°",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 softWrap = false,
                             )
                             Text(
-                                text = "Danger ≥${"%.1f".format(ageBracket.tempDanger)}°",
+                                text = "Danger ≤${"%.1f".format(ageBracket.tempLowDanger)}° / ≥${"%.1f".format(ageBracket.tempDanger)}°",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -693,14 +693,14 @@ private fun VitalLogsSheet(
                     items(logs, key = { it.timestamp }) { entry ->
                         val hrTint = when {
                             entry.heartRate == null || ageBracket == null -> palette.normal
-                            entry.heartRate >= ageBracket.hrDanger -> palette.danger
-                            entry.heartRate >= ageBracket.hrWarning -> palette.warning
+                            entry.heartRate >= ageBracket.hrDanger || entry.heartRate <= ageBracket.hrLowDanger -> palette.danger
+                            entry.heartRate >= ageBracket.hrWarning || entry.heartRate <= ageBracket.hrLowWarning -> palette.warning
                             else -> palette.normal
                         }
                         val tempTint = when {
                             entry.temperature == null || ageBracket == null -> palette.normal
-                            entry.temperature >= ageBracket.tempDanger -> palette.danger
-                            entry.temperature >= ageBracket.tempWarning -> palette.warning
+                            entry.temperature >= ageBracket.tempDanger || entry.temperature <= ageBracket.tempLowDanger -> palette.danger
+                            entry.temperature >= ageBracket.tempWarning || entry.temperature <= ageBracket.tempLowWarning -> palette.warning
                             else -> palette.normal
                         }
                         Surface(
@@ -950,7 +950,7 @@ private fun LocationCard(
                             modifier = Modifier.size(16.dp),
                         )
                         Spacer(Modifier.width(4.dp))
-                        Text("Open in Maps")
+                        Text("Open in Google Maps")
                     }
                 }
             } else {

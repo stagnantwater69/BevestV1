@@ -365,7 +365,7 @@ class MonitoringRepositoryImpl @Inject constructor(
         val now = System.currentTimeMillis()
         val waitStart = waitingStartedAt[workerId]
         val clearTs = lastClearedAt[workerId] ?: 0L
-        val recentlyCleared = (now - clearTs) < 4_500L
+        val recentlyCleared = (now - clearTs) < 12_000L
 
         if (candidates.isEmpty()) {
             if (overrideState != null && overrideState != SafetyResponseState.NONE) {
@@ -497,7 +497,13 @@ class MonitoringRepositoryImpl @Inject constructor(
             latitude = rawBest.latitude ?: bestGps?.latitude,
             longitude = rawBest.longitude ?: bestGps?.longitude,
             fallDetected = anyFall,
-            motionState = if (anyFall) MotionState.FALL_DETECTED else rawBest.motionState,
+            motionState = if (anyFall) {
+                MotionState.FALL_DETECTED
+            } else if (rawBest.motionState == MotionState.FALL_DETECTED) {
+                MotionState.STATIONARY
+            } else {
+                rawBest.motionState
+            },
             safetyResponse = effectiveResponse,
             timestamp = if (bestTimestamp > 0L) bestTimestamp else now,
         )
@@ -757,7 +763,7 @@ class MonitoringRepositoryImpl @Inject constructor(
 
         // 1. Update /liveReadings/{workerId}
         runCatching {
-            database.getReference(FirebasePaths.liveReading(workerId)).updateChildren(updates)
+            database.getReference(FirebasePaths.liveReading(workerId)).updateChildren(updates).await()
         }
 
         // 2. Discover all vestIds and MAC addresses associated with this worker (including
@@ -854,19 +860,13 @@ class MonitoringRepositoryImpl @Inject constructor(
 
             for (vId in targetVestIds) {
                 if (!vId.startsWith("VEST-", ignoreCase = true)) continue
-                database.getReference("vestsLive/$vId/safetyResponse").setValue(state.name)
-                database.getReference("liveReadingsByVest/$vId").updateChildren(updates)
-                if (clearFall) {
-                    database.getReference("vestsLive/$vId/fallDetected").setValue(false)
-                }
+                runCatching { database.getReference("vestsLive/$vId").updateChildren(updates).await() }
+                runCatching { database.getReference("liveReadingsByVest/$vId").updateChildren(updates).await() }
             }
 
             for (mac in targetMacs) {
-                database.getReference("vestsLiveByMac/$mac/safetyResponse").setValue(state.name)
-                database.getReference("liveReadingsByMac/$mac").updateChildren(updates)
-                if (clearFall) {
-                    database.getReference("vestsLiveByMac/$mac/fallDetected").setValue(false)
-                }
+                runCatching { database.getReference("vestsLiveByMac/$mac").updateChildren(updates).await() }
+                runCatching { database.getReference("liveReadingsByMac/$mac").updateChildren(updates).await() }
             }
         }
     }

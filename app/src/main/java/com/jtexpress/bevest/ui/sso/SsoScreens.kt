@@ -14,10 +14,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -52,6 +56,7 @@ import com.jtexpress.bevest.ui.common.StatusBadge
 import com.jtexpress.bevest.ui.common.SuccessNote
 import com.jtexpress.bevest.ui.common.detail
 import com.jtexpress.bevest.ui.common.label
+import com.jtexpress.bevest.ui.common.openInGoogleMaps
 import com.jtexpress.bevest.ui.theme.BevestIcons
 import com.jtexpress.bevest.ui.theme.BevestShapes
 import com.jtexpress.bevest.ui.theme.Elevation
@@ -519,6 +524,8 @@ fun IncidentDetailScreen(
                     }
 
                     if (incident.latitude != null && incident.longitude != null) {
+                        val context = LocalContext.current
+                        val workerLabel = state.worker?.fullName?.takeIf { it.isNotBlank() } ?: incident.workerId
                         val incidentStatus = when (incident.severity) {
                             AlertSeverity.WARNING -> SafetyStatus.WARNING
                             AlertSeverity.DANGER -> SafetyStatus.DANGER
@@ -534,24 +541,62 @@ fun IncidentDetailScreen(
                             shadowElevation = Elevation.card,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(200.dp)
                                 .clip(BevestShapes.card),
                         ) {
-                            OsmMapView(
-                                pins = listOf(
-                                    OsmPin(
-                                        id = incident.incidentId,
-                                        latitude = incident.latitude,
-                                        longitude = incident.longitude,
-                                        title = state.worker?.fullName?.takeIf { it.isNotBlank() } ?: incident.workerId,
-                                        snippet = incident.type.label(),
-                                        status = incidentStatus,
-                                    ),
-                                ),
-                                modifier = Modifier.fillMaxSize(),
-                                initialZoom = 18.0,
-                                followSinglePin = false,
-                            )
+                            Column {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(200.dp),
+                                ) {
+                                    OsmMapView(
+                                        pins = listOf(
+                                            OsmPin(
+                                                id = incident.incidentId,
+                                                latitude = incident.latitude,
+                                                longitude = incident.longitude,
+                                                title = workerLabel,
+                                                snippet = incident.type.label(),
+                                                status = incidentStatus,
+                                            ),
+                                        ),
+                                        modifier = Modifier.fillMaxSize(),
+                                        initialZoom = 18.0,
+                                        followSinglePin = false,
+                                    )
+                                }
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        "%.6f, %.6f".format(incident.latitude, incident.longitude),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    TextButton(
+                                        onClick = {
+                                            openInGoogleMaps(
+                                                context,
+                                                incident.latitude,
+                                                incident.longitude,
+                                                workerLabel,
+                                            )
+                                        },
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.OpenInNew,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Open in Google Maps")
+                                    }
+                                }
+                            }
                         }
                     }
 

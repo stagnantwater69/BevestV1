@@ -5,22 +5,34 @@ data class AgeVitalThreshold(
     val label: String = "18 – 29 yrs",
     val minAge: Int = 18,
     val maxAge: Int = 29,
+    val hrLowDanger: Int = 45,
+    val hrLowWarning: Int = 55,
     val hrWarning: Int = 100,
     val hrDanger: Int = 120,
+    val tempLowDanger: Double = 35.0,
+    val tempLowWarning: Double = 35.8,
     val tempWarning: Double = 37.8,
     val tempDanger: Double = 38.5,
 )
 
 /**
- * Safety threshold parameters, including age-based Warning and Danger thresholds
- * for Heart Rate (BPM) and Body Temperature (°C) configured by the Developer in
- * `settings/thresholds`.
+ * Safety threshold parameters, including age-based Low/High Warning and Danger thresholds
+ * for Heart Rate (BPM), Body Temperature (°C), and Fall Detection sensitivity configured by
+ * the Developer in `settings/thresholds`.
  */
 data class ThresholdConfig(
+    val heartRateLowDanger: Int = 45,
+    val heartRateLowWarning: Int = 55,
     val heartRateHigh: Int = 100,
     val heartRateDanger: Int = 120,
+    val temperatureLowDanger: Double = 35.0,
+    val temperatureLowWarning: Double = 35.8,
     val temperatureHigh: Double = 37.8,
     val temperatureDanger: Double = 38.5,
+    val fallSensitivity: String = "MEDIUM",
+    val fallFreefallG: Double = 0.65,
+    val fallImpactG: Double = 2.8,
+    val fallSevereImpactG: Double = 4.5,
     val warningDurationSeconds: Int = 30,
     val inactivitySeconds: Int = 180,
     val offlineTimeoutSeconds: Int = 60,
@@ -30,7 +42,8 @@ data class ThresholdConfig(
 ) {
     /**
      * Resolves the Warning and Danger thresholds for a worker's [age].
-     * Falls back to global [heartRateHigh]/[heartRateDanger] and [temperatureHigh]/[temperatureDanger]
+     * Falls back to global [heartRateLowDanger]/[heartRateLowWarning]/[heartRateHigh]/[heartRateDanger]
+     * and [temperatureLowDanger]/[temperatureLowWarning]/[temperatureHigh]/[temperatureDanger]
      * when age is not provided.
      */
     fun forAge(age: Int?): AgeVitalThreshold {
@@ -45,8 +58,12 @@ data class ThresholdConfig(
             label = "Default",
             minAge = 18,
             maxAge = 99,
+            hrLowDanger = heartRateLowDanger,
+            hrLowWarning = heartRateLowWarning,
             hrWarning = heartRateHigh,
             hrDanger = heartRateDanger,
+            tempLowDanger = temperatureLowDanger,
+            tempLowWarning = temperatureLowWarning,
             tempWarning = temperatureHigh,
             tempDanger = temperatureDanger,
         )

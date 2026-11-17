@@ -264,6 +264,11 @@ unsigned long      d15PressStart             = 0;
 bool               d15LongPressHandled       = false;
 uint64_t           lastVitalLogMinute        = 0;
 
+// Dynamic Fall Detection Sensitivity Thresholds (synced from /settings/thresholds in RTDB)
+volatile float     fallFreefallG             = 0.65f;
+volatile float     fallImpactG               = 2.8f;
+volatile float     fallSevereImpactG         = 4.5f;
+
 unsigned long      lastTempRead        = 0;
 unsigned long      lastPush            = 0;
 unsigned long      lastVestLive        = 0;
@@ -307,6 +312,7 @@ void pushReadingToFirebase(bool isFallEvent = false);
 void pushVestLiveToFirebase();
 void pushVitalLogToFirebase();
 void checkRemoteSafetyResponse();
+void checkRemoteFallThresholds();
 void checkRemoteWifiCommand();
 void syncOnlinePresenceToFirestore(bool isOnline = true);
 void firebaseCloudTask(void* pvParameters);
@@ -1156,7 +1162,31 @@ void firebaseCloudTask(void* pvParameters) {
       checkRemoteWifiCommand();
     }
 
+    // 10. Sync Fall Detection Sensitivity Thresholds from Developer Settings (every 10s)
+    static unsigned long lastFallThreshCheck = 0;
+    if (now - lastFallThreshCheck >= 10000) {
+      lastFallThreshCheck = now;
+      checkRemoteFallThresholds();
+    }
+
     vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
+void checkRemoteFallThresholds() {
+  if (WiFi.status() != WL_CONNECTED || !Firebase.ready() || inProvisioningMode) return;
+
+  if (Firebase.getFloat(fbdo, "/settings/thresholds/fallFreefallG")) {
+    float val = fbdo.floatData();
+    if (val >= 0.25f && val <= 0.95f) fallFreefallG = val;
+  }
+  if (Firebase.getFloat(fbdo, "/settings/thresholds/fallImpactG")) {
+    float val = fbdo.floatData();
+    if (val >= 1.4f && val <= 6.5f) fallImpactG = val;
+  }
+  if (Firebase.getFloat(fbdo, "/settings/thresholds/fallSevereImpactG")) {
+    float val = fbdo.floatData();
+    if (val >= 2.2f && val <= 8.0f) fallSevereImpactG = val;
   }
 }
 
@@ -1511,15 +1541,15 @@ void readMPU6050() {
   static unsigned long freefallStartTime = 0;
   static bool freefallDetected = false;
 
-  // Stage 1: Free-fall / sudden drop (< 0.65g)
-  if (mag < 0.65f) {
+  // Stage 1: Free-fall / sudden drop (< fallFreefallG, default 0.65g)
+  if (mag < fallFreefallG) {
     freefallDetected = true;
     freefallStartTime = now;
   }
 
-  // Stage 2: Impact (> 2.8g within 1.2s of free-fall, or severe impact > 4.5g)
-  bool impactAfterFreefall = freefallDetected && (now - freefallStartTime <= 1200) && (mag > 2.8f);
-  bool severeDirectImpact  = (mag > 4.5f);
+  // Stage 2: Impact (> fallImpactG within 1.2s of free-fall, or severe impact > fallSevereImpactG)
+  bool impactAfterFreefall = freefallDetected && (now - freefallStartTime <= 1200) && (mag > fallImpactG);
+  bool severeDirectImpact  = (mag > fallSevereImpactG);
 
   if (freefallDetected && (now - freefallStartTime > 1200)) {
     freefallDetected = false;
