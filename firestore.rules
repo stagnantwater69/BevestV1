@@ -192,8 +192,14 @@ service cloud.firestore {
 
     // ---- settings ----
     match /settings/{doc} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin() || isDeveloper();
+      allow read: if doc == 'webpage' || isSignedIn();
+      allow write: if isDeveloper() || (doc != 'webpage' && isAdmin());
+    }
+
+    // ---- vest orders / inquiries (submitted from public Home webpage) ----
+    match /vestOrders/{id} {
+      allow create: if true;
+      allow read, update, delete: if isDeveloper() || isAdmin();
     }
   }
 }

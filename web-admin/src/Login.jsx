@@ -16,7 +16,7 @@ import logo from './assets/bevest_logo.png';
 import { logActivity } from './activityLogger';
 import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
 
-const Login = ({ onLogin }) => {
+const Login = ({ onLogin, onBackToHome }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -579,6 +579,17 @@ const Login = ({ onLogin }) => {
       <div className="login-card mobile-style-card">
         {/* Invisible reCAPTCHA container for Firebase Phone SMS Authentication */}
         <div id="recaptcha-container"></div>
+
+        {!isForgotMode && onBackToHome && (
+          <button
+            type="button"
+            className="back-to-login-btn"
+            onClick={onBackToHome}
+            style={{ marginBottom: '0.75rem' }}
+          >
+            <FiArrowLeft /> Back to Home
+          </button>
+        )}
 
         {/* Mobile Header: Logo + Motto Band */}
         <div className="mobile-header-section">

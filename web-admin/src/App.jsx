@@ -4,6 +4,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { FiLock, FiCheckCircle, FiX } from 'react-icons/fi';
 import { auth, db } from './firebase';
 import Login from './Login';
+import HomePage from './HomePage';
 import Dashboard from './Dashboard';
 import ContractorDashboard from './contractor/ContractorDashboard';
 import DeveloperDashboard from './DeveloperDashboard';
@@ -11,6 +12,7 @@ import ConfirmModal from './ConfirmModal';
 
 function App() {
   const [user, setUser] = useState(null);
+  const [showLogin, setShowLogin] = useState(false);
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
   const [passError, setPassError] = useState('');
@@ -54,13 +56,19 @@ function App() {
   };
 
   if (user) {
+    const handleLogout = () => {
+      setDismissedPrompt(false);
+      setShowLogin(false);
+      setUser(null);
+    };
+
     let dashboardView;
     if (user.role === 'DEVELOPER') {
-      dashboardView = <DeveloperDashboard user={user} onLogout={() => { setDismissedPrompt(false); setUser(null); }} />;
+      dashboardView = <DeveloperDashboard user={user} onLogout={handleLogout} />;
     } else if (user.role === 'CONTRACTOR') {
-      dashboardView = <ContractorDashboard user={user} onLogout={() => { setDismissedPrompt(false); setUser(null); }} />;
+      dashboardView = <ContractorDashboard user={user} onLogout={handleLogout} />;
     } else {
-      dashboardView = <Dashboard user={user} onLogout={() => { setDismissedPrompt(false); setUser(null); }} />;
+      dashboardView = <Dashboard user={user} onLogout={handleLogout} />;
     }
 
     return (
@@ -143,8 +151,29 @@ function App() {
     );
   }
 
+  if (showLogin) {
+    return (
+      <Login
+        onLogin={(userData) => {
+          setDismissedPrompt(false);
+          setShowLogin(false);
+          setUser(userData);
+        }}
+        onBackToHome={() => {
+          setShowLogin(false);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+      />
+    );
+  }
+
   return (
-    <Login onLogin={(userData) => { setDismissedPrompt(false); setUser(userData); }} />
+    <HomePage
+      onNavigateLogin={() => {
+        setShowLogin(true);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }}
+    />
   );
 }
 

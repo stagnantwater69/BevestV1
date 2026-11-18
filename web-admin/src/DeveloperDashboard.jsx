@@ -6,7 +6,7 @@ import {
   FiRefreshCw, FiEye, FiTrash2, FiShield, FiTag, 
   FiAlertTriangle, FiCheck, FiX, FiLayers, FiMenu,
   FiBriefcase, FiUserPlus, FiLock, FiMail, FiPhone,
-  FiSave, FiEdit3
+  FiSave, FiEdit3, FiGlobe
 } from 'react-icons/fi';
 import { 
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
@@ -25,6 +25,12 @@ import {
   resetSubscriptionPlans,
   formatPhp 
 } from './subscriptionPlans';
+import {
+  DEFAULT_WEBPAGE_SETTINGS,
+  useWebpageSettings,
+  saveWebpageSettings,
+  resetWebpageSettings
+} from './webpageConfig';
 import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
 import ConfirmModal from './ConfirmModal';
 import logo from './assets/bevest_logo.png';
@@ -46,6 +52,38 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [vestRateInput, setVestRateInput] = useState(4000);
   const [savingTiers, setSavingTiers] = useState(false);
   const [newFeatureText, setNewFeatureText] = useState({ BUSINESS: '', ENTERPRISE: '', CUSTOM: '' });
+
+  // Dynamic BeVest Public Webpage Settings state
+  const { settings: cloudWebpageSettings } = useWebpageSettings();
+  const [webpageForm, setWebpageForm] = useState(DEFAULT_WEBPAGE_SETTINGS);
+  const [savingWebpage, setSavingWebpage] = useState(false);
+  const [vestOrders, setVestOrders] = useState([]);
+
+  useEffect(() => {
+    if (cloudWebpageSettings) {
+      setWebpageForm({
+        callUs: cloudWebpageSettings.callUs || DEFAULT_WEBPAGE_SETTINGS.callUs,
+        emailUs: cloudWebpageSettings.emailUs || DEFAULT_WEBPAGE_SETTINGS.emailUs,
+        smallTitle: cloudWebpageSettings.smallTitle || DEFAULT_WEBPAGE_SETTINGS.smallTitle,
+        bigTitle: cloudWebpageSettings.bigTitle || DEFAULT_WEBPAGE_SETTINGS.bigTitle
+      });
+    }
+  }, [cloudWebpageSettings]);
+
+  useEffect(() => {
+    const ordersRef = collection(db, 'vestOrders');
+    const unsub = onSnapshot(
+      ordersRef,
+      (snap) => {
+        const list = [];
+        snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+        list.sort((a, b) => (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0) - (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0));
+        setVestOrders(list);
+      },
+      (err) => console.warn('Orders fetch warning:', err.message)
+    );
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     if (cloudPlans) {
@@ -321,6 +359,44 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const showToast = (type, text) => {
     setToastMsg({ type, text });
     setTimeout(() => setToastMsg({ type: '', text: '' }), 5000);
+  };
+
+  const handleSaveWebpage = async (e) => {
+    e.preventDefault();
+    if (!webpageForm.callUs.trim() || !webpageForm.emailUs.trim() || !webpageForm.smallTitle.trim() || !webpageForm.bigTitle.trim()) {
+      showToast('error', 'Please fill in Call Us, Email Us, Small Title, and Big Title.');
+      return;
+    }
+    setSavingWebpage(true);
+    try {
+      await saveWebpageSettings(webpageForm, devEmail);
+      await logActivity('Updated public BeVest Webpage contact & hero settings', devEmail);
+      showToast('success', '✓ BeVest Webpage settings saved and live!');
+    } catch (err) {
+      console.error('Error saving webpage settings:', err);
+      showToast('error', 'Failed to save webpage settings: ' + err.message);
+    } finally {
+      setSavingWebpage(false);
+    }
+  };
+
+  const handleResetWebpage = async () => {
+    setSavingWebpage(true);
+    try {
+      const defaults = await resetWebpageSettings(devEmail);
+      setWebpageForm({
+        callUs: defaults.callUs,
+        emailUs: defaults.emailUs,
+        smallTitle: defaults.smallTitle,
+        bigTitle: defaults.bigTitle
+      });
+      await logActivity('Reset public BeVest Webpage settings to defaults', devEmail);
+      showToast('success', '✓ BeVest Webpage settings restored to defaults.');
+    } catch (err) {
+      showToast('error', 'Failed to reset webpage settings: ' + err.message);
+    } finally {
+      setSavingWebpage(false);
+    }
   };
 
   const handleSignOut = () => {
@@ -1649,6 +1725,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
           >
             <FiTool /> Troubleshoot Center
           </button>
+          <button 
+            className={`nav-item ${activeTab === 'webpage' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('webpage'); setIsMobileMenuOpen(false); }}
+          >
+            <FiGlobe /> BeVest Webpage
+          </button>
         </nav>
         
         <div className="sidebar-footer">
@@ -1671,6 +1753,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 {activeTab === 'subscriptions' && 'Subscription & Payment Management'}
                 {activeTab === 'vitals' && 'Vital Signs Threshold Configuration (By Worker Age)'}
                 {activeTab === 'troubleshoot' && 'Subscription Diagnostics & Troubleshooting'}
+                {activeTab === 'webpage' && 'BeVest Public Webpage Settings'}
               </h1>
               <p>
                 {activeTab === 'hardware' && 'Generate official scannable QR codes and upload authentic smart vests to the central Bevest database.'}
@@ -1679,6 +1762,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 {activeTab === 'subscriptions' && 'Manage contractor subscription tiers, verify manual payments, and monitor subscription expiration dates.'}
                 {activeTab === 'vitals' && 'Adjust and customize Heart Rate (BPM) and Body Temperature (°C) Warning (Yellow) and Danger (Red) thresholds based on worker age.'}
                 {activeTab === 'troubleshoot' && 'Diagnose subscription errors, grant temporary quota boosts, and override account statuses.'}
+                {activeTab === 'webpage' && 'Manage dynamic Call Us, Email Us, and Hero Titles shown on the public BeVest Home webpage.'}
               </p>
             </div>
 
@@ -3451,6 +3535,170 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   >
                     <FiSave /> {savingVitals ? 'Saving...' : 'Save All Vital & Fall Thresholds'}
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 6: BEVEST WEBPAGE SETTINGS */}
+          {activeTab === 'webpage' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div className="dev-card">
+                <div className="dev-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <div>
+                    <h3 className="dev-card-title" style={{ marginBottom: '0.25rem' }}>
+                      <FiGlobe /> Home Webpage Contact & Hero Text
+                    </h3>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      Changes saved here update the public BeVest Home webpage immediately in real time.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="dev-btn-secondary"
+                    onClick={handleResetWebpage}
+                    disabled={savingWebpage}
+                  >
+                    <FiRefreshCw /> Reset Defaults
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveWebpage} style={{ marginTop: '1.25rem' }}>
+                  <div className="dev-form-row">
+                    <div className="dev-form-group">
+                      <label className="dev-form-label">CALL US (PHONE NUMBER) *</label>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          type="text"
+                          className="dev-input"
+                          placeholder="e.g. +63 917 555 0148"
+                          value={webpageForm.callUs}
+                          onChange={(e) => setWebpageForm({ ...webpageForm, callUs: e.target.value })}
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div className="dev-form-group">
+                      <label className="dev-form-label">EMAIL US (CONTACT EMAIL) *</label>
+                      <input
+                        type="email"
+                        className="dev-input"
+                        placeholder="e.g. contact@bevest.com"
+                        value={webpageForm.emailUs}
+                        onChange={(e) => setWebpageForm({ ...webpageForm, emailUs: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="dev-form-row">
+                    <div className="dev-form-group">
+                      <label className="dev-form-label">HERO SMALL TITLE *</label>
+                      <input
+                        type="text"
+                        className="dev-input"
+                        placeholder="e.g. Safe Workplace"
+                        value={webpageForm.smallTitle}
+                        onChange={(e) => setWebpageForm({ ...webpageForm, smallTitle: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="dev-form-group">
+                      <label className="dev-form-label">HERO BIG TITLE *</label>
+                      <input
+                        type="text"
+                        className="dev-input"
+                        placeholder="e.g. Your Safety is in our Vest"
+                        value={webpageForm.bigTitle}
+                        onChange={(e) => setWebpageForm({ ...webpageForm, bigTitle: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Live Preview */}
+                  <div style={{ marginTop: '0.5rem', marginBottom: '1.25rem', border: '1px solid var(--border-color)', borderRadius: '10px', overflow: 'hidden' }}>
+                    <div style={{ background: '#ffffff', padding: '0.75rem 1.25rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                      <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>
+                        Be<span style={{ color: '#ea580c' }}>Vest</span> <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, marginLeft: '0.4rem' }}>LIVE HEADER PREVIEW</span>
+                      </strong>
+                      <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8rem', flexWrap: 'wrap' }}>
+                        <div><span style={{ color: '#64748b' }}>Call Us:</span> <strong>{webpageForm.callUs || '—'}</strong></div>
+                        <div><span style={{ color: '#64748b' }}>Email Us:</span> <strong>{webpageForm.emailUs || '—'}</strong></div>
+                      </div>
+                    </div>
+                    <div style={{ background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', padding: '1.75rem 1.5rem', color: '#ffffff' }}>
+                      <div style={{ fontSize: '0.78rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#fed7aa', marginBottom: '0.4rem' }}>
+                        {webpageForm.smallTitle || 'Safe Workplace'}
+                      </div>
+                      <div style={{ fontSize: '1.55rem', fontWeight: 800, textTransform: 'uppercase', lineHeight: 1.15 }}>
+                        {webpageForm.bigTitle || 'Your Safety is in our Vest'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      type="submit"
+                      className="dev-btn-orange"
+                      disabled={savingWebpage}
+                    >
+                      <FiSave /> {savingWebpage ? 'Saving...' : 'Save Webpage Settings'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Vest Orders Submitted From Home Webpage */}
+              <div className="dev-card">
+                <div className="dev-card-header">
+                  <div>
+                    <h3 className="dev-card-title">
+                      <FiLayers /> Recent "Order Now" Inquiries ({vestOrders.length})
+                    </h3>
+                    <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                      Requests submitted through the "Get your vest now / Order Now" banner on the public Home webpage.
+                    </p>
+                  </div>
+                </div>
+                <div className="dev-table-wrapper">
+                  <table className="dev-table">
+                    <thead>
+                      <tr>
+                        <th>Company</th>
+                        <th>Contact Person</th>
+                        <th>Email / Phone</th>
+                        <th>Qty</th>
+                        <th>Notes</th>
+                        <th>Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vestOrders.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} style={{ textAlign: 'center', padding: '1.75rem', color: 'var(--text-muted)' }}>
+                            No vest order inquiries submitted yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        vestOrders.map((ord) => (
+                          <tr key={ord.id}>
+                            <td><strong>{ord.company || '—'}</strong></td>
+                            <td>{ord.contactName || '—'}</td>
+                            <td>
+                              <div>{ord.email}</div>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{ord.phone}</span>
+                            </td>
+                            <td><span className="dev-badge-blue">{ord.quantity || 1} vests</span></td>
+                            <td style={{ maxWidth: '240px' }}>{ord.notes || '—'}</td>
+                            <td>{ord.createdAt?.toDate ? formatDisplayDate(ord.createdAt.toDate()) : 'Recent'}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
