@@ -1743,6 +1743,13 @@ fun PairVestScreen(
                             }
                         }
                         if (!state.testing) {
+                            if (!state.checks.allPass) {
+                                Text(
+                                    "Some modules aren't reporting or have no signal yet (e.g., GPS indoors or HR sensor not worn). You can still confirm and finish pairing.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                             SecondaryButton(
                                 text = "Run the test again",
                                 onClick = viewModel::runConnectionTest,
@@ -1751,7 +1758,7 @@ fun PairVestScreen(
                             PrimaryButton(
                                 text = "Confirm & Finish Pairing",
                                 onClick = viewModel::confirmWorkerPairing,
-                                enabled = state.checks.allPass,
+                                enabled = !state.submitting,
                                 loading = state.submitting,
                                 loadingText = "Saving…",
                             )

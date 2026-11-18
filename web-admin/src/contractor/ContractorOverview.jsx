@@ -9,7 +9,7 @@ import {
 } from './ui';
 import IncidentTrendChart from './IncidentTrendChart';
 import OsmMap from './OsmMap';
-import { getContractorSubscription } from '../subscriptionPlans';
+import { getContractorSubscription, useSubscriptionPlans } from '../subscriptionPlans';
 
 const DAY = 24 * 3600 * 1000;
 
@@ -20,7 +20,8 @@ const DAY = 24 * 3600 * 1000;
 const ContractorOverview = ({ contractorId, data, profile, onNavigate }) => {
   const { loading, error, workers, liveWorkers = [], incidents, now } = data;
   const { ssos, loading: ssosLoading } = useContractorSsos(contractorId);
-  const subscription = getContractorSubscription(profile);
+  const { plans: activePlans, vestRate } = useSubscriptionPlans();
+  const subscription = getContractorSubscription(profile, activePlans, vestRate);
 
   const mapPins = useMemo(
     () => liveWorkers

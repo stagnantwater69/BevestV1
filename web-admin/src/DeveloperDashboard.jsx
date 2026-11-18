@@ -53,15 +53,56 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
   }, [cloudPlans, cloudVestRate]);
 
-  const handleTierFieldChange = (tierKey, field, value) => {
+  const recalcTierFromRate = (tier, rate, fallbackVests = 50) => {
+    const vests = Number(tier?.vests ?? fallbackVests) || 0;
+    const discount = Math.max(0, Math.min(100, Number(tier?.discountPercent ?? 0)));
+    const baseMonthly = Math.round(vests * rate);
+    const monthly = Math.round(baseMonthly * (1 - discount / 100));
+    return {
+      ...tier,
+      baseMonthlyPrice: baseMonthly,
+      monthlyPrice: monthly,
+      baseAnnualPrice: baseMonthly * 12,
+      annualPrice: monthly * 12
+    };
+  };
+
+  const handleVestRateChange = (rawValue) => {
+    const newRate = Math.max(0, Number(rawValue) || 0);
+    setVestRateInput(newRate);
     setTierEditor(prev => {
       if (!prev) return prev;
       return {
         ...prev,
-        [tierKey]: {
-          ...prev[tierKey],
-          [field]: value
+        BUSINESS: recalcTierFromRate(prev.BUSINESS, newRate, 50),
+        ENTERPRISE: recalcTierFromRate(prev.ENTERPRISE, newRate, 100),
+        CUSTOM: {
+          ...prev.CUSTOM,
+          ratePerVest: newRate
         }
+      };
+    });
+  };
+
+  const handleTierFieldChange = (tierKey, field, value) => {
+    setTierEditor(prev => {
+      if (!prev) return prev;
+      const updatedTier = {
+        ...prev[tierKey],
+        [field]: value
+      };
+      if (tierKey !== 'CUSTOM' && (field === 'vests' || field === 'discountPercent')) {
+        return {
+          ...prev,
+          [tierKey]: recalcTierFromRate(updatedTier, Number(vestRateInput) || 0)
+        };
+      }
+      if (tierKey !== 'CUSTOM' && field === 'monthlyPrice') {
+        updatedTier.annualPrice = Math.round((Number(value) || 0) * 12);
+      }
+      return {
+        ...prev,
+        [tierKey]: updatedTier
       };
     });
   };
@@ -2145,7 +2186,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       className="dev-input"
                       style={{ width: '130px', padding: '0.35rem 0.6rem', fontWeight: 700 }}
                       value={vestRateInput}
-                      onChange={(e) => setVestRateInput(Math.max(0, Number(e.target.value) || 0))}
+                      onChange={(e) => handleVestRateChange(e.target.value)}
                     />
                   </div>
                   <span style={{ fontSize: '0.75rem', color: '#9a3412' }}>

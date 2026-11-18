@@ -98,8 +98,18 @@ export function useSubscriptionPlans() {
   const [isCustomConfig, setIsCustomConfig] = useState(false);
 
   useEffect(() => {
+    let latestUpdatedAtMs = 0;
+
     const applyPlanData = (data) => {
       if (!data) return;
+      const incomingTs = Number(data.updatedAtMs) || 0;
+      if (latestUpdatedAtMs > 0 && incomingTs > 0 && incomingTs < latestUpdatedAtMs) {
+        return;
+      }
+      if (incomingTs > latestUpdatedAtMs) {
+        latestUpdatedAtMs = incomingTs;
+      }
+
       setPlans({
         BUSINESS: {
           ...DEFAULT_SUBSCRIPTION_PLANS.BUSINESS,
@@ -152,11 +162,40 @@ export function useSubscriptionPlans() {
  * Saves modified subscription tiers, rates, and inclusions to Firestore and RTDB.
  */
 export async function saveSubscriptionPlans(plansData, vestMonthlyRate, userEmail = 'Developer') {
+  const rate = Math.max(0, Number(vestMonthlyRate) || VEST_MONTHLY_RATE);
+  const cleanObject = (obj) => JSON.parse(JSON.stringify(obj || {}));
+
+  const sanitizeTier = (tier, fallback) => {
+    const merged = { ...fallback, ...(tier || {}) };
+    if (merged.id === 'CUSTOM' || merged.isCustom) {
+      return cleanObject({
+        ...merged,
+        minVests: Number(merged.minVests) || 125,
+        storageGb: Number(merged.storageGb) || 100,
+        discountPercent: Number(merged.discountPercent ?? 10),
+        ratePerVest: rate,
+      });
+    }
+    return cleanObject({
+      ...merged,
+      vests: Number(merged.vests) || 0,
+      ssos: Number(merged.ssos) || 0,
+      storageGb: Number(merged.storageGb) || 0,
+      discountPercent: Number(merged.discountPercent ?? 0),
+      baseMonthlyPrice: Number(merged.baseMonthlyPrice ?? merged.monthlyPrice ?? 0),
+      monthlyPrice: Number(merged.monthlyPrice) || 0,
+      baseAnnualPrice: Number(merged.baseAnnualPrice ?? merged.annualPrice ?? 0),
+      annualPrice: Number(merged.annualPrice) || 0,
+    });
+  };
+
   const payload = {
-    ...plansData,
-    vestMonthlyRate: Number(vestMonthlyRate) || VEST_MONTHLY_RATE,
+    BUSINESS: sanitizeTier(plansData?.BUSINESS, DEFAULT_SUBSCRIPTION_PLANS.BUSINESS),
+    ENTERPRISE: sanitizeTier(plansData?.ENTERPRISE, DEFAULT_SUBSCRIPTION_PLANS.ENTERPRISE),
+    CUSTOM: sanitizeTier(plansData?.CUSTOM, DEFAULT_SUBSCRIPTION_PLANS.CUSTOM),
+    vestMonthlyRate: rate,
     updatedAtMs: Date.now(),
-    updatedBy: userEmail
+    updatedBy: userEmail || 'Developer'
   };
 
   let savedFirestore = false;
@@ -302,7 +341,7 @@ export function calculateRenewalDate(assignedDate, billingCycle = 'monthly') {
 /**
  * Safe fallback subscription for contractor accounts.
  */
-export function getContractorSubscription(userDocData = {}, customPlans = null) {
+export function getContractorSubscription(userDocData = {}, customPlans = null, vestRate = null) {
   const activePlans = customPlans || SUBSCRIPTION_PLANS;
   if (userDocData && userDocData.subscription && userDocData.subscription.planId && userDocData.subscription.planId !== 'NONE') {
     const sub = userDocData.subscription;
@@ -310,22 +349,35 @@ export function getContractorSubscription(userDocData = {}, customPlans = null) 
     const assigned = sub.assignedAt || userDocData.createdAt || new Date();
     const billingCycle = sub.billingCycle || 'monthly';
     const renew = sub.renewDate || calculateRenewalDate(assigned, billingCycle);
+    const isCustom = Boolean(plan.isCustom || sub.planId === 'CUSTOM');
+
+    let monthlyPrice = plan.monthlyPrice ?? sub.monthlyPrice;
+    let annualPrice = plan.annualPrice ?? sub.annualPrice;
+    const discountPercent = plan.discountPercent ?? sub.discountPercent ?? 0;
+
+    if (isCustom) {
+      const customVestLimit = Number(sub.vestLimit ?? plan.minVests ?? 125) || 125;
+      const effectiveRate = Number(vestRate ?? plan.ratePerVest ?? VEST_MONTHLY_RATE) || VEST_MONTHLY_RATE;
+      const recalculated = calculateCustomPricing(customVestLimit, discountPercent, effectiveRate);
+      monthlyPrice = recalculated.monthlyPrice;
+      annualPrice = recalculated.annualPrice;
+    }
 
     return {
       hasPlan: true,
       planId: plan.id,
       planName: plan.name,
       billingCycle,
-      vestLimit: sub.vestLimit ?? plan.vests,
-      ssoLimit: sub.ssoLimit ?? plan.ssos,
-      storageGb: sub.storageGb ?? plan.storageGb,
-      monthlyPrice: sub.monthlyPrice ?? plan.monthlyPrice,
-      annualPrice: sub.annualPrice ?? plan.annualPrice,
-      discountPercent: sub.discountPercent ?? plan.discountPercent,
+      vestLimit: isCustom ? (sub.vestLimit ?? plan.vests) : (plan.vests ?? sub.vestLimit),
+      ssoLimit: isCustom ? (sub.ssoLimit ?? plan.ssos) : (plan.ssos ?? sub.ssoLimit),
+      storageGb: isCustom ? (sub.storageGb ?? plan.storageGb) : (plan.storageGb ?? sub.storageGb),
+      monthlyPrice,
+      annualPrice,
+      discountPercent,
       assignedAt: assigned,
       renewDate: renew,
       status: sub.status || 'Active',
-      isCustom: plan.isCustom || sub.planId === 'CUSTOM',
+      isCustom,
       customNotes: sub.customNotes || ''
     };
   }

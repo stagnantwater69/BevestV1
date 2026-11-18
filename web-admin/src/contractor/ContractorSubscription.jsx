@@ -28,7 +28,7 @@ const ContractorSubscription = ({ user, profile, data }) => {
   const [toastMsg, setToastMsg] = useState('');
 
   const contractorId = profile?.contractorId || user?.uid;
-  const subscription = getContractorSubscription(profile || user?.profile || {}, activePlans);
+  const subscription = getContractorSubscription(profile || user?.profile || {}, activePlans, vestRate);
 
   // Custom Tier state for > 125 vests and customizable SSOs
   const [customVests, setCustomVests] = useState(
@@ -45,8 +45,9 @@ const ContractorSubscription = ({ user, profile, data }) => {
     subscription.isCustom && subscription.billingCycle ? subscription.billingCycle : 'monthly'
   );
 
-  // Real-time custom pricing calculation (10% volume discount applied for custom enterprise scale)
-  const customPricing = calculateCustomPricing(customVests, 10);
+  // Real-time custom pricing calculation (uses Developer-configured vestRate & CUSTOM discountPercent)
+  const customDiscountPercent = activePlans?.CUSTOM?.discountPercent ?? 10;
+  const customPricing = calculateCustomPricing(customVests, customDiscountPercent, vestRate);
 
   // Current utilization from real-time contractor data
   const ssoCount = data?.officers?.length || 0;
@@ -546,17 +547,17 @@ const ContractorSubscription = ({ user, profile, data }) => {
           <div className={`sub-tier-card ${isCurrent('CUSTOM') ? 'is-active-plan' : ''}`}>
             {isCurrent('CUSTOM') && <span className="sub-card-badge">Current Plan</span>}
             <div className="sub-tier-header">
-              <span className="sub-tier-tag">SCALE</span>
+              <span className="sub-tier-tag">{activePlans.CUSTOM?.tag || 'SCALE'}</span>
               <div className="sub-price-block">
                 <div className="sub-price-main" style={{ letterSpacing: '-0.02em' }}>
                   {isCurrent('CUSTOM') 
                     ? formatPhp(subscription.monthlyPrice) 
-                    : 'CUSTOM'}
+                    : (activePlans.CUSTOM?.title || 'CUSTOM')}
                 </div>
                 <div className="sub-price-cycle" style={{ color: '#64748b', fontWeight: 500 }}>
                   {isCurrent('CUSTOM')
                     ? `(${subscription.vestLimit} Vests • ${subscription.ssoLimit} SSOs)`
-                    : 'Enterprise Solutions (> 125 Vests)'}
+                    : (activePlans.CUSTOM?.subtitle || `Enterprise Solutions (> ${activePlans.CUSTOM?.minVests || 125} Vests)`)}
                 </div>
               </div>
             </div>
@@ -564,26 +565,12 @@ const ContractorSubscription = ({ user, profile, data }) => {
             <hr className="sub-tier-divider" />
 
             <ul className="sub-features-list">
-              <li className="sub-feature-item">
-                <span className="sub-bullet-dot"></span>
-                <span>Custom quota for &gt; 125 Vests &amp; SSOs</span>
-              </li>
-              <li className="sub-feature-item">
-                <span className="sub-bullet-dot"></span>
-                <span>Custom calculation live pricing</span>
-              </li>
-              <li className="sub-feature-item">
-                <span className="sub-bullet-dot"></span>
-                <span>Everything in Enterprise included</span>
-              </li>
-              <li className="sub-feature-item">
-                <span className="sub-bullet-dot"></span>
-                <span>Unlimited Data Storage (100 GB)</span>
-              </li>
-              <li className="sub-feature-item">
-                <span className="sub-bullet-dot"></span>
-                <span>Dedicated Safety Account Manager</span>
-              </li>
+              {(activePlans.CUSTOM?.features || []).map((feat, idx) => (
+                <li key={idx} className="sub-feature-item">
+                  <span className="sub-bullet-dot"></span>
+                  <span>{feat}</span>
+                </li>
+              ))}
             </ul>
 
             <div className="sub-tier-footer">
