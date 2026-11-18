@@ -34,6 +34,7 @@ class ProfileViewModel @Inject constructor(
 
 data class EditProfileUiState(
     val firstName: String = "",
+    val middleName: String = "",
     val lastName: String = "",
     val phone: String = "",
     val firstNameError: String? = null,
@@ -62,6 +63,7 @@ class EditProfileViewModel @Inject constructor(
                 is Outcome.Success -> _state.update {
                     it.copy(
                         firstName = result.data.firstName,
+                        middleName = result.data.middleName,
                         lastName = result.data.lastName,
                         phone = result.data.phone,
                         loaded = true,
@@ -73,6 +75,7 @@ class EditProfileViewModel @Inject constructor(
     }
 
     fun onFirstName(v: String) = _state.update { it.copy(firstName = v, firstNameError = null) }
+    fun onMiddleName(v: String) = _state.update { it.copy(middleName = v) }
     fun onLastName(v: String) = _state.update { it.copy(lastName = v, lastNameError = null) }
     fun onPhone(v: String) = _state.update { it.copy(phone = v, phoneError = null) }
 
@@ -89,7 +92,7 @@ class EditProfileViewModel @Inject constructor(
         val id = uid ?: return
         _state.update { it.copy(submitting = true, formError = null) }
         viewModelScope.launch {
-            when (val result = userRepository.updateProfile(id, s.firstName.trim(), s.lastName.trim(), formattedPhone)) {
+            when (val result = userRepository.updateProfile(id, s.firstName.trim(), s.middleName.trim(), s.lastName.trim(), formattedPhone)) {
                 is Outcome.Success -> _state.update { it.copy(submitting = false, saved = true) }
                 is Outcome.Failure -> _state.update { it.copy(submitting = false, formError = result.error.message) }
             }

@@ -24,7 +24,7 @@ interface UserRepository {
     /** Every account regardless of role (admin only). */
     fun observeAllUsers(): Flow<Outcome<List<User>>>
 
-    suspend fun updateProfile(uid: String, firstName: String, lastName: String, phone: String): Outcome<Unit>
+    suspend fun updateProfile(uid: String, firstName: String, middleName: String = "", lastName: String, phone: String): Outcome<Unit>
 
     /** A contractor editing one of their officers, including the site they monitor. */
     suspend fun updateSso(

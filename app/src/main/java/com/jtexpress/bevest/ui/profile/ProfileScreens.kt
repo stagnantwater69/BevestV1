@@ -397,6 +397,11 @@ fun EditProfileScreen(
                         required = true,
                     )
                     FormField(
+                        state.middleName,
+                        viewModel::onMiddleName,
+                        "Middle name (Optional)",
+                    )
+                    FormField(
                         state.lastName,
                         viewModel::onLastName,
                         "Last name",

@@ -7,9 +7,9 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
-  collection, query, where, orderBy, limit, onSnapshot, doc, updateDoc,
+  collection, query, where, orderBy, limit, onSnapshot, doc, getDocs, updateDoc, deleteDoc,
 } from 'firebase/firestore';
-import { ref, onValue } from 'firebase/database';
+import { ref, onValue, remove } from 'firebase/database';
 import { db, rtdb } from '../firebase';
 import { formatPhoneWithCountryCode } from '../PhoneInput';
 
@@ -616,3 +616,55 @@ export const siteLabel = (sites, siteId) => {
   const site = sites.find((s) => s.id === siteId);
   return site ? site.name : siteId;
 };
+
+/**
+ * Deletes an SSO document in `users/{ssoUid}` along with all workers belonging
+ * to that SSO (matching `createdBy`, `ssoId`, or the SSO's assigned `siteId`),
+ * and unlinks any vests assigned to those workers.
+ */
+export async function deleteSsoWithWorkers({ contractorId, ssoUid, siteId = null }) {
+  if (!ssoUid) return 0;
+
+  let workerDocsToDelete = [];
+  if (contractorId) {
+    const q = query(collection(db, 'workers'), where('contractorId', '==', contractorId));
+    const snap = await getDocs(q);
+    workerDocsToDelete = snap.docs.filter((d) => {
+      const w = d.data();
+      return (
+        w.createdBy === ssoUid
+        || w.ssoId === ssoUid
+        || (siteId && w.siteId === siteId)
+      );
+    });
+  }
+
+  for (const wSnap of workerDocsToDelete) {
+    const workerId = wSnap.id;
+    const w = wSnap.data();
+    const assignedVest = typeof w.assignedVestId === 'string' ? w.assignedVestId.trim() : '';
+    if (assignedVest) {
+      try {
+        await updateDoc(doc(db, 'vests', assignedVest), {
+          assignedWorkerId: null,
+          status: 'AVAILABLE',
+          openAssignmentId: null,
+        });
+      } catch (e) {
+        console.warn(`Failed to unlink vest ${assignedVest}:`, e);
+      }
+      await Promise.allSettled([
+        remove(ref(rtdb, `vestsLive/${assignedVest}/assignedWorkerId`)),
+        remove(ref(rtdb, `vestToWorker/${assignedVest}`)),
+      ]);
+    }
+    await Promise.allSettled([
+      remove(ref(rtdb, `workerToVest/${workerId}`)),
+      remove(ref(rtdb, `liveReadings/${workerId}`)),
+    ]);
+    await deleteDoc(doc(db, 'workers', workerId));
+  }
+
+  await deleteDoc(doc(db, 'users', ssoUid));
+  return workerDocsToDelete.length;
+}

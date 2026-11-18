@@ -3,9 +3,9 @@ import {
   FiUserCheck, FiPlus, FiSearch, FiLock, FiRefreshCw, FiX, FiTrash2, FiMapPin
 } from 'react-icons/fi';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { collection, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, setDoc } from 'firebase/firestore';
 import { secondaryAuth, db } from '../firebase';
-import { useContractorSsos, useContractorSites, siteLabel, STATUS_COLOR, initialsOf } from './contractorData';
+import { useContractorSsos, useContractorSites, siteLabel, STATUS_COLOR, initialsOf, deleteSsoWithWorkers } from './contractorData';
 import { PageHeader, SearchBox, Badge, EmptyState, ErrorState, Skeleton } from './ui';
 import { logActivity } from '../activityLogger';
 import PhoneInput, { formatPhoneWithCountryCode } from '../PhoneInput';
@@ -214,8 +214,15 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
     if (!pendingDelete) return;
     setDeleting(true);
     try {
-      await deleteDoc(doc(db, 'users', pendingDelete.uid));
-      logActivity(`Deleted Site Safety Officer: ${pendingDelete.fullName || pendingDelete.email}`);
+      const removedWorkers = await deleteSsoWithWorkers({
+        contractorId,
+        ssoUid: pendingDelete.uid,
+        siteId: pendingDelete.siteId || null,
+      });
+      logActivity(
+        `Deleted Site Safety Officer: ${pendingDelete.fullName || pendingDelete.email}` +
+        (removedWorkers > 0 ? ` (and ${removedWorkers} assigned worker${removedWorkers === 1 ? '' : 's'})` : '')
+      );
       setPendingDelete(null);
     } catch (err) {
       console.error('Error deleting SSO:', err);
@@ -382,7 +389,7 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
             <div className="modal-body ct-modal-body">
               <p className="ct-muted" style={{ lineHeight: 1.5 }}>
                 Are you sure you want to permanently delete{' '}
-                <strong>{pendingDelete.fullName || pendingDelete.email}</strong>? This action cannot be undone.
+                <strong>{pendingDelete.fullName || pendingDelete.email}</strong>? All workers assigned under this officer will also be deleted. This action cannot be undone.
               </p>
               <div className="form-actions" style={{ marginTop: '1.5rem' }}>
                 <button

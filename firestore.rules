@@ -109,7 +109,10 @@ service cloud.firestore {
       allow create, update: if isAdmin()
                             || isDeveloper()  // developer vest deletion unlinks workers
                             || isSso();
-      allow delete: if isAdmin() || isDeveloper() || isSso();
+      allow delete: if isAdmin()
+                    || isDeveloper()
+                    || isSso()
+                    || (isContractor() && (resource.data.contractorId == request.auth.uid || resource.data.contractorId == myContractorId()));
     }
 
     // ---- vests ----

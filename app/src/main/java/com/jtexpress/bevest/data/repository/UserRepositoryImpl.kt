@@ -113,12 +113,14 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun updateProfile(
         uid: String,
         firstName: String,
+        middleName: String,
         lastName: String,
         phone: String,
     ): Outcome<Unit> = try {
         users.document(uid).update(
             mapOf(
                 "firstName" to firstName,
+                "middleName" to middleName,
                 "lastName" to lastName,
                 "phone" to Validators.formatPhoneWithCountryCode(phone),
             ),

@@ -145,13 +145,15 @@ fun VestListScreen(
     BevestScaffold(
         title = "Vests",
         floatingActionButton = {
-            // Extended rather than a bare icon: "pair a vest" is not a universally
-            // understood glyph, and this is the screen's primary action.
-            ExtendedFloatingActionButton(
-                onClick = onPairVest,
-                icon = { Icon(BevestIcons.Add, contentDescription = null) },
-                text = { Text("Add Vest") },
-            )
+            if (!state.loading && state.error == null && state.all.isNotEmpty()) {
+                // Extended rather than a bare icon: "pair a vest" is not a universally
+                // understood glyph, and this is the screen's primary action.
+                ExtendedFloatingActionButton(
+                    onClick = onPairVest,
+                    icon = { Icon(BevestIcons.Add, contentDescription = null) },
+                    text = { Text("Add Vest") },
+                )
+            }
         },
     ) { padding ->
         when {

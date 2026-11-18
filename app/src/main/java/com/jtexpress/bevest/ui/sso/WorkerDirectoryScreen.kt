@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -52,6 +51,7 @@ import com.jtexpress.bevest.ui.common.FilterRow
 import com.jtexpress.bevest.ui.common.ListSkeleton
 import com.jtexpress.bevest.ui.common.SearchBar
 import com.jtexpress.bevest.ui.theme.BevestIcons
+import com.jtexpress.bevest.ui.theme.BevestShapes
 import com.jtexpress.bevest.ui.theme.LocalStatusPalette
 import com.jtexpress.bevest.ui.theme.Spacing
 
@@ -211,29 +211,31 @@ private fun SwipeToDeleteWorkerRow(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp)),
+            .clip(BevestShapes.card),
     ) {
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .background(LocalStatusPalette.current.danger)
-                .padding(horizontal = Spacing.lg),
-            contentAlignment = Alignment.CenterEnd,
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+        if (offsetX < 0f) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(LocalStatusPalette.current.danger)
+                    .padding(horizontal = Spacing.lg),
+                contentAlignment = Alignment.CenterEnd,
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.Delete,
-                    contentDescription = "Delete worker",
-                    tint = Color.White,
-                )
-                Text(
-                    text = "Delete",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelLarge,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Delete,
+                        contentDescription = "Delete worker",
+                        tint = Color.White,
+                    )
+                    Text(
+                        text = "Delete",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
             }
         }
 

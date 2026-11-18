@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { FiEdit2, FiMapPin, FiUsers, FiMail, FiPhone, FiTrash2 } from 'react-icons/fi';
-import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { FiEdit2, FiMapPin, FiUsers, FiMail, FiPhone, FiTrash2, FiX } from 'react-icons/fi';
+import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
-  useContractorSsos, useContractorSites, siteLabel, STATUS_COLOR, initialsOf,
+  useContractorSsos, useContractorSites, siteLabel, STATUS_COLOR, initialsOf, deleteSsoWithWorkers,
 } from './contractorData';
 import { PageHeader, Badge, EmptyState, ErrorState, Skeleton } from './ui';
 import PhoneInput, { formatPhoneWithCountryCode } from '../PhoneInput';
@@ -70,6 +70,7 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
     const existsInList = !currentSiteId || allSites.some((s) => s.id === currentSiteId);
     setForm({
       firstName: sso.firstName || '',
+      middleName: sso.middleName || '',
       lastName: sso.lastName || '',
       phone: sso.phone || '',
       siteId: currentSiteId,
@@ -90,6 +91,7 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
     try {
       await updateDoc(doc(db, 'users', sso.uid), {
         firstName: form.firstName.trim(),
+        middleName: (form.middleName || '').trim(),
         lastName: form.lastName.trim(),
         phone: formatPhoneWithCountryCode(form.phone),
         siteId: form.siteId ? form.siteId.trim() : null,
@@ -106,7 +108,11 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
   const handleDelete = async () => {
     setConfirmDeleteOpen(false);
     try {
-      await deleteDoc(doc(db, 'users', sso.uid));
+      await deleteSsoWithWorkers({
+        contractorId,
+        ssoUid: sso.uid,
+        siteId: sso.siteId || null,
+      });
       onBack();
     } catch (err) {
       setErrorMsg('Failed to delete officer: ' + err.message);
@@ -118,7 +124,7 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
       breadcrumb={breadcrumb}
       title={sso.fullName || sso.email}
       subtitle="Site Safety Officer"
-      actions={!editing && (
+      actions={
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button id="ct-sso-edit-btn" className="btn-primary" onClick={startEdit}>
             <FiEdit2 /> Edit profile
@@ -132,115 +138,139 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
             <FiTrash2 /> Delete SSO
           </button>
         </div>
-      )}
+      }
     />
   );
-
-  if (editing) {
-    return (
-      <>
-        {header}
-        <div className="add-user-card" style={{ maxWidth: '800px', margin: '0 auto' }}>
-          <form onSubmit={handleSave}>
-            <div className="form-grid">
-              <div className="form-group-custom">
-                <label className="form-label" htmlFor="ct-sso-first">First name *</label>
-                <input
-                  id="ct-sso-first"
-                  className="form-input"
-                  value={form.firstName}
-                  onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="form-group-custom">
-                <label className="form-label" htmlFor="ct-sso-last">Last name *</label>
-                <input
-                  id="ct-sso-last"
-                  className="form-input"
-                  value={form.lastName}
-                  onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="form-group-custom">
-                <label className="form-label" htmlFor="ct-sso-email">Email address</label>
-                <input id="ct-sso-email" className="form-input" value={sso.email} disabled />
-                <span className="input-hint" style={{ margin: '0.25rem 0 0' }}>
-                  The sign-in email cannot be changed
-                </span>
-              </div>
-              <div className="form-group-custom">
-                <label className="form-label" htmlFor="ct-sso-phone">Phone number</label>
-                <PhoneInput
-                  id="ct-sso-phone"
-                  value={form.phone}
-                  onChange={(phone) => setForm({ ...form, phone })}
-                />
-              </div>
-              <div className="form-group-custom" style={{ gridColumn: '1 / -1' }}>
-                <label className="form-label" htmlFor="ct-sso-site">Assigned Site</label>
-                <select
-                  id="ct-sso-site"
-                  className="form-input"
-                  value={isCustomSite ? '__CUSTOM__' : form.siteId}
-                  onChange={(e) => {
-                    if (e.target.value === '__CUSTOM__') {
-                      setIsCustomSite(true);
-                      setForm({ ...form, siteId: '' });
-                    } else {
-                      setIsCustomSite(false);
-                      setForm({ ...form, siteId: e.target.value });
-                    }
-                  }}
-                >
-                  <option value="">No site assigned</option>
-                  {allSites.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}{s.location ? ` — ${s.location}` : ''}
-                    </option>
-                  ))}
-                  <option value="__CUSTOM__">+ Enter custom site ID...</option>
-                </select>
-                {isCustomSite && (
-                  <input
-                    type="text"
-                    id="ct-sso-custom-site"
-                    className="form-input"
-                    style={{ marginTop: '0.5rem' }}
-                    placeholder="Enter custom Site ID (e.g. Site-C)"
-                    value={form.siteId}
-                    onChange={(e) => setForm({ ...form, siteId: e.target.value })}
-                    autoFocus
-                  />
-                )}
-                <span className="input-hint" style={{ margin: '0.25rem 0 0' }}>
-                  Reassigning the officer to another site changes which workers they monitor.
-                </span>
-              </div>
-            </div>
-
-            {errorMsg && (
-              <div className="error-message" style={{ textAlign: 'left', margin: '1rem 0' }}>{errorMsg}</div>
-            )}
-
-            <div className="form-actions" style={{ marginTop: '1.5rem' }}>
-              <button type="button" className="btn-secondary" onClick={() => setEditing(false)} disabled={saving}>
-                Cancel
-              </button>
-              <button type="submit" className="btn-primary" disabled={saving}>
-                {saving ? 'Saving...' : 'Save changes'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </>
-    );
-  }
 
   return (
     <>
       {header}
+
+      {editing && form && (
+        <div className="modal-overlay" onClick={() => !saving && setEditing(false)}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: '500px', width: '95%', maxHeight: '90vh', overflowY: 'auto' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2>Edit Profile</h2>
+              <button
+                type="button"
+                className="close-btn"
+                onClick={() => !saving && setEditing(false)}
+                aria-label="Close"
+              >
+                <FiX />
+              </button>
+            </div>
+            <div className="modal-body ct-modal-body">
+              <form onSubmit={handleSave}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                  <div className="form-group-custom">
+                    <label className="form-label" htmlFor="ct-sso-first">First Name *</label>
+                    <input
+                      id="ct-sso-first"
+                      className="form-input"
+                      value={form.firstName}
+                      onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="form-group-custom">
+                    <label className="form-label" htmlFor="ct-sso-middle">Middle Name (Optional)</label>
+                    <input
+                      id="ct-sso-middle"
+                      className="form-input"
+                      placeholder="Optional"
+                      value={form.middleName}
+                      onChange={(e) => setForm({ ...form, middleName: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group-custom">
+                    <label className="form-label" htmlFor="ct-sso-last">Last Name *</label>
+                    <input
+                      id="ct-sso-last"
+                      className="form-input"
+                      value={form.lastName}
+                      onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="form-group-custom">
+                    <label className="form-label" htmlFor="ct-sso-phone">Phone Number</label>
+                    <PhoneInput
+                      id="ct-sso-phone"
+                      value={form.phone}
+                      onChange={(phone) => setForm({ ...form, phone })}
+                    />
+                  </div>
+                  <div className="form-group-custom">
+                    <label className="form-label" htmlFor="ct-sso-email">Email Address</label>
+                    <input id="ct-sso-email" className="form-input" value={sso.email} disabled />
+                    <span className="input-hint" style={{ margin: '0.25rem 0 0' }}>
+                      The sign-in email cannot be changed
+                    </span>
+                  </div>
+                  <div className="form-group-custom">
+                    <label className="form-label" htmlFor="ct-sso-site">Assigned Site</label>
+                    <select
+                      id="ct-sso-site"
+                      className="form-input"
+                      value={isCustomSite ? '__CUSTOM__' : form.siteId}
+                      onChange={(e) => {
+                        if (e.target.value === '__CUSTOM__') {
+                          setIsCustomSite(true);
+                          setForm({ ...form, siteId: '' });
+                        } else {
+                          setIsCustomSite(false);
+                          setForm({ ...form, siteId: e.target.value });
+                        }
+                      }}
+                    >
+                      <option value="">No site assigned</option>
+                      {allSites.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}{s.location ? ` — ${s.location}` : ''}
+                        </option>
+                      ))}
+                      <option value="__CUSTOM__">+ Enter custom site ID...</option>
+                    </select>
+                    {isCustomSite && (
+                      <input
+                        type="text"
+                        id="ct-sso-custom-site"
+                        className="form-input"
+                        style={{ marginTop: '0.5rem' }}
+                        placeholder="Enter custom Site ID (e.g. Site-C)"
+                        value={form.siteId}
+                        onChange={(e) => setForm({ ...form, siteId: e.target.value })}
+                        autoFocus
+                      />
+                    )}
+                    <span className="input-hint" style={{ margin: '0.25rem 0 0' }}>
+                      Reassigning the officer to another site changes which workers they monitor.
+                    </span>
+                  </div>
+                </div>
+
+                {errorMsg && (
+                  <div className="error-message" style={{ textAlign: 'left', margin: '1rem 0 0' }}>{errorMsg}</div>
+                )}
+
+                <div className="form-actions" style={{ marginTop: '1.25rem' }}>
+                  <button type="button" className="btn-secondary" onClick={() => setEditing(false)} disabled={saving}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary" disabled={saving}>
+                    {saving ? 'Saving...' : 'Save changes'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Officer Summary Card */}
       <div className="ct-card ct-sso-summary">
@@ -270,7 +300,7 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
       <ConfirmModal
         open={confirmDeleteOpen}
         title="Delete Site Safety Officer?"
-        message={`Are you sure you want to permanently delete Site Safety Officer "${sso.fullName || sso.email}"? This action cannot be undone.`}
+        message={`Are you sure you want to permanently delete Site Safety Officer "${sso.fullName || sso.email}"? All workers assigned under this officer will also be deleted. This action cannot be undone.`}
         confirmLabel="Delete SSO"
         variant="danger"
         onConfirm={handleDelete}

@@ -40,8 +40,8 @@ const rtdb = getDatabase();
 
 // Vest telemetry mirror + offline/low-battery alerts
 export { mirrorVestLive, vestHealthSweep } from "./vests";
-// Firestore role -> Auth custom claim (needed by the RTDB rules)
-export { syncUserClaims } from "./claims";
+// Firestore role -> Auth custom claim + Auth disable on user doc deletion
+export { syncUserClaims, disableAuthUser } from "./claims";
 
 async function thresholds(): Promise<Thresholds> {
   const snap = await db.doc("settings/thresholds").get();
