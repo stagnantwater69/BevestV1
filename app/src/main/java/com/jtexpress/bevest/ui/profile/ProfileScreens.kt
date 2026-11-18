@@ -179,7 +179,7 @@ private fun IdentityHeader(user: User) {
                 size = 84.dp,
             )
             Text(
-                user.fullName.ifBlank { "Unnamed user" },
+                user.formalFullName.ifBlank { "Unnamed user" },
                 style = MaterialTheme.typography.headlineSmall,
                 textAlign = TextAlign.Center,
                 maxLines = 2,
@@ -407,6 +407,11 @@ fun EditProfileScreen(
                         "Last name",
                         error = state.lastNameError,
                         required = true,
+                    )
+                    FormField(
+                        state.suffix,
+                        viewModel::onSuffix,
+                        "Suffix (Optional)",
                     )
                     FormField(
                         state.phone,

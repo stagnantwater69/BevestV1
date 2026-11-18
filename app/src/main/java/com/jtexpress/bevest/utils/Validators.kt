@@ -3,12 +3,12 @@ package com.jtexpress.bevest.utils
 /** Input validation used by forms across the app (plan section 31.2, section 9). */
 object Validators {
 
-    private val EMAIL_REGEX = Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
+    private val EMAIL_REGEX = Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}$")
     private val PHONE_REGEX = Regex("^[+]?[0-9 ()-]{7,20}$")
 
     fun email(value: String): String? = when {
         value.isBlank() -> "Email is required"
-        !EMAIL_REGEX.matches(value.trim()) -> "Enter a valid email address"
+        !EMAIL_REGEX.matches(value.trim()) -> "Invalid email address"
         else -> null
     }
 
@@ -21,10 +21,28 @@ object Validators {
     fun required(value: String, field: String): String? =
         if (value.isBlank()) "$field is required" else null
 
-    fun phone(value: String, required: Boolean = true): String? = when {
-        value.isBlank() -> if (required) "Phone number is required" else null
-        !PHONE_REGEX.matches(value.trim()) -> "Enter a valid phone number"
-        else -> null
+    /**
+     * Sanitizes a local Philippine (+63) phone input string:
+     * - Digits only
+     * - Removes leading '0' automatically once another digit is entered
+     * - Maximum 10 digits
+     */
+    fun sanitizePhPhoneLocal(raw: String, preserveSingleZero: Boolean = false): String {
+        var digits = raw.filter { it.isDigit() }
+        if (digits.startsWith("0") && (!preserveSingleZero || digits.length > 1)) {
+            digits = digits.trimStart('0')
+        }
+        return digits.take(10)
+    }
+
+    fun phone(value: String, required: Boolean = true): String? {
+        val clean = value.trim()
+        if (clean.isEmpty()) return if (required) "Phone number is required" else null
+        if (clean.startsWith("+63")) {
+            val localDigits = clean.removePrefix("+63").filter { it.isDigit() }
+            return if (localDigits.length == 10 && !localDigits.startsWith("0")) null else "Phone number must be 10 digits"
+        }
+        return if (!PHONE_REGEX.matches(clean)) "Enter a valid phone number" else null
     }
 
     /**
@@ -54,21 +72,21 @@ object Validators {
      * Extracts the local subscriber number without the country code prefix for display inside
      * a phone input field that already renders a fixed country code prefix.
      */
-    fun stripCountryCode(raw: String?, defaultCode: String = "+63"): String {
+    fun stripCountryCode(raw: String?, defaultCode: String = "+63", preserveSingleZero: Boolean = false): String {
         val clean = raw?.trim().orEmpty()
         if (clean.isEmpty() || clean.equals("Not set", ignoreCase = true) || clean == "--") return ""
         if (clean.startsWith(defaultCode)) {
             val rest = clean.removePrefix(defaultCode).trim()
-            return if (defaultCode == "+63") rest.trimStart('0').trim() else rest
+            return if (defaultCode == "+63") sanitizePhPhoneLocal(rest, preserveSingleZero) else rest
         }
         if (defaultCode == "+63" && clean.startsWith("63") && clean.length >= 11) {
-            return clean.removePrefix("63").trim().trimStart('0').trim()
+            return sanitizePhPhoneLocal(clean.removePrefix("63"), preserveSingleZero)
         }
         if (clean.startsWith("+")) {
             val spaceIdx = clean.indexOf(' ')
             if (spaceIdx > 0) return clean.substring(spaceIdx + 1).trim()
         }
-        return if (defaultCode == "+63") clean.trimStart('0').trim() else clean
+        return if (defaultCode == "+63") sanitizePhPhoneLocal(clean, preserveSingleZero) else clean
     }
 
     fun workerId(value: String): String? = when {

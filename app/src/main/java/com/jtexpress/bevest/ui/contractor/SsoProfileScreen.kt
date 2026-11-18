@@ -74,7 +74,7 @@ fun SsoProfileScreen(
     val edit = state.edit
 
     BevestScaffold(
-        title = if (edit != null) "Edit officer" else (sso?.fullName?.ifBlank { null } ?: sso?.email ?: "Officer profile"),
+        title = if (edit != null) "Edit officer" else (sso?.formalFullName?.ifBlank { null } ?: sso?.email ?: "Officer profile"),
         subtitle = "Site Safety Officer",
         // Backing out of the form returns to the profile rather than leaving it.
         onBack = if (edit != null) viewModel::cancelEdit else onBack,
@@ -115,7 +115,7 @@ fun SsoProfileScreen(
                     ) {
                         WorkerAvatar(name = sso.fullName.ifBlank { sso.email }, photoUrl = null, size = 56.dp)
                         Text(
-                            sso.fullName.ifBlank { sso.email },
+                            sso.formalFullName.ifBlank { sso.email },
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.weight(1f),
                         )

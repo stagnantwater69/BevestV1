@@ -33,6 +33,8 @@ import {
 } from './webpageConfig';
 import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
 import ConfirmModal from './ConfirmModal';
+import AddressAutocomplete from './AddressAutocomplete';
+import { validateEmail, validatePhoneNumber, liveEmailError, formatProfileName } from './validation';
 import logo from './assets/bevest_logo.png';
 import './developer.css';
 
@@ -106,9 +108,18 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     };
   };
 
+  const parseNumericField = (raw) => {
+    const str = String(raw ?? '');
+    if (str === '') return '';
+    const digits = str.replace(/\D/g, '');
+    if (!digits) return '';
+    return Number(digits);
+  };
+
   const handleVestRateChange = (rawValue) => {
-    const newRate = Math.max(0, Number(rawValue) || 0);
-    setVestRateInput(newRate);
+    const parsed = parseNumericField(rawValue);
+    setVestRateInput(parsed);
+    const newRate = Number(parsed) || 0;
     setTierEditor(prev => {
       if (!prev) return prev;
       return {
@@ -276,9 +287,11 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [adminFirstName, setAdminFirstName] = useState('');
   const [adminMiddleName, setAdminMiddleName] = useState('');
   const [adminLastName, setAdminLastName] = useState('');
+  const [adminSuffix, setAdminSuffix] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPhone, setAdminPhone] = useState('');
   const [adminPassword, setAdminPassword] = useState(`ADM-2026-${Math.floor(1000 + Math.random() * 9000)}`);
+  const [adminFormSubmitted, setAdminFormSubmitted] = useState(false);
 
   // Organizations Collection state
   const [organizations, setOrganizations] = useState([]);
@@ -286,6 +299,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [orgSearch, setOrgSearch] = useState('');
   const [showCreateOrgModal, setShowCreateOrgModal] = useState(false);
   const [orgSaving, setOrgSaving] = useState(false);
+  const [orgFormSubmitted, setOrgFormSubmitted] = useState(false);
   const [orgForm, setOrgForm] = useState({
     name: '',
     address: '',
@@ -365,6 +379,11 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     e.preventDefault();
     if (!webpageForm.callUs.trim() || !webpageForm.emailUs.trim() || !webpageForm.smallTitle.trim() || !webpageForm.bigTitle.trim()) {
       showToast('error', 'Please fill in Call Us, Email Us, Small Title, and Big Title.');
+      return;
+    }
+    const emailErr = validateEmail(webpageForm.emailUs);
+    if (emailErr) {
+      showToast('error', emailErr);
       return;
     }
     setSavingWebpage(true);
@@ -449,18 +468,18 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     return () => unsubscribe();
   }, []);
 
-  // 2b. Subscribe to Organizations collection
+  // 2b. Subscribe to Construction Companies collection in Firestore
   useEffect(() => {
     setOrgsLoading(true);
-    const orgsRef = collection(db, 'organizations');
-    const unsubscribe = onSnapshot(orgsRef, (snap) => {
+    const companiesRef = collection(db, 'constructionCompanies');
+    const unsubscribe = onSnapshot(companiesRef, (snap) => {
       const list = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       setOrganizations(list);
       setOrgsLoading(false);
     }, (err) => {
-      console.warn('Error fetching organizations:', err.message);
+      console.warn('Error fetching construction companies:', err.message);
       setOrgsLoading(false);
     });
     return () => unsubscribe();
@@ -1301,28 +1320,40 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     printWin.document.close();
   };
 
-  // DEVELOPER FUNCTION: CREATE & DELETE ORGANIZATION
+  // DEVELOPER FUNCTION: CREATE & DELETE CONSTRUCTION COMPANY
   const handleCreateOrganization = (e) => {
     e.preventDefault();
+    setOrgFormSubmitted(true);
     if (!orgForm.name.trim() || !orgForm.address.trim() || !orgForm.phone.trim() || !orgForm.email.trim() || !orgForm.pointOfContact.trim()) {
-      showToast('error', 'Please fill in all required Organization fields.');
+      showToast('error', 'Please fill in all required Construction Company fields.');
+      return;
+    }
+    const emailErr = validateEmail(orgForm.email);
+    if (emailErr) {
+      showToast('error', emailErr);
+      return;
+    }
+    const phoneErr = validatePhoneNumber(orgForm.phone);
+    if (phoneErr) {
+      showToast('error', phoneErr);
       return;
     }
 
     setConfirmDialog({
-      title: 'Confirm Create Organization',
-      message: `Create organization "${orgForm.name.trim()}" in Firestore?\nThis organization will isolate its Admins, Contractors, SSOs, and Workers from other organizations.`,
-      confirmLabel: 'Create Organization',
+      title: 'Confirm Create Construction Company',
+      message: `Do you want to create ${orgForm.name.trim()}?`,
+      confirmLabel: 'Create Company',
       variant: 'primary',
       onConfirm: async () => {
         setConfirmDialog(null);
         setOrgSaving(true);
         try {
-          const slug = orgForm.name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 14) || 'ORG';
-          const autoRef = doc(collection(db, 'organizations'));
-          const orgId = `ORG-${slug}-${autoRef.id.slice(0, 5).toUpperCase()}`;
+          const slug = orgForm.name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 14) || 'CMP';
+          const autoRef = doc(collection(db, 'constructionCompanies'));
+          const orgId = `CMP-${slug}-${autoRef.id.slice(0, 5).toUpperCase()}`;
           const orgDoc = {
             organizationId: orgId,
+            companyId: orgId,
             name: orgForm.name.trim(),
             address: orgForm.address.trim(),
             phone: formatPhoneWithCountryCode(orgForm.phone),
@@ -1332,21 +1363,22 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             createdAt: new Date(),
             createdByDeveloper: devEmail
           };
-          await setDoc(doc(db, 'organizations', orgId), orgDoc);
-          await logActivity(`Created organization ${orgDoc.name} (${orgId})`, devEmail);
+          await setDoc(doc(db, 'constructionCompanies', orgId), orgDoc);
+          await logActivity(`Created construction company ${orgDoc.name} (${orgId})`, devEmail);
           setOrgForm({ name: '', address: '', phone: '', email: '', pointOfContact: '' });
+          setOrgFormSubmitted(false);
           setAdminOrgId(orgId);
           setAdminCompany(orgDoc.name);
           setShowCreateOrgModal(false);
           setConfirmDialog({
-            title: 'Organization Created',
-            message: `Organization "${orgDoc.name}" has been created and saved in Firestore.`,
+            title: 'Construction Company Created',
+            message: `Construction Company "${orgDoc.name}" has been created and saved in Firestore.`,
             variant: 'success',
             noticeOnly: true,
           });
         } catch (err) {
-          console.error('Error creating organization:', err);
-          showToast('error', 'Failed to create organization: ' + err.message);
+          console.error('Error creating construction company:', err);
+          showToast('error', 'Failed to create construction company: ' + err.message);
         } finally {
           setOrgSaving(false);
         }
@@ -1356,18 +1388,18 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
   const handleDeleteOrganization = (org) => {
     setConfirmDialog({
-      title: `Delete Organization "${org.name}"?`,
-      message: `Are you sure you want to delete organization "${org.name}" (${org.id})? Existing user links will remain untouched unless reassigned.`,
-      confirmLabel: 'Delete Organization',
+      title: `Delete Construction Company "${org.name}"?`,
+      message: `Are you sure you want to delete construction company "${org.name}" (${org.id})? Existing user links will remain untouched unless reassigned.`,
+      confirmLabel: 'Delete Company',
       variant: 'danger',
       onConfirm: async () => {
         setConfirmDialog(null);
         try {
-          await deleteDoc(doc(db, 'organizations', org.id));
-          await logActivity(`Deleted organization ${org.name} (${org.id})`, devEmail);
-          showToast('success', `✓ Organization "${org.name}" deleted.`);
+          await deleteDoc(doc(db, 'constructionCompanies', org.id));
+          await logActivity(`Deleted construction company ${org.name} (${org.id})`, devEmail);
+          showToast('success', `✓ Construction Company "${org.name}" deleted.`);
         } catch (err) {
-          showToast('error', 'Failed to delete organization: ' + err.message);
+          showToast('error', 'Failed to delete construction company: ' + err.message);
         }
       },
     });
@@ -1376,10 +1408,21 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   // DEVELOPER FUNCTION: CREATE ACCOUNT FOR ADMIN
   const handleCreateAdmin = async (e) => {
     e.preventDefault();
+    setAdminFormSubmitted(true);
     const selectedOrg = organizations.find(o => o.id === adminOrgId) || null;
     const resolvedCompany = selectedOrg ? selectedOrg.name : adminCompany.trim();
     if ((!resolvedCompany && !adminOrgId) || !adminFirstName.trim() || !adminLastName.trim() || !adminEmail.trim() || !adminPhone.trim() || !adminPassword) {
-      showToast('error', 'Please select an Organization and fill in all required Admin fields.');
+      showToast('error', 'Please select a Construction Company and fill in all required Admin fields.');
+      return;
+    }
+    const emailErr = validateEmail(adminEmail);
+    if (emailErr) {
+      showToast('error', emailErr);
+      return;
+    }
+    const phoneErr = validatePhoneNumber(adminPhone);
+    if (phoneErr) {
+      showToast('error', phoneErr);
       return;
     }
 
@@ -1404,6 +1447,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         firstName: adminFirstName.trim(),
         middleName: adminMiddleName.trim(),
         lastName: adminLastName.trim(),
+        suffix: adminSuffix.trim(),
         organizationId: selectedOrg ? selectedOrg.id : null,
         organizationName: resolvedCompany,
         company: resolvedCompany,
@@ -1430,6 +1474,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
           firstName: adminFirstName.trim(),
           middleName: adminMiddleName.trim(),
           lastName: adminLastName.trim(),
+          suffix: adminSuffix.trim(),
           organizationId: selectedOrg ? selectedOrg.id : null,
           organizationName: resolvedCompany,
           company: resolvedCompany,
@@ -1450,8 +1495,10 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       setAdminFirstName('');
       setAdminMiddleName('');
       setAdminLastName('');
+      setAdminSuffix('');
       setAdminEmail('');
       setAdminPhone('');
+      setAdminFormSubmitted(false);
       setAdminPassword(`ADM-2026-${Math.floor(1000 + Math.random() * 9000)}`);
     } catch (err) {
       console.error('Error creating admin account:', err);
@@ -1699,7 +1746,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             className={`nav-item ${activeTab === 'organizations' ? 'active' : ''}`}
             onClick={() => { setActiveTab('organizations'); setIsMobileMenuOpen(false); }}
           >
-            <FiLayers /> Organizations
+            <FiLayers /> Construction Company
           </button>
           <button 
             className={`nav-item ${activeTab === 'admins' ? 'active' : ''}`}
@@ -1749,7 +1796,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               <h1>
                 {activeTab === 'hardware' && 'Smart Vest Hardware & QR Generator'}
                 {activeTab === 'admins' && 'Admin Account Provisioning & Companies'}
-                {activeTab === 'organizations' && 'Organizations Management & Data Isolation'}
+                {activeTab === 'organizations' && 'Construction Company Management & Data Isolation'}
                 {activeTab === 'subscriptions' && 'Subscription & Payment Management'}
                 {activeTab === 'vitals' && 'Vital Signs Threshold Configuration (By Worker Age)'}
                 {activeTab === 'troubleshoot' && 'Subscription Diagnostics & Troubleshooting'}
@@ -1758,7 +1805,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               <p>
                 {activeTab === 'hardware' && 'Generate official scannable QR codes and upload authentic smart vests to the central Bevest database.'}
                 {activeTab === 'admins' && 'Onboard and manage Admin accounts for client companies and project sites.'}
-                {activeTab === 'organizations' && 'Create and manage Organizations in Firestore to isolate Admins, Contractors, Site Safety Officers, and Workers.'}
+                {activeTab === 'organizations' && 'Create and manage Construction Companies in Firestore to isolate Admins, Contractors, Site Safety Officers, and Workers.'}
                 {activeTab === 'subscriptions' && 'Manage contractor subscription tiers, verify manual payments, and monitor subscription expiration dates.'}
                 {activeTab === 'vitals' && 'Adjust and customize Heart Rate (BPM) and Body Temperature (°C) Warning (Yellow) and Danger (Red) thresholds based on worker age.'}
                 {activeTab === 'troubleshoot' && 'Diagnose subscription errors, grant temporary quota boosts, and override account statuses.'}
@@ -2263,7 +2310,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     <button
                       type="button"
                       className="dev-btn-orange"
-                      onClick={() => setShowAddAdminModal(true)}
+                      onClick={() => { setAdminFormSubmitted(false); setShowAddAdminModal(true); }}
                     >
                       <FiUserPlus /> Onboard New Admin
                     </button>
@@ -2274,7 +2321,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   <table className="dev-table">
                     <thead>
                       <tr>
-                        <th>Company / Organization</th>
+                        <th>Construction Company</th>
                         <th>Admin Name</th>
                         <th>Email Address</th>
                         <th>Phone Number</th>
@@ -2329,7 +2376,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                 </div>
                               </td>
                               <td>
-                                <div style={{ fontWeight: 600 }}>{a.firstName} {a.lastName}</div>
+                                <div style={{ fontWeight: 600 }}>{formatProfileName(a)}</div>
                               </td>
                               <td>
                                 <span>{a.email}</span>
@@ -2372,24 +2419,24 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             </div>
           )}
 
-          {/* TAB 2B: ORGANIZATIONS COLLECTION & DATA ISOLATION */}
+          {/* TAB 2B: CONSTRUCTION COMPANY COLLECTION & DATA ISOLATION */}
           {activeTab === 'organizations' && (
             <div>
               <div className="dev-card">
                 <div className="dev-card-header">
                   <div>
                     <h3 className="dev-card-title">
-                      <FiLayers /> Organizations Directory ({organizations.length})
+                      <FiLayers /> Construction Companies Directory ({organizations.length})
                     </h3>
                     <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                      Each organization has an isolated workspace for its Admins, Contractors, Site Safety Officers, and Workers.
+                      Each construction company has an isolated workspace for its Admins, Contractors, Site Safety Officers, and Workers.
                     </p>
                   </div>
                   <div className="dev-search-filter-row" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                     <input
                       type="text"
                       className="dev-input"
-                      placeholder="Search organization name, contact, email..."
+                      placeholder="Search construction company, contact, email..."
                       value={orgSearch}
                       onChange={(e) => setOrgSearch(e.target.value)}
                       style={{ minWidth: '260px' }}
@@ -2397,9 +2444,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     <button
                       type="button"
                       className="dev-btn-orange"
-                      onClick={() => setShowCreateOrgModal(true)}
+                      onClick={() => { setOrgFormSubmitted(false); setShowCreateOrgModal(true); }}
                     >
-                      <FiPlus /> Create Organization
+                      <FiPlus /> Create Company
                     </button>
                   </div>
                 </div>
@@ -2408,7 +2455,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   <table className="dev-table">
                     <thead>
                       <tr>
-                        <th>Organization Name</th>
+                        <th>Construction Company Name</th>
                         <th>Address</th>
                         <th>Phone Number</th>
                         <th>Email Address</th>
@@ -2420,7 +2467,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       {orgsLoading ? (
                         <tr>
                           <td colSpan={6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-                            Loading organizations...
+                            Loading construction companies...
                           </td>
                         </tr>
                       ) : organizations.filter(o => {
@@ -2433,7 +2480,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       }).length === 0 ? (
                         <tr>
                           <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
-                            No organizations created yet. Click <strong>Create Organization</strong> to add one.
+                            No construction companies created yet. Click <strong>Create Company</strong> to add one.
                           </td>
                         </tr>
                       ) : (
@@ -2540,7 +2587,8 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <span style={{ fontWeight: 700, color: '#ea580c' }}>₱</span>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
                       className="dev-input"
                       style={{ width: '130px', padding: '0.35rem 0.6rem', fontWeight: 700 }}
                       value={vestRateInput}
@@ -2602,11 +2650,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                               {isCustom ? 'Min Vests Limit' : 'Vests Quota'}
                             </label>
                             <input
-                              type="number"
+                              type="text"
+                              inputMode="numeric"
                               className="dev-input"
                               style={{ padding: '0.35rem 0.5rem' }}
-                              value={isCustom ? (t.minVests || 125) : (t.vests || 0)}
-                              onChange={(e) => handleTierFieldChange(tierKey, isCustom ? 'minVests' : 'vests', Number(e.target.value) || 0)}
+                              value={isCustom ? (t.minVests ?? '') : (t.vests ?? '')}
+                              onChange={(e) => handleTierFieldChange(tierKey, isCustom ? 'minVests' : 'vests', parseNumericField(e.target.value))}
                             />
                           </div>
                           <div className="dev-form-group" style={{ margin: 0 }}>
@@ -2615,34 +2664,37 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                             </label>
                             <input
                               type="text"
+                              inputMode={isCustom ? 'text' : 'numeric'}
                               className="dev-input"
                               style={{ padding: '0.35rem 0.5rem' }}
-                              value={t.ssos || ''}
-                              onChange={(e) => handleTierFieldChange(tierKey, 'ssos', isCustom ? e.target.value : (Number(e.target.value) || 0))}
+                              value={t.ssos ?? ''}
+                              onChange={(e) => handleTierFieldChange(tierKey, 'ssos', isCustom ? e.target.value : parseNumericField(e.target.value))}
                             />
                           </div>
                           <div className="dev-form-group" style={{ margin: 0 }}>
                             <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>Storage Quota (GB)</label>
                             <input
-                              type="number"
+                              type="text"
+                              inputMode="numeric"
                               className="dev-input"
                               style={{ padding: '0.35rem 0.5rem' }}
-                              value={t.storageGb || 0}
+                              value={t.storageGb ?? ''}
                               onChange={(e) => {
-                                const gb = Number(e.target.value) || 0;
+                                const gb = parseNumericField(e.target.value);
                                 handleTierFieldChange(tierKey, 'storageGb', gb);
-                                handleTierFieldChange(tierKey, 'storage', `${gb}gb Data Storage`);
+                                handleTierFieldChange(tierKey, 'storage', `${Number(gb) || 0}gb Data Storage`);
                               }}
                             />
                           </div>
                           <div className="dev-form-group" style={{ margin: 0 }}>
                             <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>Discount %</label>
                             <input
-                              type="number"
+                              type="text"
+                              inputMode="numeric"
                               className="dev-input"
                               style={{ padding: '0.35rem 0.5rem' }}
-                              value={t.discountPercent || 0}
-                              onChange={(e) => handleTierFieldChange(tierKey, 'discountPercent', Number(e.target.value) || 0)}
+                              value={t.discountPercent ?? ''}
+                              onChange={(e) => handleTierFieldChange(tierKey, 'discountPercent', parseNumericField(e.target.value))}
                             />
                           </div>
                         </div>
@@ -2653,21 +2705,23 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                             <div className="dev-form-group" style={{ margin: 0 }}>
                               <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>Monthly Price (₱)</label>
                               <input
-                                type="number"
+                                type="text"
+                                inputMode="numeric"
                                 className="dev-input"
                                 style={{ padding: '0.35rem 0.5rem', fontWeight: 600 }}
-                                value={t.monthlyPrice || 0}
-                                onChange={(e) => handleTierFieldChange(tierKey, 'monthlyPrice', Number(e.target.value) || 0)}
+                                value={t.monthlyPrice ?? ''}
+                                onChange={(e) => handleTierFieldChange(tierKey, 'monthlyPrice', parseNumericField(e.target.value))}
                               />
                             </div>
                             <div className="dev-form-group" style={{ margin: 0 }}>
                               <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>Annual Price (₱)</label>
                               <input
-                                type="number"
+                                type="text"
+                                inputMode="numeric"
                                 className="dev-input"
                                 style={{ padding: '0.35rem 0.5rem', fontWeight: 600 }}
-                                value={t.annualPrice || 0}
-                                onChange={(e) => handleTierFieldChange(tierKey, 'annualPrice', Number(e.target.value) || 0)}
+                                value={t.annualPrice ?? ''}
+                                onChange={(e) => handleTierFieldChange(tierKey, 'annualPrice', parseNumericField(e.target.value))}
                               />
                             </div>
                             {tierKey === 'ENTERPRISE' && (
@@ -2675,21 +2729,23 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                 <div className="dev-form-group" style={{ margin: 0 }}>
                                   <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>Base Monthly (₱)</label>
                                   <input
-                                    type="number"
+                                    type="text"
+                                    inputMode="numeric"
                                     className="dev-input"
                                     style={{ padding: '0.35rem 0.5rem' }}
-                                    value={t.baseMonthlyPrice || 0}
-                                    onChange={(e) => handleTierFieldChange(tierKey, 'baseMonthlyPrice', Number(e.target.value) || 0)}
+                                    value={t.baseMonthlyPrice ?? ''}
+                                    onChange={(e) => handleTierFieldChange(tierKey, 'baseMonthlyPrice', parseNumericField(e.target.value))}
                                   />
                                 </div>
                                 <div className="dev-form-group" style={{ margin: 0 }}>
                                   <label className="dev-form-label" style={{ fontSize: '0.7rem' }}>Base Annual (₱)</label>
                                   <input
-                                    type="number"
+                                    type="text"
+                                    inputMode="numeric"
                                     className="dev-input"
                                     style={{ padding: '0.35rem 0.5rem' }}
-                                    value={t.baseAnnualPrice || 0}
-                                    onChange={(e) => handleTierFieldChange(tierKey, 'baseAnnualPrice', Number(e.target.value) || 0)}
+                                    value={t.baseAnnualPrice ?? ''}
+                                    onChange={(e) => handleTierFieldChange(tierKey, 'baseAnnualPrice', parseNumericField(e.target.value))}
                                   />
                                 </div>
                               </>
@@ -3722,25 +3778,25 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             </div>
 
             <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1.25rem', lineHeight: '1.4' }}>
-              Create an administrative account for a company or client organization. Admins have oversight to manage contractor accounts, site safety officers, and monitor active workers.
+              Create an administrative account for a construction company. Admins have oversight to manage contractor accounts, site safety officers, and monitor active workers.
             </p>
 
-            <form onSubmit={handleCreateAdmin}>
-              {/* ORGANIZATION ASSIGNMENT */}
+            <form onSubmit={handleCreateAdmin} noValidate>
+              {/* CONSTRUCTION COMPANY ASSIGNMENT */}
               <div className="dev-form-group">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
-                  <label className="dev-form-label" style={{ margin: 0 }}>ORGANIZATION *</label>
+                  <label className="dev-form-label" style={{ margin: 0 }}>CONSTRUCTION COMPANY *</label>
                   <button
                     type="button"
                     className="dev-btn-secondary"
                     style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem' }}
                     onClick={() => setShowCreateOrgModal(true)}
                   >
-                    <FiPlus /> New Organization
+                    <FiPlus /> Create Company
                   </button>
                 </div>
                 <select
-                  className="dev-input"
+                  className={`dev-input${adminFormSubmitted && !adminOrgId ? ' input-error' : ''}`}
                   value={adminOrgId}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -3752,8 +3808,8 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 >
                   <option value="">
                     {organizations.length === 0
-                      ? 'No organizations created yet — click "+ New Organization"'
-                      : 'Select Organization...'}
+                      ? 'No construction companies created yet — click "+ Create Company"'
+                      : 'Select Construction Company...'}
                   </option>
                   {organizations.map((org) => (
                     <option key={org.id} value={org.id}>
@@ -3762,7 +3818,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   ))}
                 </select>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                  Isolates this Admin, their Contractors, Site Safety Officers, and Workers within the selected Organization.
+                  Isolates this Admin, their Contractors, Site Safety Officers, and Workers within the selected Construction Company.
                 </div>
               </div>
 
@@ -3771,7 +3827,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   <label className="dev-form-label">FIRST NAME *</label>
                   <input
                     type="text"
-                    className="dev-input"
+                    className={`dev-input${adminFormSubmitted && !adminFirstName.trim() ? ' input-error' : ''}`}
                     placeholder="First name"
                     value={adminFirstName}
                     onChange={(e) => setAdminFirstName(e.target.value)}
@@ -3794,32 +3850,51 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   <label className="dev-form-label">LAST NAME *</label>
                   <input
                     type="text"
-                    className="dev-input"
+                    className={`dev-input${adminFormSubmitted && !adminLastName.trim() ? ' input-error' : ''}`}
                     placeholder="Last name"
                     value={adminLastName}
                     onChange={(e) => setAdminLastName(e.target.value)}
                     required
                   />
                 </div>
+
+                <div className="dev-form-group">
+                  <label className="dev-form-label">SUFFIX (OPTIONAL)</label>
+                  <input
+                    type="text"
+                    className="dev-input"
+                    placeholder="e.g. Jr., III"
+                    value={adminSuffix}
+                    onChange={(e) => setAdminSuffix(e.target.value)}
+                  />
+                </div>
               </div>
 
-              <div className="dev-form-group">
-                <label className="dev-form-label">ADMIN EMAIL ADDRESS *</label>
-                <input
-                  type="email"
-                  className="dev-input"
-                  placeholder="admin@company.com"
-                  value={adminEmail}
-                  onChange={(e) => setAdminEmail(e.target.value)}
-                  required
-                />
-              </div>
+              {(() => {
+                const emailErr = liveEmailError(adminEmail);
+                const isInvalid = Boolean(emailErr) || (adminFormSubmitted && !adminEmail.trim());
+                return (
+                  <div className="dev-form-group">
+                    <label className="dev-form-label">ADMIN EMAIL ADDRESS *</label>
+                    <input
+                      type="email"
+                      className={`dev-input${isInvalid ? ' input-error' : ''}`}
+                      placeholder="admin@company.com"
+                      value={adminEmail}
+                      onChange={(e) => setAdminEmail(e.target.value)}
+                      required
+                    />
+                    {emailErr && <div className="field-error-text">{emailErr}</div>}
+                  </div>
+                );
+              })()}
 
               <div className="dev-form-group">
                 <label className="dev-form-label">PHONE NUMBER *</label>
                 <PhoneInput
                   value={adminPhone}
                   onChange={(p) => setAdminPhone(p)}
+                  hasError={adminFormSubmitted && (!adminPhone.trim() || Boolean(validatePhoneNumber(adminPhone, true)))}
                   required
                 />
               </div>
@@ -3838,7 +3913,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 </div>
                 <input
                   type="text"
-                  className="dev-input"
+                  className={`dev-input${adminFormSubmitted && !adminPassword ? ' input-error' : ''}`}
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
                   required
@@ -4172,12 +4247,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         </div>
       )}
 
-      {/* MODAL: CREATE ORGANIZATION */}
+      {/* MODAL: CREATE CONSTRUCTION COMPANY */}
       {showCreateOrgModal && (
         <div className="dev-modal-overlay" style={{ zIndex: 9998 }}>
           <div className="dev-modal-card">
             <div className="dev-modal-header">
-              <h3>Create Organization</h3>
+              <h3>Create Construction Company</h3>
               <button
                 type="button"
                 className="dev-modal-close"
@@ -4188,15 +4263,15 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             </div>
 
             <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1.25rem', lineHeight: '1.4' }}>
-              Create an Organization record in Firestore to isolate Admins, Contractors, Site Safety Officers, and Workers from other organizations.
+              Create a Construction Company record in Firestore to isolate Admins, Contractors, Site Safety Officers, and Workers from other construction companies.
             </p>
 
-            <form onSubmit={handleCreateOrganization}>
+            <form onSubmit={handleCreateOrganization} noValidate>
               <div className="dev-form-group">
-                <label className="dev-form-label">ORGANIZATION NAME *</label>
+                <label className="dev-form-label">CONSTRUCTION COMPANY NAME *</label>
                 <input
                   type="text"
-                  className="dev-input"
+                  className={`dev-input${orgFormSubmitted && !orgForm.name.trim() ? ' input-error' : ''}`}
                   placeholder="e.g. BuildCorp Infrastructure"
                   value={orgForm.name}
                   onChange={(e) => setOrgForm({ ...orgForm, name: e.target.value })}
@@ -4207,12 +4282,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
               <div className="dev-form-group">
                 <label className="dev-form-label">ADDRESS *</label>
-                <input
-                  type="text"
+                <AddressAutocomplete
                   className="dev-input"
                   placeholder="e.g. 123 Ayala Ave, Makati City"
                   value={orgForm.address}
-                  onChange={(e) => setOrgForm({ ...orgForm, address: e.target.value })}
+                  onChange={(address) => setOrgForm({ ...orgForm, address })}
+                  hasError={orgFormSubmitted && !orgForm.address.trim()}
                   required
                 />
               </div>
@@ -4222,27 +4297,35 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 <PhoneInput
                   value={orgForm.phone}
                   onChange={(phone) => setOrgForm({ ...orgForm, phone })}
+                  hasError={orgFormSubmitted && (!orgForm.phone.trim() || Boolean(validatePhoneNumber(orgForm.phone, true)))}
                   required
                 />
               </div>
 
-              <div className="dev-form-group">
-                <label className="dev-form-label">EMAIL ADDRESS *</label>
-                <input
-                  type="email"
-                  className="dev-input"
-                  placeholder="contact@organization.com"
-                  value={orgForm.email}
-                  onChange={(e) => setOrgForm({ ...orgForm, email: e.target.value })}
-                  required
-                />
-              </div>
+              {(() => {
+                const emailErr = liveEmailError(orgForm.email);
+                const isInvalid = Boolean(emailErr) || (orgFormSubmitted && !orgForm.email.trim());
+                return (
+                  <div className="dev-form-group">
+                    <label className="dev-form-label">EMAIL ADDRESS *</label>
+                    <input
+                      type="email"
+                      className={`dev-input${isInvalid ? ' input-error' : ''}`}
+                      placeholder="contact@company.com"
+                      value={orgForm.email}
+                      onChange={(e) => setOrgForm({ ...orgForm, email: e.target.value })}
+                      required
+                    />
+                    {emailErr && <div className="field-error-text">{emailErr}</div>}
+                  </div>
+                );
+              })()}
 
               <div className="dev-form-group">
                 <label className="dev-form-label">POINT OF CONTACT *</label>
                 <input
                   type="text"
-                  className="dev-input"
+                  className={`dev-input${orgFormSubmitted && !orgForm.pointOfContact.trim() ? ' input-error' : ''}`}
                   placeholder="e.g. Juan Dela Cruz"
                   value={orgForm.pointOfContact}
                   onChange={(e) => setOrgForm({ ...orgForm, pointOfContact: e.target.value })}
@@ -4264,7 +4347,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   className="dev-btn-orange"
                   disabled={orgSaving}
                 >
-                  {orgSaving ? 'Creating...' : 'Create Organization'}
+                  {orgSaving ? 'Creating...' : 'Create Company'}
                 </button>
               </div>
             </form>

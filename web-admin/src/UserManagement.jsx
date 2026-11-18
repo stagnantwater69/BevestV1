@@ -11,6 +11,7 @@ import { getContractorSubscription } from './subscriptionPlans';
 import { logActivity } from './activityLogger';
 import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
 import ConfirmModal from './ConfirmModal';
+import { validateEmail, validatePhoneNumber, liveEmailError, formatProfileName } from './validation';
 
 const UserManagement = ({ user }) => {
   const adminOrgId = user?.profile?.organizationId || null;
@@ -23,11 +24,13 @@ const UserManagement = ({ user }) => {
     firstName: '',
     middleName: '',
     lastName: '',
+    suffix: '',
     phone: '',
     email: '',
     password: '',
     role: 'Contractor'
   });
+  const [addSubmitted, setAddSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -43,9 +46,11 @@ const UserManagement = ({ user }) => {
   const [editFirstName, setEditFirstName] = useState('');
   const [editMiddleName, setEditMiddleName] = useState('');
   const [editLastName, setEditLastName] = useState('');
+  const [editSuffix, setEditSuffix] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editNewPassword, setEditNewPassword] = useState('');
+  const [editSubmitted, setEditSubmitted] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // Disable account confirmation modal state
@@ -136,8 +141,19 @@ const UserManagement = ({ user }) => {
 
   // 1. Create Contractor Account without Subscription Plan (with Confirmation Modal)
   const requestCreateUser = () => {
+    setAddSubmitted(true);
     if (!formData.firstName.trim() || !formData.lastName.trim() || !formData.email.trim() || !formData.phone.trim() || !formData.password) {
       setErrorMsg("Please fill in all required fields (including phone number) and generate a password.");
+      return;
+    }
+    const emailErr = validateEmail(formData.email);
+    if (emailErr) {
+      setErrorMsg(emailErr);
+      return;
+    }
+    const phoneErr = validatePhoneNumber(formData.phone, true);
+    if (phoneErr) {
+      setErrorMsg(phoneErr);
       return;
     }
     setErrorMsg('');
@@ -166,6 +182,7 @@ const UserManagement = ({ user }) => {
         firstName: formData.firstName.trim(),
         middleName: (formData.middleName || '').trim(),
         lastName: formData.lastName.trim(),
+        suffix: (formData.suffix || '').trim(),
         phone: formatPhoneWithCountryCode(formData.phone),
         email: formData.email.trim(),
         role: 'CONTRACTOR',
@@ -193,11 +210,13 @@ const UserManagement = ({ user }) => {
         firstName: '',
         middleName: '',
         lastName: '',
+        suffix: '',
         phone: '',
         email: '',
         password: '',
         role: 'Contractor'
       });
+      setAddSubmitted(false);
       setShowAddModal(false);
       await fetchUsers();
       setConfirmDialog({
@@ -220,9 +239,11 @@ const UserManagement = ({ user }) => {
     setEditFirstName(userToEdit.firstName || '');
     setEditMiddleName(userToEdit.middleName || '');
     setEditLastName(userToEdit.lastName || '');
+    setEditSuffix(userToEdit.suffix || '');
     setEditPhone(userToEdit.phone || '');
     setEditEmail(userToEdit.email || '');
     setEditNewPassword('');
+    setEditSubmitted(false);
   };
 
   const handleGenerateEditPassword = () => {
@@ -244,8 +265,19 @@ const UserManagement = ({ user }) => {
   // Save updated user profile details (and optional password change) in Firestore
   const handleSaveUserEdit = async () => {
     if (!editingUser) return;
+    setEditSubmitted(true);
     if (!editFirstName.trim() || !editLastName.trim()) {
       alert("First name and last name are required.");
+      return;
+    }
+    const emailErr = validateEmail(editEmail);
+    if (emailErr) {
+      alert(emailErr);
+      return;
+    }
+    const phoneErr = validatePhoneNumber(editPhone, false);
+    if (phoneErr) {
+      alert(phoneErr);
       return;
     }
     if (editNewPassword && editNewPassword.trim().length < 6) {
@@ -259,6 +291,7 @@ const UserManagement = ({ user }) => {
         firstName: editFirstName.trim(),
         middleName: editMiddleName.trim(),
         lastName: editLastName.trim(),
+        suffix: editSuffix.trim(),
         phone: formatPhoneWithCountryCode(editPhone),
         email: editEmail.trim()
       };
@@ -429,6 +462,7 @@ const UserManagement = ({ user }) => {
           className="btn-primary"
           onClick={() => {
             setErrorMsg('');
+            setAddSubmitted(false);
             setShowAddModal(true);
           }}
         >
@@ -565,7 +599,7 @@ const UserManagement = ({ user }) => {
                           </div>
                           <div className="user-info">
                             <span className="user-name" style={{ color: isAccountDisabled ? '#64748b' : '#0f172a' }}>
-                              {user.firstName} {user.lastName}
+                              {formatProfileName(user)}
                             </span>
                             <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{user.email}</span>
                           </div>
@@ -710,7 +744,7 @@ const UserManagement = ({ user }) => {
                 <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>FIRST NAME *</label>
                 <input 
                   type="text" 
-                  className="form-input" 
+                  className={`form-input${editSubmitted && !editFirstName.trim() ? ' input-error' : ''}`} 
                   value={editFirstName} 
                   onChange={(e) => setEditFirstName(e.target.value)}
                   style={{ width: '100%' }}
@@ -733,9 +767,21 @@ const UserManagement = ({ user }) => {
                 <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>LAST NAME *</label>
                 <input 
                   type="text" 
-                  className="form-input" 
+                  className={`form-input${editSubmitted && !editLastName.trim() ? ' input-error' : ''}`} 
                   value={editLastName} 
                   onChange={(e) => setEditLastName(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>SUFFIX (OPTIONAL)</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  placeholder="e.g. Jr., III"
+                  value={editSuffix} 
+                  onChange={(e) => setEditSuffix(e.target.value)}
                   style={{ width: '100%' }}
                 />
               </div>
@@ -745,19 +791,27 @@ const UserManagement = ({ user }) => {
                 <PhoneInput 
                   value={editPhone} 
                   onChange={(phone) => setEditPhone(phone)}
+                  hasError={editSubmitted && Boolean(editPhone.trim()) && Boolean(validatePhoneNumber(editPhone, false))}
                 />
               </div>
 
-              <div>
-                <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>EMAIL ADDRESS</label>
-                <input 
-                  type="email" 
-                  className="form-input" 
-                  value={editEmail} 
-                  onChange={(e) => setEditEmail(e.target.value)}
-                  style={{ width: '100%' }}
-                />
-              </div>
+              {(() => {
+                const emailErr = liveEmailError(editEmail);
+                const isInvalid = Boolean(emailErr) || (editSubmitted && !editEmail.trim());
+                return (
+                  <div>
+                    <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>EMAIL ADDRESS</label>
+                    <input 
+                      type="email" 
+                      className={`form-input${isInvalid ? ' input-error' : ''}`} 
+                      value={editEmail} 
+                      onChange={(e) => setEditEmail(e.target.value)}
+                      style={{ width: '100%' }}
+                    />
+                    {emailErr && <div className="field-error-text">{emailErr}</div>}
+                  </div>
+                );
+              })()}
 
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
@@ -931,7 +985,7 @@ const UserManagement = ({ user }) => {
                 <label className="form-label">FIRST NAME *</label>
                 <input
                   type="text"
-                  className="form-input"
+                  className={`form-input${addSubmitted && !formData.firstName.trim() ? ' input-error' : ''}`}
                   placeholder="e.g. Marcus"
                   value={formData.firstName}
                   onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
@@ -954,7 +1008,7 @@ const UserManagement = ({ user }) => {
                 <label className="form-label">LAST NAME *</label>
                 <input
                   type="text"
-                  className="form-input"
+                  className={`form-input${addSubmitted && !formData.lastName.trim() ? ' input-error' : ''}`}
                   placeholder="e.g. Thorne"
                   value={formData.lastName}
                   onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
@@ -963,32 +1017,51 @@ const UserManagement = ({ user }) => {
               </div>
 
               <div className="form-group-custom">
-                <label className="form-label">PHONE NUMBER *</label>
-                <PhoneInput
-                  value={formData.phone}
-                  onChange={(phone) => setFormData({ ...formData, phone })}
-                  required
+                <label className="form-label">SUFFIX (OPTIONAL)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Jr., III"
+                  value={formData.suffix}
+                  onChange={(e) => setFormData({ ...formData, suffix: e.target.value })}
                 />
               </div>
 
               <div className="form-group-custom">
-                <label className="form-label">EMAIL ADDRESS *</label>
-                <input
-                  type="email"
-                  className="form-input"
-                  placeholder="contractor@buildcorp.com"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                <label className="form-label">PHONE NUMBER *</label>
+                <PhoneInput
+                  value={formData.phone}
+                  onChange={(phone) => setFormData({ ...formData, phone })}
+                  hasError={addSubmitted && (!formData.phone.trim() || Boolean(validatePhoneNumber(formData.phone, true)))}
                   required
                 />
               </div>
+
+              {(() => {
+                const emailErr = liveEmailError(formData.email);
+                const isInvalid = Boolean(emailErr) || (addSubmitted && !formData.email.trim());
+                return (
+                  <div className="form-group-custom">
+                    <label className="form-label">EMAIL ADDRESS *</label>
+                    <input
+                      type="email"
+                      className={`form-input${isInvalid ? ' input-error' : ''}`}
+                      placeholder="contractor@buildcorp.com"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      required
+                    />
+                    {emailErr && <div className="field-error-text">{emailErr}</div>}
+                  </div>
+                );
+              })()}
 
               <div className="form-group-custom">
                 <label className="form-label">TEMPORARY PASSWORD *</label>
                 <div className="password-input-group">
                   <input
                     type="text"
-                    className="form-input password-field"
+                    className={`form-input password-field${addSubmitted && !formData.password ? ' input-error' : ''}`}
                     placeholder="Enter or click generate..."
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}

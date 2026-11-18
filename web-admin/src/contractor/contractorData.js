@@ -12,6 +12,7 @@ import {
 import { ref, onValue, remove } from 'firebase/database';
 import { db, rtdb } from '../firebase';
 import { formatPhoneWithCountryCode } from '../PhoneInput';
+import { formatProfileName } from '../validation';
 
 // ------------------------------------------------------------------ constants
 
@@ -228,12 +229,14 @@ export const toUser = (snap) => {
   const firstName = d.firstName || '';
   const middleName = d.middleName || '';
   const lastName = d.lastName || '';
+  const suffix = d.suffix || '';
   return {
     uid: snap.id,
     firstName,
     middleName,
     lastName,
-    fullName: [firstName, middleName, lastName].map((s) => s.trim()).filter(Boolean).join(' '),
+    suffix,
+    fullName: formatProfileName({ firstName, middleName, lastName, suffix }),
     email: d.email || '',
     phone: formatPhoneWithCountryCode(d.phone || ''),
     role: d.role || '',

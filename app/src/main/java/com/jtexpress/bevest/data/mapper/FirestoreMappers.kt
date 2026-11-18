@@ -42,6 +42,7 @@ fun DocumentSnapshot.toUser(): User = User(
     firstName = str("firstName"),
     middleName = str("middleName"),
     lastName = str("lastName"),
+    suffix = str("suffix"),
     email = str("email"),
     phone = Validators.formatPhoneWithCountryCode(str("phone")),
     role = UserRole.fromRaw(strOrNull("role")),

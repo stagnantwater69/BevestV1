@@ -26,7 +26,9 @@ class AccountRepositoryImpl @Inject constructor(
         email: String,
         tempPassword: String,
         firstName: String,
+        middleName: String,
         lastName: String,
+        suffix: String,
         phone: String,
         role: UserRole,
         contractorId: String?,
@@ -50,7 +52,9 @@ class AccountRepositoryImpl @Inject constructor(
             firestore.collection(FirebasePaths.USERS).document(uid).set(
                 mapOf(
                     "firstName" to firstName.trim(),
+                    "middleName" to middleName.trim(),
                     "lastName" to lastName.trim(),
+                    "suffix" to suffix.trim(),
                     "email" to email.trim(),
                     "phone" to Validators.formatPhoneWithCountryCode(phone),
                     "role" to role.name,

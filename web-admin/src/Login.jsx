@@ -15,11 +15,13 @@ import { auth, db } from './firebase';
 import logo from './assets/bevest_logo.png';
 import { logActivity } from './activityLogger';
 import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
+import { validateEmail, liveEmailError } from './validation';
 
 const Login = ({ onLogin, onBackToHome }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [loginSubmitted, setLoginSubmitted] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -28,6 +30,7 @@ const Login = ({ onLogin, onBackToHome }) => {
   const [resetMethod, setResetMethod] = useState('email'); // 'email' | 'phone'
   const [resetEmail, setResetEmail] = useState('');
   const [resetPhone, setResetPhone] = useState('');
+  const [resetSubmitted, setResetSubmitted] = useState(false);
   const [phoneLookupMode, setPhoneLookupMode] = useState('email'); // 'email' | 'phone'
   const [resetLoading, setResetLoading] = useState(false);
   const [resetError, setResetError] = useState('');
@@ -74,6 +77,16 @@ const Login = ({ onLogin, onBackToHome }) => {
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
+    setLoginSubmitted(true);
+    const emailErr = validateEmail(email);
+    if (emailErr) {
+      setError(emailErr);
+      return;
+    }
+    if (!password) {
+      setError('Password is required.');
+      return;
+    }
     setLoading(true);
 
     try {
@@ -315,8 +328,10 @@ const Login = ({ onLogin, onBackToHome }) => {
 
   const handleResetPasswordEmail = async (e) => {
     e.preventDefault();
-    if (!resetEmail.trim()) {
-      setResetError('Please enter your registered email address.');
+    setResetSubmitted(true);
+    const emailErr = validateEmail(resetEmail);
+    if (emailErr) {
+      setResetError(emailErr);
       return;
     }
     setResetError('');
@@ -412,8 +427,9 @@ const Login = ({ onLogin, onBackToHome }) => {
 
       if (phoneLookupMode === 'email') {
         const emailToTest = resetEmail.trim();
-        if (!emailToTest) {
-          setResetError('Please enter your registered email address.');
+        const emailErr = validateEmail(emailToTest);
+        if (emailErr) {
+          setResetError(emailErr);
           setResetLoading(false);
           return;
         }
@@ -678,23 +694,30 @@ const Login = ({ onLogin, onBackToHome }) => {
                   </button>
                 </div>
               ) : (
-                <form onSubmit={handleResetPasswordEmail}>
-                  <div className="form-group">
-                    <div className="form-header">
-                      <label className="form-label">REGISTERED EMAIL</label>
-                    </div>
-                    <div className="input-wrapper">
-                      <input
-                        type="email"
-                        className="form-input"
-                        placeholder="name@company.com"
-                        value={resetEmail}
-                        onChange={(e) => setResetEmail(e.target.value)}
-                        required
-                        autoFocus
-                      />
-                    </div>
-                  </div>
+                <form onSubmit={handleResetPasswordEmail} noValidate>
+                  {(() => {
+                    const err = liveEmailError(resetEmail);
+                    const isInvalid = Boolean(err) || (resetSubmitted && !resetEmail.trim());
+                    return (
+                      <div className="form-group">
+                        <div className="form-header">
+                          <label className="form-label">REGISTERED EMAIL</label>
+                        </div>
+                        <div className="input-wrapper">
+                          <input
+                            type="email"
+                            className={`form-input${isInvalid ? ' input-error' : ''}`}
+                            placeholder="name@company.com"
+                            value={resetEmail}
+                            onChange={(e) => setResetEmail(e.target.value)}
+                            required
+                            autoFocus
+                          />
+                        </div>
+                        {err && <div className="field-error-text">{err}</div>}
+                      </div>
+                    );
+                  })()}
 
                   <button type="submit" className="submit-btn" disabled={resetLoading}>
                     {resetLoading ? 'Sending Reset Link...' : 'Send Reset Link'}
@@ -747,7 +770,7 @@ const Login = ({ onLogin, onBackToHome }) => {
                 )}
 
                 {phoneStep === 'lookup' && (
-                  <form onSubmit={handlePhoneLookup}>
+                  <form onSubmit={handlePhoneLookup} noValidate>
                     {phoneLookupMode === 'email' ? (
                       <div className="form-group">
                         <div className="form-header">
@@ -995,23 +1018,39 @@ const Login = ({ onLogin, onBackToHome }) => {
           <div>
             {error && <div className="error-message" style={{ marginBottom: '1.25rem' }}>{error}</div>}
 
-            <form onSubmit={handleLogin} className="mobile-login-form">
+            <form onSubmit={handleLogin} className="mobile-login-form" noValidate>
               {/* Email Input */}
-              <div className="mobile-input-box">
-                <FiMail className="mobile-input-icon" />
-                <input
-                  type="email"
-                  className="mobile-input-field"
-                  placeholder="Email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoComplete="email"
-                />
-              </div>
+              {(() => {
+                const emailErr = liveEmailError(email);
+                const isInvalid = Boolean(emailErr) || (loginSubmitted && !email.trim());
+                return (
+                  <div style={{ width: '100%', marginBottom: '1.15rem' }}>
+                    <div
+                      className={`mobile-input-box${isInvalid ? ' input-error' : ''}`}
+                      style={{ marginBottom: 0 }}
+                    >
+                      <FiMail className="mobile-input-icon" />
+                      <input
+                        type="email"
+                        className="mobile-input-field"
+                        placeholder="Email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                        autoComplete="email"
+                      />
+                    </div>
+                    {emailErr && (
+                      <div className="field-error-text" style={{ marginTop: '0.35rem', paddingLeft: '0.25rem' }}>
+                        {emailErr}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Password Input with Visibility Toggle */}
-              <div className="mobile-input-box">
+              <div className={`mobile-input-box${loginSubmitted && !password ? ' input-error' : ''}`}>
                 <FiLock className="mobile-input-icon" />
                 <input
                   type={showPassword ? 'text' : 'password'}

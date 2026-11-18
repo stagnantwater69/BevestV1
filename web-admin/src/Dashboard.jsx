@@ -9,6 +9,7 @@ import UserManagement from './UserManagement';
 import SystemManagement from './SystemManagement';
 import AdminProfile from './AdminProfile';
 import { formatTimeAgo } from './activityLogger';
+import { formatProfileName } from './validation';
 
 const Dashboard = ({ user, onLogout }) => {
   const [activeTab, setActiveTab] = useState('Overview');
@@ -37,10 +38,7 @@ const Dashboard = ({ user, onLogout }) => {
     return () => unsub();
   }, [user?.uid, user?.profile]);
 
-  const adminName = [liveProfile?.firstName, liveProfile?.middleName, liveProfile?.lastName]
-    .map((s) => (s || '').trim())
-    .filter(Boolean)
-    .join(' ') || user?.email || 'Administrator';
+  const adminName = formatProfileName(liveProfile, user?.email || 'Administrator');
 
   const adminInitials = ((liveProfile?.firstName?.[0] || '') + (liveProfile?.lastName?.[0] || '')).toUpperCase() ||
     (adminName.slice(0, 2).toUpperCase() || 'AD');

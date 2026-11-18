@@ -1,16 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { FiMail, FiPhone, FiEdit2, FiLock, FiChevronRight, FiArrowLeft, FiShield, FiBriefcase } from 'react-icons/fi';
 import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
+import { validatePhoneNumber, formatProfileName } from './validation';
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
 const AdminProfile = ({ user }) => {
   const [showEdit, setShowEdit] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [editSubmitted, setEditSubmitted] = useState(false);
   const [profile, setProfile] = useState({
     firstName: user?.profile?.firstName || 'Web',
     middleName: user?.profile?.middleName || '',
     lastName: user?.profile?.lastName || 'Admin',
+    suffix: user?.profile?.suffix || '',
     email: user?.email || user?.profile?.email || 'testwebadmin@bevest.com',
     phone: (user?.profile?.phone && user.profile.phone !== 'Not set' ? formatPhoneWithCountryCode(user.profile.phone) : '') || 'Not set',
     company: user?.profile?.company || user?.profile?.companyName || 'Bevest Enterprise'
@@ -26,6 +30,7 @@ const AdminProfile = ({ user }) => {
             firstName: d.firstName || prev.firstName,
             middleName: d.middleName != null ? d.middleName : prev.middleName,
             lastName: d.lastName || prev.lastName,
+            suffix: d.suffix != null ? d.suffix : prev.suffix,
             email: d.email || prev.email,
             phone: (d.phone && d.phone !== 'Not set' ? formatPhoneWithCountryCode(d.phone) : '') || prev.phone,
             company: d.company || d.companyName || prev.company
@@ -38,6 +43,7 @@ const AdminProfile = ({ user }) => {
   const [editFirstName, setEditFirstName] = useState(profile.firstName);
   const [editMiddleName, setEditMiddleName] = useState(profile.middleName || '');
   const [editLastName, setEditLastName] = useState(profile.lastName);
+  const [editSuffix, setEditSuffix] = useState(profile.suffix || '');
   const [editPhone, setEditPhone] = useState(profile.phone !== 'Not set' ? profile.phone : '');
 
   const initials = `${(profile.firstName || 'W')[0]}${(profile.lastName || 'A')[0]}`.toUpperCase();
@@ -46,18 +52,33 @@ const AdminProfile = ({ user }) => {
     setEditFirstName(profile.firstName);
     setEditMiddleName(profile.middleName || '');
     setEditLastName(profile.lastName);
+    setEditSuffix(profile.suffix || '');
     setEditPhone(profile.phone !== 'Not set' ? profile.phone : '');
+    setEditError('');
+    setEditSubmitted(false);
     setShowEdit(true);
   };
 
   const handleSaveProfile = async (e) => {
     e.preventDefault();
+    setEditSubmitted(true);
+    if (!editFirstName.trim() || !editLastName.trim()) {
+      setEditError('First name and last name are required.');
+      return;
+    }
+    const phoneErr = validatePhoneNumber(editPhone, false);
+    if (phoneErr) {
+      setEditError(phoneErr);
+      return;
+    }
+    setEditError('');
     const formattedPhone = formatPhoneWithCountryCode(editPhone);
     setProfile(prev => ({
       ...prev,
       firstName: editFirstName.trim(),
       middleName: editMiddleName.trim(),
       lastName: editLastName.trim(),
+      suffix: editSuffix.trim(),
       phone: formattedPhone || 'Not set'
     }));
     if (user?.uid) {
@@ -66,6 +87,7 @@ const AdminProfile = ({ user }) => {
           firstName: editFirstName.trim(),
           middleName: editMiddleName.trim(),
           lastName: editLastName.trim(),
+          suffix: editSuffix.trim(),
           phone: formattedPhone
         });
       } catch (err) {
@@ -80,6 +102,7 @@ const AdminProfile = ({ user }) => {
             firstName: editFirstName.trim(),
             middleName: editMiddleName.trim(),
             lastName: editLastName.trim(),
+            suffix: editSuffix.trim(),
             role: profile.role || 'ADMIN',
             company: profile.company || ''
           };
@@ -102,7 +125,7 @@ const AdminProfile = ({ user }) => {
         {/* Profile Header Card */}
         <div className="profile-header-card">
           <div className="profile-avatar">{initials}</div>
-          <h2>{[profile.firstName, profile.middleName, profile.lastName].filter(Boolean).join(' ')}</h2>
+          <h2>{formatProfileName(profile)}</h2>
           <div className="admin-badge">
             <FiShield /> ADMINISTRATOR
           </div>
@@ -115,7 +138,7 @@ const AdminProfile = ({ user }) => {
             <div className="profile-list-item">
               <FiBriefcase className="item-icon" />
               <div className="item-details">
-                <span className="item-label">Company / Organization</span>
+                <span className="item-label">Construction Company</span>
                 <span className="item-value" style={{ fontWeight: 600, color: 'var(--text-color, #0f172a)' }}>
                   {profile.company || 'Bevest Enterprise'}
                 </span>
@@ -172,9 +195,9 @@ const AdminProfile = ({ user }) => {
             </div>
             <div className="profile-modal-body">
               <div className="section-title">YOUR DETAILS</div>
-              <form onSubmit={handleSaveProfile} className="profile-form">
+              <form onSubmit={handleSaveProfile} className="profile-form" noValidate>
                 
-                <div className="floating-input-group">
+                <div className={`floating-input-group${editSubmitted && !editFirstName.trim() ? ' input-error' : ''}`}>
                   <input
                     type="text"
                     value={editFirstName}
@@ -195,7 +218,7 @@ const AdminProfile = ({ user }) => {
                   <label>Middle name (optional)</label>
                 </div>
                 
-                <div className="floating-input-group">
+                <div className={`floating-input-group${editSubmitted && !editLastName.trim() ? ' input-error' : ''}`}>
                   <input
                     type="text"
                     value={editLastName}
@@ -205,15 +228,29 @@ const AdminProfile = ({ user }) => {
                   />
                   <label>Last name *</label>
                 </div>
+
+                <div className="floating-input-group">
+                  <input
+                    type="text"
+                    value={editSuffix}
+                    onChange={(e) => setEditSuffix(e.target.value)}
+                    placeholder=" "
+                  />
+                  <label>Suffix (optional)</label>
+                </div>
                 
                 <PhoneInput
                   variant="floating"
                   label="Phone number"
                   value={editPhone}
-                  onChange={(phone) => setEditPhone(phone)}
+                  onChange={(phone) => { setEditPhone(phone); setEditError(''); }}
                   placeholder="900 000 0000"
                 />
-                
+
+                {editError && (
+                  <div className="error-message" style={{ textAlign: 'left', margin: '0.25rem 0' }}>{editError}</div>
+                )}
+
                 <button type="submit" className="btn-orange">Save changes</button>
               </form>
             </div>

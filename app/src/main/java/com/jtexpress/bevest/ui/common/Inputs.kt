@@ -198,14 +198,14 @@ fun FormField(
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val isPhone = keyboardType == KeyboardType.Phone
-    val displayValue = if (isPhone) Validators.stripCountryCode(value) else value
+    val displayValue = if (isPhone) Validators.stripCountryCode(value, preserveSingleZero = true) else value
     var passwordVisible by remember { mutableStateOf(false) }
 
     OutlinedTextField(
         value = displayValue,
         onValueChange = { next ->
             if (isPhone) {
-                val local = Validators.stripCountryCode(next)
+                val local = Validators.stripCountryCode(next, preserveSingleZero = true)
                 onValueChange(if (local.isEmpty()) "" else "+63 $local")
             } else {
                 onValueChange(next)

@@ -8,6 +8,7 @@ import {
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { useWebpageSettings } from './webpageConfig';
+import { validateEmail, liveEmailError } from './validation';
 import logo from './assets/bevest_logo.png';
 import safetySlide1 from './assets/carousel/safety-1.jpg';
 import safetySlide2 from './assets/carousel/safety-2.jpg';
@@ -72,6 +73,7 @@ const HomePage = ({ onNavigateLogin }) => {
   const [orderNotes, setOrderNotes] = useState('');
   const [orderSubmitting, setOrderSubmitting] = useState(false);
   const [orderSubmitted, setOrderSubmitted] = useState(false);
+  const [orderAttempted, setOrderAttempted] = useState(false);
   const [orderError, setOrderError] = useState('');
 
   // Auto-advance construction safety carousel every 5 seconds
@@ -93,14 +95,21 @@ const HomePage = ({ onNavigateLogin }) => {
 
   const handleOpenOrder = () => {
     setOrderSubmitted(false);
+    setOrderAttempted(false);
     setOrderError('');
     setShowOrderModal(true);
   };
 
   const handleSubmitOrder = async (e) => {
     e.preventDefault();
+    setOrderAttempted(true);
     if (!orderCompany.trim() || !orderName.trim() || !orderEmail.trim() || !orderPhone.trim()) {
       setOrderError('Please fill in your company, name, email, and contact number.');
+      return;
+    }
+    const emailErr = validateEmail(orderEmail);
+    if (emailErr) {
+      setOrderError(emailErr);
       return;
     }
 
@@ -456,7 +465,7 @@ const HomePage = ({ onNavigateLogin }) => {
               <h3>Web Admin & Contractor Portal</h3>
               <p>Central management console for contractors and safety administrators.</p>
               <ul className="home-scope-list">
-                <li><FiCheckCircle /> Organization isolation & contractor/SSO provisioning</li>
+                <li><FiCheckCircle /> Construction company isolation & contractor/SSO provisioning</li>
                 <li><FiCheckCircle /> Vest inventory & site project monitoring</li>
                 <li><FiCheckCircle /> Live safety telemetry & historical charts</li>
                 <li><FiCheckCircle /> Monthly safety reports & subscription management</li>
@@ -599,10 +608,10 @@ const HomePage = ({ onNavigateLogin }) => {
                     </label>
                     <input
                       type="text"
-                      className="form-input"
                       placeholder="e.g. BuildCorp Construction"
                       value={orderCompany}
                       onChange={(e) => setOrderCompany(e.target.value)}
+                      className={`form-input${orderAttempted && !orderCompany.trim() ? ' input-error' : ''}`}
                       required
                     />
                   </div>
@@ -614,7 +623,7 @@ const HomePage = ({ onNavigateLogin }) => {
                       </label>
                       <input
                         type="text"
-                        className="form-input"
+                        className={`form-input${orderAttempted && !orderName.trim() ? ' input-error' : ''}`}
                         placeholder="Full name"
                         value={orderName}
                         onChange={(e) => setOrderName(e.target.value)}
@@ -628,7 +637,7 @@ const HomePage = ({ onNavigateLogin }) => {
                       <input
                         type="number"
                         min="1"
-                        className="form-input"
+                        className={`form-input${orderAttempted && !orderQty ? ' input-error' : ''}`}
                         value={orderQty}
                         onChange={(e) => setOrderQty(e.target.value)}
                         required
@@ -637,26 +646,33 @@ const HomePage = ({ onNavigateLogin }) => {
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div>
-                      <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700, display: 'block', marginBottom: '0.3rem' }}>
-                        EMAIL ADDRESS *
-                      </label>
-                      <input
-                        type="email"
-                        className="form-input"
-                        placeholder="name@company.com"
-                        value={orderEmail}
-                        onChange={(e) => setOrderEmail(e.target.value)}
-                        required
-                      />
-                    </div>
+                    {(() => {
+                      const emailErr = liveEmailError(orderEmail);
+                      const isInvalid = Boolean(emailErr) || (orderAttempted && !orderEmail.trim());
+                      return (
+                        <div>
+                          <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700, display: 'block', marginBottom: '0.3rem' }}>
+                            EMAIL ADDRESS *
+                          </label>
+                          <input
+                            type="email"
+                            className={`form-input${isInvalid ? ' input-error' : ''}`}
+                            placeholder="name@company.com"
+                            value={orderEmail}
+                            onChange={(e) => setOrderEmail(e.target.value)}
+                            required
+                          />
+                          {emailErr && <div className="field-error-text">{emailErr}</div>}
+                        </div>
+                      );
+                    })()}
                     <div>
                       <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700, display: 'block', marginBottom: '0.3rem' }}>
                         PHONE NUMBER *
                       </label>
                       <input
                         type="tel"
-                        className="form-input"
+                        className={`form-input${orderAttempted && !orderPhone.trim() ? ' input-error' : ''}`}
                         placeholder="+63 917 000 0000"
                         value={orderPhone}
                         onChange={(e) => setOrderPhone(e.target.value)}

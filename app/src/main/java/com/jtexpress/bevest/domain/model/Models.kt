@@ -38,6 +38,7 @@ data class User(
     val firstName: String = "",
     val middleName: String = "",
     val lastName: String = "",
+    val suffix: String = "",
     val email: String = "",
     val phone: String = "",
     val role: UserRole = UserRole.UNKNOWN,
@@ -49,7 +50,17 @@ data class User(
     /** Contractors only; null means no plan chosen yet. */
     val subscription: Subscription? = null,
 ) {
-    val fullName: String get() = listOf(firstName, middleName, lastName).filter { it.isNotBlank() }.joinToString(" ")
+    val fullName: String get() = listOf(firstName, middleName, lastName, suffix).filter { it.isNotBlank() }.joinToString(" ")
+    val formalFullName: String get() {
+        val f = firstName.trim()
+        val l = lastName.trim()
+        val m = middleName.trim()
+        val s = suffix.trim()
+        if (f.isEmpty() && l.isEmpty()) return email.trim()
+        val middleInitial = m.firstOrNull()?.let { "${it.uppercaseChar()}." } ?: ""
+        val tail = listOf(f, middleInitial, s).filter { it.isNotEmpty() }.joinToString(" ")
+        return listOf(l, tail).filter { it.isNotEmpty() }.joinToString(", ")
+    }
 }
 
 val WORKER_JOB_POSITIONS = listOf(

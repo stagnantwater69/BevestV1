@@ -36,6 +36,7 @@ data class EditProfileUiState(
     val firstName: String = "",
     val middleName: String = "",
     val lastName: String = "",
+    val suffix: String = "",
     val phone: String = "",
     val firstNameError: String? = null,
     val lastNameError: String? = null,
@@ -65,6 +66,7 @@ class EditProfileViewModel @Inject constructor(
                         firstName = result.data.firstName,
                         middleName = result.data.middleName,
                         lastName = result.data.lastName,
+                        suffix = result.data.suffix,
                         phone = result.data.phone,
                         loaded = true,
                     )
@@ -77,6 +79,7 @@ class EditProfileViewModel @Inject constructor(
     fun onFirstName(v: String) = _state.update { it.copy(firstName = v, firstNameError = null) }
     fun onMiddleName(v: String) = _state.update { it.copy(middleName = v) }
     fun onLastName(v: String) = _state.update { it.copy(lastName = v, lastNameError = null) }
+    fun onSuffix(v: String) = _state.update { it.copy(suffix = v) }
     fun onPhone(v: String) = _state.update { it.copy(phone = v, phoneError = null) }
 
     fun save() {
@@ -92,7 +95,7 @@ class EditProfileViewModel @Inject constructor(
         val id = uid ?: return
         _state.update { it.copy(submitting = true, formError = null) }
         viewModelScope.launch {
-            when (val result = userRepository.updateProfile(id, s.firstName.trim(), s.middleName.trim(), s.lastName.trim(), formattedPhone)) {
+            when (val result = userRepository.updateProfile(id, s.firstName.trim(), s.middleName.trim(), s.lastName.trim(), s.suffix.trim(), formattedPhone)) {
                 is Outcome.Success -> _state.update { it.copy(submitting = false, saved = true) }
                 is Outcome.Failure -> _state.update { it.copy(submitting = false, formError = result.error.message) }
             }

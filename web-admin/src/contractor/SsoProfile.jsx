@@ -8,6 +8,7 @@ import {
 import { PageHeader, Badge, EmptyState, ErrorState, Skeleton } from './ui';
 import PhoneInput, { formatPhoneWithCountryCode } from '../PhoneInput';
 import ConfirmModal from '../ConfirmModal';
+import { validatePhoneNumber } from '../validation';
 
 /**
  * Site Safety Officer profile for the contractor.
@@ -24,6 +25,7 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
   const [form, setForm] = useState(null);
   const [isCustomSite, setIsCustomSite] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editSubmitted, setEditSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
@@ -72,18 +74,26 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
       firstName: sso.firstName || '',
       middleName: sso.middleName || '',
       lastName: sso.lastName || '',
+      suffix: sso.suffix || '',
       phone: sso.phone || '',
       siteId: currentSiteId,
     });
     setIsCustomSite(!existsInList && !!currentSiteId);
+    setEditSubmitted(false);
     setErrorMsg('');
     setEditing(true);
   };
 
   const handleSave = async (e) => {
     e.preventDefault();
+    setEditSubmitted(true);
     if (!form.firstName.trim() || !form.lastName.trim()) {
       setErrorMsg('First and last name are required.');
+      return;
+    }
+    const phoneErr = validatePhoneNumber(form.phone, false);
+    if (phoneErr) {
+      setErrorMsg(phoneErr);
       return;
     }
     setSaving(true);
@@ -93,6 +103,7 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
         firstName: form.firstName.trim(),
         middleName: (form.middleName || '').trim(),
         lastName: form.lastName.trim(),
+        suffix: (form.suffix || '').trim(),
         phone: formatPhoneWithCountryCode(form.phone),
         siteId: form.siteId ? form.siteId.trim() : null,
       });
@@ -165,13 +176,13 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
               </button>
             </div>
             <div className="modal-body ct-modal-body">
-              <form onSubmit={handleSave}>
+              <form onSubmit={handleSave} noValidate>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                   <div className="form-group-custom">
                     <label className="form-label" htmlFor="ct-sso-first">First Name *</label>
                     <input
                       id="ct-sso-first"
-                      className="form-input"
+                      className={`form-input${editSubmitted && !form.firstName.trim() ? ' input-error' : ''}`}
                       value={form.firstName}
                       onChange={(e) => setForm({ ...form, firstName: e.target.value })}
                       required
@@ -191,10 +202,20 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
                     <label className="form-label" htmlFor="ct-sso-last">Last Name *</label>
                     <input
                       id="ct-sso-last"
-                      className="form-input"
+                      className={`form-input${editSubmitted && !form.lastName.trim() ? ' input-error' : ''}`}
                       value={form.lastName}
                       onChange={(e) => setForm({ ...form, lastName: e.target.value })}
                       required
+                    />
+                  </div>
+                  <div className="form-group-custom">
+                    <label className="form-label" htmlFor="ct-sso-suffix">Suffix (Optional)</label>
+                    <input
+                      id="ct-sso-suffix"
+                      className="form-input"
+                      placeholder="e.g. Jr., III"
+                      value={form.suffix}
+                      onChange={(e) => setForm({ ...form, suffix: e.target.value })}
                     />
                   </div>
                   <div className="form-group-custom">
@@ -203,6 +224,7 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
                       id="ct-sso-phone"
                       value={form.phone}
                       onChange={(phone) => setForm({ ...form, phone })}
+                      hasError={editSubmitted && Boolean(form.phone.trim()) && Boolean(validatePhoneNumber(form.phone, false))}
                     />
                   </div>
                   <div className="form-group-custom">

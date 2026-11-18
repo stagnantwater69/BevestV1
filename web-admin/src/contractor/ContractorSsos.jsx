@@ -10,6 +10,8 @@ import { PageHeader, SearchBox, Badge, EmptyState, ErrorState, Skeleton } from '
 import { logActivity } from '../activityLogger';
 import PhoneInput, { formatPhoneWithCountryCode } from '../PhoneInput';
 import ConfirmModal from '../ConfirmModal';
+import AddressAutocomplete from '../AddressAutocomplete';
+import { validateEmail, validatePhoneNumber, liveEmailError } from '../validation';
 
 /**
  * Site Safety Officers directory for the contractor.
@@ -31,11 +33,13 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
     firstName: '',
     middleName: '',
     lastName: '',
+    suffix: '',
     email: '',
     phone: '',
     siteId: '',
     tempPassword: ''
   });
+  const [addSsoSubmitted, setAddSsoSubmitted] = useState(false);
   const [creatingNewSiteInline, setCreatingNewSiteInline] = useState(false);
   const [inlineSiteName, setInlineSiteName] = useState('');
   const [inlineSiteLocation, setInlineSiteLocation] = useState('');
@@ -46,6 +50,7 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
   const [showCreateSiteModal, setShowCreateSiteModal] = useState(false);
   const [newSiteName, setNewSiteName] = useState('');
   const [newSiteLocation, setNewSiteLocation] = useState('');
+  const [siteSubmitted, setSiteSubmitted] = useState(false);
   const [savingSite, setSavingSite] = useState(false);
   const [siteError, setSiteError] = useState('');
   const [confirmDialog, setConfirmDialog] = useState(null);
@@ -66,11 +71,13 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
       firstName: '',
       middleName: '',
       lastName: '',
+      suffix: '',
       email: '',
       phone: '',
       siteId: sites[0]?.id || '',
       tempPassword: ''
     });
+    setAddSsoSubmitted(false);
     setCreatingNewSiteInline(sites.length === 0);
     setInlineSiteName('');
     setInlineSiteLocation('');
@@ -106,6 +113,7 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
   const handleCreateStandaloneSite = (e) => {
     e.preventDefault();
     setSiteError('');
+    setSiteSubmitted(true);
     if (!newSiteName.trim()) {
       setSiteError('Site name is required.');
       return;
@@ -141,9 +149,20 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
   const handleCreateSso = (e) => {
     e.preventDefault();
     setErrorMsg('');
+    setAddSsoSubmitted(true);
 
     if (!formData.firstName.trim() || !formData.lastName.trim() || !formData.email.trim() || !formData.tempPassword) {
       setErrorMsg('Please fill in all required fields and provide a temporary password.');
+      return;
+    }
+    const emailErr = validateEmail(formData.email);
+    if (emailErr) {
+      setErrorMsg(emailErr);
+      return;
+    }
+    const phoneErr = validatePhoneNumber(formData.phone, false);
+    if (phoneErr) {
+      setErrorMsg(phoneErr);
       return;
     }
     if (creatingNewSiteInline && !inlineSiteName.trim() && !formData.siteId) {
@@ -176,6 +195,7 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
             firstName: formData.firstName.trim(),
             middleName: (formData.middleName || '').trim(),
             lastName: formData.lastName.trim(),
+            suffix: (formData.suffix || '').trim(),
             email: formData.email.trim(),
             phone: formatPhoneWithCountryCode(formData.phone),
             role: 'SSO',
@@ -242,7 +262,7 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => { setSiteError(''); setShowCreateSiteModal(true); }}
+            onClick={() => { setSiteError(''); setSiteSubmitted(false); setShowCreateSiteModal(true); }}
           >
             <FiMapPin /> Add Project Site
           </button>
@@ -434,14 +454,14 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
             </div>
             <div className="modal-body ct-modal-body">
               <p className="ct-muted" style={{ marginBottom: '1rem' }}>
-                Create a project site for your organization. Only your Site Safety Officers and workers can be assigned to it.
+                Create a project site for your construction company. Only your Site Safety Officers and workers can be assigned to it.
               </p>
-              <form onSubmit={handleCreateStandaloneSite}>
+              <form onSubmit={handleCreateStandaloneSite} noValidate>
                 <div className="form-group-custom" style={{ marginBottom: '0.9rem' }}>
                   <label className="form-label">Site Name *</label>
                   <input
                     type="text"
-                    className="form-input"
+                    className={`form-input${siteSubmitted && !newSiteName.trim() ? ' input-error' : ''}`}
                     placeholder="e.g. North Tower Site A"
                     value={newSiteName}
                     onChange={(e) => setNewSiteName(e.target.value)}
@@ -450,12 +470,11 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
                 </div>
                 <div className="form-group-custom" style={{ marginBottom: '1rem' }}>
                   <label className="form-label">Location / Address</label>
-                  <input
-                    type="text"
+                  <AddressAutocomplete
                     className="form-input"
                     placeholder="e.g. Makati CBD, Metro Manila"
                     value={newSiteLocation}
-                    onChange={(e) => setNewSiteLocation(e.target.value)}
+                    onChange={(val) => setNewSiteLocation(val)}
                   />
                 </div>
                 {siteError && (
@@ -490,13 +509,13 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
               </button>
             </div>
             <div className="modal-body ct-modal-body">
-              <form onSubmit={handleCreateSso}>
+              <form onSubmit={handleCreateSso} noValidate>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginBottom: '1rem' }}>
                   <div className="form-group-custom">
                     <label className="form-label">First Name *</label>
                     <input
                       type="text"
-                      className="form-input"
+                      className={`form-input${addSsoSubmitted && !formData.firstName.trim() ? ' input-error' : ''}`}
                       placeholder="e.g. Marcus"
                       value={formData.firstName}
                       onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
@@ -519,7 +538,7 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
                     <label className="form-label">Last Name *</label>
                     <input
                       type="text"
-                      className="form-input"
+                      className={`form-input${addSsoSubmitted && !formData.lastName.trim() ? ' input-error' : ''}`}
                       placeholder="e.g. Vance"
                       value={formData.lastName}
                       onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
@@ -528,24 +547,43 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
                   </div>
 
                   <div className="form-group-custom">
-                    <label className="form-label">Phone Number</label>
-                    <PhoneInput
-                      value={formData.phone}
-                      onChange={(phone) => setFormData({ ...formData, phone })}
+                    <label className="form-label">Suffix (Optional)</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Jr., III"
+                      value={formData.suffix}
+                      onChange={(e) => setFormData({ ...formData, suffix: e.target.value })}
                     />
                   </div>
 
                   <div className="form-group-custom">
-                    <label className="form-label">Email Address *</label>
-                    <input
-                      type="email"
-                      className="form-input"
-                      placeholder="sso@contractor.com"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      required
+                    <label className="form-label">Phone Number</label>
+                    <PhoneInput
+                      value={formData.phone}
+                      onChange={(phone) => setFormData({ ...formData, phone })}
+                      hasError={addSsoSubmitted && Boolean(formData.phone.trim()) && Boolean(validatePhoneNumber(formData.phone, false))}
                     />
                   </div>
+
+                  {(() => {
+                    const emailErr = liveEmailError(formData.email);
+                    const isInvalid = Boolean(emailErr) || (addSsoSubmitted && !formData.email.trim());
+                    return (
+                      <div className="form-group-custom">
+                        <label className="form-label">Email Address *</label>
+                        <input
+                          type="email"
+                          className={`form-input${isInvalid ? ' input-error' : ''}`}
+                          placeholder="sso@contractor.com"
+                          value={formData.email}
+                          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                          required
+                        />
+                        {emailErr && <div className="field-error-text">{emailErr}</div>}
+                      </div>
+                    );
+                  })()}
 
                   <div className="form-group-custom">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
@@ -577,7 +615,7 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
                           <label className="form-label" style={{ fontSize: '0.72rem' }}>New Site Name *</label>
                           <input
                             type="text"
-                            className="form-input"
+                            className={`form-input${addSsoSubmitted && !inlineSiteName.trim() && !formData.siteId ? ' input-error' : ''}`}
                             placeholder="e.g. Site Alpha"
                             value={inlineSiteName}
                             onChange={(e) => setInlineSiteName(e.target.value)}
@@ -585,12 +623,11 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
                         </div>
                         <div>
                           <label className="form-label" style={{ fontSize: '0.72rem' }}>Location</label>
-                          <input
-                            type="text"
+                          <AddressAutocomplete
                             className="form-input"
                             placeholder="e.g. Taguig City"
                             value={inlineSiteLocation}
-                            onChange={(e) => setInlineSiteLocation(e.target.value)}
+                            onChange={(val) => setInlineSiteLocation(val)}
                           />
                         </div>
                       </div>
@@ -602,7 +639,7 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
                     <div className="password-input-group">
                       <input
                         type="text"
-                        className="form-input password-field"
+                        className={`form-input password-field${addSsoSubmitted && !formData.tempPassword ? ' input-error' : ''}`}
                         placeholder="Click generate to create..."
                         value={formData.tempPassword}
                         onChange={(e) => setFormData({ ...formData, tempPassword: e.target.value })}

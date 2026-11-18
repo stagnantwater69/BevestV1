@@ -4,6 +4,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import logo from '../assets/bevest_logo.png';
 import { auth, db } from '../firebase';
 import { useContractorData, initialsOf } from './contractorData';
+import { formatProfileName } from '../validation';
 import ContractorOverview from './ContractorOverview';
 import ContractorReports, { MonthlyReportDetail, IncidentHistory } from './ContractorReports';
 import ContractorSsos, { AddSso } from './ContractorSsos';
@@ -57,7 +58,7 @@ const ContractorDashboard = ({ user, onLogout }) => {
     return () => unsub();
   }, [contractorId]);
 
-  const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || user.email;
+  const fullName = formatProfileName(profile, user.email);
   const activeTab = PARENT_TAB[route.page];
 
   const go = (page, param = null) => {

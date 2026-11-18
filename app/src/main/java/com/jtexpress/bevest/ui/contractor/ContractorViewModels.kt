@@ -316,7 +316,9 @@ class SsoProfileViewModel @Inject constructor(
 
 data class AddSsoState(
     val firstName: String = "",
+    val middleName: String = "",
     val lastName: String = "",
+    val suffix: String = "",
     val email: String = "",
     val phone: String = "",
     val tempPassword: String = "",
@@ -339,15 +341,24 @@ class AddSsoViewModel @Inject constructor(
     val state: StateFlow<AddSsoState> = _state.asStateFlow()
 
     fun update(field: String, value: String) = _state.update {
-        when (field) {
+        val next = when (field) {
             "firstName" -> it.copy(firstName = value)
+            "middleName" -> it.copy(middleName = value)
             "lastName" -> it.copy(lastName = value)
+            "suffix" -> it.copy(suffix = value)
             "email" -> it.copy(email = value)
             "phone" -> it.copy(phone = value)
             "tempPassword" -> it.copy(tempPassword = value)
             "siteId" -> it.copy(siteId = value)
             else -> it
-        }.copy(errors = it.errors - field, formError = null)
+        }
+        val nextErrors = if (field == "email") {
+            val err = if (value.isNotBlank()) Validators.email(value) else null
+            if (err != null) it.errors + ("email" to err) else it.errors - "email"
+        } else {
+            it.errors - field
+        }
+        next.copy(errors = nextErrors, formError = null)
     }
 
     /**
@@ -381,7 +392,9 @@ class AddSsoViewModel @Inject constructor(
                 email = s.email,
                 tempPassword = s.tempPassword,
                 firstName = s.firstName,
+                middleName = s.middleName,
                 lastName = s.lastName,
+                suffix = s.suffix,
                 phone = formattedPhone,
                 role = UserRole.SSO,
                 contractorId = contractorId,

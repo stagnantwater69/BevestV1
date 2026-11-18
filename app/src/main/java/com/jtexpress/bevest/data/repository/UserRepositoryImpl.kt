@@ -115,6 +115,7 @@ class UserRepositoryImpl @Inject constructor(
         firstName: String,
         middleName: String,
         lastName: String,
+        suffix: String,
         phone: String,
     ): Outcome<Unit> = try {
         users.document(uid).update(
@@ -122,6 +123,7 @@ class UserRepositoryImpl @Inject constructor(
                 "firstName" to firstName,
                 "middleName" to middleName,
                 "lastName" to lastName,
+                "suffix" to suffix,
                 "phone" to Validators.formatPhoneWithCountryCode(phone),
             ),
         ).await()

@@ -379,11 +379,21 @@ fun AddSsoScreen(
                     required = true,
                 )
                 FormField(
+                    state.middleName,
+                    { viewModel.update("middleName", it) },
+                    "Middle name (Optional)",
+                )
+                FormField(
                     state.lastName,
                     { viewModel.update("lastName", it) },
                     "Last name",
                     error = state.errors["lastName"],
                     required = true,
+                )
+                FormField(
+                    state.suffix,
+                    { viewModel.update("suffix", it) },
+                    "Suffix (Optional)",
                 )
             }
 

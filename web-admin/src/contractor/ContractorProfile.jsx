@@ -8,6 +8,7 @@ import { auth, db } from '../firebase';
 import { initialsOf } from './contractorData';
 import PhoneInput, { formatPhoneWithCountryCode } from '../PhoneInput';
 import ConfirmModal from '../ConfirmModal';
+import { validatePhoneNumber, formatProfileName } from '../validation';
 
 const ContractorProfile = ({ user, profile, onProfileChange }) => {
   const [showEdit, setShowEdit] = useState(false);
@@ -15,7 +16,9 @@ const ContractorProfile = ({ user, profile, onProfileChange }) => {
   const [passwordSuccessOpen, setPasswordSuccessOpen] = useState(false);
 
   const [editFirstName, setEditFirstName] = useState(profile.firstName || '');
+  const [editMiddleName, setEditMiddleName] = useState(profile.middleName || '');
   const [editLastName, setEditLastName] = useState(profile.lastName || '');
+  const [editSuffix, setEditSuffix] = useState(profile.suffix || '');
   const [editPhone, setEditPhone] = useState(profile.phone || '');
 
   const [currentPassword, setCurrentPassword] = useState('');
@@ -25,16 +28,20 @@ const ContractorProfile = ({ user, profile, onProfileChange }) => {
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
   const [profileError, setProfileError] = useState('');
+  const [profileSubmitted, setProfileSubmitted] = useState(false);
   const [passwordError, setPasswordError] = useState('');
 
-  const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || user.email;
-  const initials = initialsOf(fullName, 'C');
+  const fullName = formatProfileName(profile, user.email);
+  const initials = initialsOf(`${profile.firstName || ''} ${profile.lastName || ''}`.trim() || user.email, 'C');
 
   const handleOpenEdit = () => {
     setEditFirstName(profile.firstName || '');
+    setEditMiddleName(profile.middleName || '');
     setEditLastName(profile.lastName || '');
+    setEditSuffix(profile.suffix || '');
     setEditPhone(profile.phone || '');
     setProfileError('');
+    setProfileSubmitted(false);
     setShowEdit(true);
   };
 
@@ -49,13 +56,25 @@ const ContractorProfile = ({ user, profile, onProfileChange }) => {
   const handleSaveProfile = async (e) => {
     e.preventDefault();
     setProfileError('');
+    setProfileSubmitted(true);
+    if (!editFirstName.trim() || !editLastName.trim()) {
+      setProfileError('First name and last name are required.');
+      return;
+    }
+    const phoneErr = validatePhoneNumber(editPhone, false);
+    if (phoneErr) {
+      setProfileError(phoneErr);
+      return;
+    }
     setSavingProfile(true);
 
     try {
       const userRef = doc(db, 'users', user.uid);
       const updated = {
         firstName: editFirstName.trim(),
+        middleName: editMiddleName.trim(),
         lastName: editLastName.trim(),
+        suffix: editSuffix.trim(),
         phone: formatPhoneWithCountryCode(editPhone)
       };
       await updateDoc(userRef, updated);
@@ -195,8 +214,8 @@ const ContractorProfile = ({ user, profile, onProfileChange }) => {
                   {profileError}
                 </div>
               )}
-              <form onSubmit={handleSaveProfile} className="profile-form">
-                <div className="floating-input-group">
+              <form onSubmit={handleSaveProfile} className="profile-form" noValidate>
+                <div className={`floating-input-group${profileSubmitted && !editFirstName.trim() ? ' input-error' : ''}`}>
                   <input
                     type="text"
                     value={editFirstName}
@@ -210,12 +229,32 @@ const ContractorProfile = ({ user, profile, onProfileChange }) => {
                 <div className="floating-input-group">
                   <input
                     type="text"
+                    value={editMiddleName}
+                    onChange={(e) => setEditMiddleName(e.target.value)}
+                    placeholder=" "
+                  />
+                  <label>Middle name (optional)</label>
+                </div>
+
+                <div className={`floating-input-group${profileSubmitted && !editLastName.trim() ? ' input-error' : ''}`}>
+                  <input
+                    type="text"
                     value={editLastName}
                     onChange={(e) => setEditLastName(e.target.value)}
                     required
                     placeholder=" "
                   />
                   <label>Last name *</label>
+                </div>
+
+                <div className="floating-input-group">
+                  <input
+                    type="text"
+                    value={editSuffix}
+                    onChange={(e) => setEditSuffix(e.target.value)}
+                    placeholder=" "
+                  />
+                  <label>Suffix (optional)</label>
                 </div>
 
                 <PhoneInput

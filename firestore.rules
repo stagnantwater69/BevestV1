@@ -177,7 +177,12 @@ service cloud.firestore {
                    || (isContractor() && request.resource.data.contractorId == request.auth.uid);
     }
 
-    // ---- organizations ----
+    // ---- construction companies (and legacy organizations) ----
+    match /constructionCompanies/{companyId} {
+      allow read: if isSignedIn();
+      allow write: if isDeveloper();
+    }
+
     match /organizations/{orgId} {
       allow read: if isSignedIn();
       allow write: if isDeveloper();

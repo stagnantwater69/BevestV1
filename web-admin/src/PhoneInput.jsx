@@ -42,10 +42,21 @@ export const FlagImage = ({ iso, alt = '' }) => (
   />
 );
 
+export function sanitizeLocalDigits(raw, countryCode = '+63', preserveSingleZero = false) {
+  let digits = String(raw || '').replace(/\D/g, '');
+  if (countryCode === '+63') {
+    if (digits.startsWith('0') && (!preserveSingleZero || digits.length > 1)) {
+      digits = digits.replace(/^0+/, '');
+    }
+    digits = digits.slice(0, 10);
+  }
+  return digits;
+}
+
 /**
  * Helper to parse a stored raw phone string into countryCode and localNumber
  */
-export function parsePhoneNumber(rawPhone, fallbackCode = '+63') {
+export function parsePhoneNumber(rawPhone, fallbackCode = '+63', preserveSingleZero = false) {
   if (!rawPhone || !rawPhone.trim()) {
     return { countryCode: fallbackCode, localNumber: '' };
   }
@@ -58,36 +69,40 @@ export function parsePhoneNumber(rawPhone, fallbackCode = '+63') {
   const matched = sorted.find((c) => clean.startsWith(c.codeValue || c.code));
   if (matched) {
     const code = matched.codeValue || matched.code;
-    let rest = clean.slice(code.length).trim();
-    if (code === '+63' && rest.startsWith('0')) {
-      rest = rest.replace(/^0+/, '').trim();
-    }
+    const rest = sanitizeLocalDigits(clean.slice(code.length), code, preserveSingleZero);
     return { countryCode: code, localNumber: rest };
   }
 
   // If starts with 63 (without +) and fallback is +63
   if (clean.startsWith('63') && clean.length >= 11 && fallbackCode === '+63') {
-    const rest = clean.slice(2).trim().replace(/^0+/, '').trim();
+    const rest = sanitizeLocalDigits(clean.slice(2), '+63', preserveSingleZero);
     return { countryCode: '+63', localNumber: rest };
   }
 
   // If starts with 0 and fallback is +63 (standard Philippine mobile syntax like 0917...)
   if (clean.startsWith('0') && fallbackCode === '+63') {
-    return { countryCode: '+63', localNumber: clean.replace(/^0+/, '').trim() };
+    return {
+      countryCode: '+63',
+      localNumber: sanitizeLocalDigits(clean, '+63', preserveSingleZero),
+    };
   }
 
   // Unknown prefix starting with +
   if (clean.startsWith('+')) {
     const spaceIndex = clean.indexOf(' ');
     if (spaceIndex > 0) {
+      const code = clean.slice(0, spaceIndex);
       return {
-        countryCode: clean.slice(0, spaceIndex),
-        localNumber: clean.slice(spaceIndex + 1).trim(),
+        countryCode: code,
+        localNumber: sanitizeLocalDigits(clean.slice(spaceIndex + 1), code, preserveSingleZero),
       };
     }
   }
 
-  return { countryCode: fallbackCode, localNumber: clean };
+  return {
+    countryCode: fallbackCode,
+    localNumber: sanitizeLocalDigits(clean, fallbackCode, preserveSingleZero),
+  };
 }
 
 /**
@@ -113,6 +128,7 @@ const PhoneInput = ({
   disabled = false,
   required = false,
   className = '',
+  hasError = false,
   variant = 'standard', // 'standard' | 'floating'
   label = 'Phone number',
 }) => {
@@ -126,7 +142,7 @@ const PhoneInput = ({
 
   // Sync internal state when external value changes
   useEffect(() => {
-    const parsed = parsePhoneNumber(value, selectedCode);
+    const parsed = parsePhoneNumber(value, selectedCode, true);
     setSelectedCode(parsed.countryCode);
     setLocalNumber(parsed.localNumber);
     const matchedCountry = COUNTRY_CODES.find((c) => (c.codeValue || c.code) === parsed.countryCode);
@@ -195,10 +211,7 @@ const PhoneInput = ({
     setSelectedIso(country.iso);
     setIsOpen(false);
     setSearch('');
-    const cleanedLocal =
-      newCode === '+63'
-        ? localNumber.trim().replace(/^0+/, '').trim()
-        : localNumber.trim();
+    const cleanedLocal = sanitizeLocalDigits(localNumber, newCode, true);
     setLocalNumber(cleanedLocal);
     if (onChange) {
       if (cleanedLocal) {
@@ -214,7 +227,7 @@ const PhoneInput = ({
 
     // Check if user pasted an international number starting with +
     if (inputVal.trim().startsWith('+')) {
-      const parsed = parsePhoneNumber(inputVal, selectedCode);
+      const parsed = parsePhoneNumber(inputVal, selectedCode, true);
       setSelectedCode(parsed.countryCode);
       setLocalNumber(parsed.localNumber);
       const matchedCountry = COUNTRY_CODES.find((c) => (c.codeValue || c.code) === parsed.countryCode);
@@ -226,17 +239,12 @@ const PhoneInput = ({
       return;
     }
 
-    // If typing local number starting with 0 in +63, remove leading 0 immediately
-    let cleanVal = inputVal;
-    if (selectedCode === '+63' && cleanVal.trimStart().startsWith('0')) {
-      cleanVal = cleanVal.trimStart().replace(/^0+/, '');
-    }
+    // Digits only; for +63 strip leading 0 once the next digit is entered and cap at 10 digits.
+    const cleanVal = sanitizeLocalDigits(inputVal, selectedCode, true);
 
     setLocalNumber(cleanVal);
     if (onChange) {
-      const trimmed = cleanVal.trim();
-      // Country code is always added to the phone number
-      onChange(trimmed ? `${selectedCode} ${trimmed}` : '');
+      onChange(cleanVal ? `${selectedCode} ${cleanVal}` : '');
     }
   };
 
@@ -285,7 +293,7 @@ const PhoneInput = ({
   if (variant === 'floating') {
     return (
       <div
-        className={`floating-input-group floating-phone-group ${className}`}
+        className={`floating-input-group floating-phone-group ${hasError ? 'input-error' : ''} ${className}`}
         ref={dropdownRef}
         style={{ zIndex: isOpen ? 9999 : undefined }}
       >
@@ -307,6 +315,7 @@ const PhoneInput = ({
 
           <input
             type="tel"
+            inputMode="numeric"
             id={id}
             className="floating-phone-input"
             placeholder={placeholder}
@@ -324,7 +333,7 @@ const PhoneInput = ({
 
   return (
     <div
-      className={`phone-input-group ${className}`}
+      className={`phone-input-group ${hasError ? 'input-error' : ''} ${className}`}
       ref={dropdownRef}
       style={{ zIndex: isOpen ? 9999 : undefined }}
     >
@@ -342,6 +351,7 @@ const PhoneInput = ({
 
       <input
         type="tel"
+        inputMode="numeric"
         id={id}
         className="form-input phone-input-field"
         placeholder={placeholder}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { updatePassword } from 'firebase/auth';
 import { doc, updateDoc } from 'firebase/firestore';
-import { FiLock, FiCheckCircle, FiX } from 'react-icons/fi';
+import { FiLock, FiCheckCircle, FiX, FiEye, FiEyeOff } from 'react-icons/fi';
 import { auth, db } from './firebase';
 import Login from './Login';
 import HomePage from './HomePage';
@@ -15,8 +15,11 @@ function App() {
   const [showLogin, setShowLogin] = useState(false);
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
   const [passError, setPassError] = useState('');
   const [passSaving, setPassSaving] = useState(false);
+  const [passSubmitted, setPassSubmitted] = useState(false);
   const [dismissedPrompt, setDismissedPrompt] = useState(false);
   const [passUpdatedModal, setPassUpdatedModal] = useState(false);
 
@@ -25,6 +28,7 @@ function App() {
   const handleFirstLoginPasswordChange = async (e) => {
     e.preventDefault();
     setPassError('');
+    setPassSubmitted(true);
     if (!newPass || newPass.length < 6) {
       setPassError('New password must be at least 6 characters.');
       return;
@@ -96,31 +100,75 @@ function App() {
               <p style={{ color: '#475569', fontSize: '0.875rem', marginBottom: '1.25rem', lineHeight: 1.5 }}>
                 Welcome! Since you signed in with a temporary password, you can set your new personal password now.
               </p>
-              <form onSubmit={handleFirstLoginPasswordChange}>
+              <form onSubmit={handleFirstLoginPasswordChange} noValidate>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', marginBottom: '1.25rem' }}>
                   <div>
                     <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>NEW PASSWORD *</label>
-                    <input
-                      type="password"
-                      className="form-input"
-                      placeholder="At least 6 characters"
-                      value={newPass}
-                      onChange={(e) => setNewPass(e.target.value)}
-                      style={{ width: '100%' }}
-                      required
-                    />
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <input
+                        type={showNewPass ? 'text' : 'password'}
+                        className={`form-input${passSubmitted && !newPass ? ' input-error' : ''}`}
+                        placeholder="At least 6 characters"
+                        value={newPass}
+                        onChange={(e) => setNewPass(e.target.value)}
+                        style={{ width: '100%', paddingRight: '2.5rem' }}
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPass((v) => !v)}
+                        aria-label={showNewPass ? 'Hide password' : 'Show password'}
+                        title={showNewPass ? 'Hide password' : 'Show password'}
+                        style={{
+                          position: 'absolute',
+                          right: '0.65rem',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: '#64748b',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0.25rem',
+                          fontSize: '1.05rem',
+                        }}
+                      >
+                        {showNewPass ? <FiEyeOff /> : <FiEye />}
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>CONFIRM NEW PASSWORD *</label>
-                    <input
-                      type="password"
-                      className="form-input"
-                      placeholder="Re-enter new password"
-                      value={confirmPass}
-                      onChange={(e) => setConfirmPass(e.target.value)}
-                      style={{ width: '100%' }}
-                      required
-                    />
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <input
+                        type={showConfirmPass ? 'text' : 'password'}
+                        className={`form-input${passSubmitted && !confirmPass ? ' input-error' : ''}`}
+                        placeholder="Re-enter new password"
+                        value={confirmPass}
+                        onChange={(e) => setConfirmPass(e.target.value)}
+                        style={{ width: '100%', paddingRight: '2.5rem' }}
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPass((v) => !v)}
+                        aria-label={showConfirmPass ? 'Hide password' : 'Show password'}
+                        title={showConfirmPass ? 'Hide password' : 'Show password'}
+                        style={{
+                          position: 'absolute',
+                          right: '0.65rem',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: '#64748b',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0.25rem',
+                          fontSize: '1.05rem',
+                        }}
+                      >
+                        {showConfirmPass ? <FiEyeOff /> : <FiEye />}
+                      </button>
+                    </div>
                   </div>
                 </div>
                 {passError && (

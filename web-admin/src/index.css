@@ -2562,4 +2562,23 @@ body {
   animation: spin 1s linear infinite;
 }
 
+.form-input.input-error,
+.dev-input.input-error,
+.mobile-input-box.input-error,
+.phone-input-group.input-error,
+.floating-phone-group.input-error,
+.floating-input-group.input-error input {
+  border-color: #dc2626 !important;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.14) !important;
+}
+
+.field-error-text {
+  color: #dc2626;
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-top: 0.3rem;
+  line-height: 1.3;
+}
+
+
 
