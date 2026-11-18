@@ -183,6 +183,12 @@ fun AddEditWorkerScreen(
                         required = true,
                     )
                     FormField(
+                        state.middleName,
+                        viewModel::onMiddleName,
+                        "Middle name (optional)",
+                        required = false,
+                    )
+                    FormField(
                         state.lastName,
                         viewModel::onLastName,
                         "Last name",

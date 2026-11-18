@@ -19,6 +19,7 @@ const UserManagement = () => {
   // Add Contractor form state - NO subscription fields (admin only provisions account credentials)
   const [formData, setFormData] = useState({
     firstName: '',
+    middleName: '',
     lastName: '',
     phone: '',
     email: '',
@@ -156,6 +157,7 @@ const UserManagement = () => {
       // Contractors start with no subscription plan
       await setDoc(doc(db, "users", newUser.uid), {
         firstName: formData.firstName.trim(),
+        middleName: (formData.middleName || '').trim(),
         lastName: formData.lastName.trim(),
         phone: formatPhoneWithCountryCode(formData.phone),
         email: formData.email.trim(),
@@ -177,6 +179,7 @@ const UserManagement = () => {
       // Reset form and go back to list
       setFormData({
         firstName: '',
+        middleName: '',
         lastName: '',
         phone: '',
         email: '',
@@ -442,6 +445,17 @@ const UserManagement = () => {
                   value={formData.phone}
                   onChange={(phone) => setFormData({ ...formData, phone })}
                   required
+                />
+              </div>
+
+              <div className="form-group-custom">
+                <label className="form-label">MIDDLE NAME (OPTIONAL)</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  placeholder="Optional" 
+                  value={formData.middleName}
+                  onChange={(e) => setFormData({...formData, middleName: e.target.value})}
                 />
               </div>
 

@@ -149,6 +149,7 @@ class WorkerRepositoryImpl @Inject constructor(
         workers.document(worker.workerId).update(
             mapOf(
                 "firstName" to worker.firstName,
+                "middleName" to worker.middleName,
                 "lastName" to worker.lastName,
                 "phone" to Validators.formatPhoneWithCountryCode(worker.phone),
                 "birthday" to worker.birthday,
@@ -222,6 +223,7 @@ class WorkerRepositoryImpl @Inject constructor(
 
     private fun Worker.toMap() = mapOf(
         "firstName" to firstName,
+        "middleName" to middleName,
         "lastName" to lastName,
         "phone" to Validators.formatPhoneWithCountryCode(phone),
         "birthday" to birthday,

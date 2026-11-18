@@ -29,6 +29,7 @@ data class WorkerFormState(
     val loaded: Boolean = false,
     val workerId: String = "",
     val firstName: String = "",
+    val middleName: String = "",
     val lastName: String = "",
     val phone: String = "",
     val birthday: String = "",
@@ -124,6 +125,7 @@ class WorkerFormViewModel @Inject constructor(
                                 loaded = true,
                                 workerId = r.data.workerId,
                                 firstName = r.data.firstName,
+                                middleName = r.data.middleName,
                                 lastName = r.data.lastName,
                                 phone = r.data.phone,
                                 birthday = bday,
@@ -162,6 +164,7 @@ class WorkerFormViewModel @Inject constructor(
     }
 
     fun onFirstName(v: String) = _state.update { it.copy(firstName = v, firstNameError = null) }
+    fun onMiddleName(v: String) = _state.update { it.copy(middleName = v) }
     fun onLastName(v: String) = _state.update { it.copy(lastName = v, lastNameError = null) }
     fun onPhone(v: String) = _state.update { it.copy(phone = v, phoneError = null) }
     fun onBirthday(v: String) = _state.update {
@@ -210,6 +213,7 @@ class WorkerFormViewModel @Inject constructor(
         val worker = Worker(
             workerId = s.workerId,
             firstName = s.firstName.trim(),
+            middleName = s.middleName.trim(),
             lastName = s.lastName.trim(),
             phone = Validators.formatPhoneWithCountryCode(s.phone),
             birthday = bday,
@@ -238,6 +242,7 @@ class WorkerFormViewModel @Inject constructor(
             val worker = Worker(
                 workerId = candidate,
                 firstName = s.firstName.trim(),
+                middleName = s.middleName.trim(),
                 lastName = s.lastName.trim(),
                 phone = Validators.formatPhoneWithCountryCode(s.phone),
                 birthday = bday,

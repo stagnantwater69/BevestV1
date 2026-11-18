@@ -40,6 +40,7 @@ private fun DocumentSnapshot.millis(key: String): Long? = when (val v = get(key)
 fun DocumentSnapshot.toUser(): User = User(
     uid = id,
     firstName = str("firstName"),
+    middleName = str("middleName"),
     lastName = str("lastName"),
     email = str("email"),
     phone = Validators.formatPhoneWithCountryCode(str("phone")),
@@ -95,6 +96,7 @@ fun DocumentSnapshot.toWorker(): Worker {
     return Worker(
         workerId = id,
         firstName = str("firstName"),
+        middleName = str("middleName"),
         lastName = str("lastName"),
         phone = Validators.formatPhoneWithCountryCode(str("phone")),
         birthday = bday,

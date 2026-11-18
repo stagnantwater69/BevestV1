@@ -235,6 +235,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   // Admin Form state
   const [adminCompany, setAdminCompany] = useState('');
   const [adminFirstName, setAdminFirstName] = useState('');
+  const [adminMiddleName, setAdminMiddleName] = useState('');
   const [adminLastName, setAdminLastName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPhone, setAdminPhone] = useState('');
@@ -1219,6 +1220,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       const now = new Date();
       const adminDoc = {
         firstName: adminFirstName.trim(),
+        middleName: adminMiddleName.trim(),
         lastName: adminLastName.trim(),
         company: adminCompany.trim(),
         companyName: adminCompany.trim(),
@@ -1227,6 +1229,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         role: 'ADMIN',
         active: true,
         status: 'Active',
+        mustChangePassword: true,
         createdAt: now,
         createdByDeveloper: devEmail
       };
@@ -1241,6 +1244,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
           phone: formatPhoneWithCountryCode(adminPhone),
           role: 'ADMIN',
           firstName: adminFirstName.trim(),
+          middleName: adminMiddleName.trim(),
           lastName: adminLastName.trim(),
           company: adminCompany.trim(),
           companyName: adminCompany.trim()
@@ -1257,6 +1261,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       // Reset form fields
       setAdminCompany('');
       setAdminFirstName('');
+      setAdminMiddleName('');
       setAdminLastName('');
       setAdminEmail('');
       setAdminPhone('');
@@ -3270,6 +3275,17 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                     value={adminFirstName}
                     onChange={(e) => setAdminFirstName(e.target.value)}
                     required
+                  />
+                </div>
+
+                <div className="dev-form-group">
+                  <label className="dev-form-label">MIDDLE NAME (OPTIONAL)</label>
+                  <input
+                    type="text"
+                    className="dev-input"
+                    placeholder="Middle name"
+                    value={adminMiddleName}
+                    onChange={(e) => setAdminMiddleName(e.target.value)}
                   />
                 </div>
 

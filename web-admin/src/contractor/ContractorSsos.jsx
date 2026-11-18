@@ -31,6 +31,7 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
   const [showAddModal, setShowAddModal] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
+    middleName: '',
     lastName: '',
     email: '',
     phone: '',
@@ -65,6 +66,7 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
   const openAddSsoModal = () => {
     setFormData({
       firstName: '',
+      middleName: '',
       lastName: '',
       email: '',
       phone: '',
@@ -172,6 +174,7 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
 
           await setDoc(doc(db, 'users', newUser.uid), {
             firstName: formData.firstName.trim(),
+            middleName: (formData.middleName || '').trim(),
             lastName: formData.lastName.trim(),
             email: formData.email.trim(),
             phone: formatPhoneWithCountryCode(formData.phone),
@@ -551,7 +554,7 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
             </div>
             <div className="modal-body ct-modal-body">
               <form onSubmit={handleCreateSso}>
-                <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem', marginBottom: '0.85rem' }}>
+                <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.85rem', marginBottom: '0.85rem' }}>
                   <div className="form-group-custom">
                     <label className="form-label">First name *</label>
                     <input
@@ -561,6 +564,16 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
                       value={formData.firstName}
                       onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
                       required
+                    />
+                  </div>
+                  <div className="form-group-custom">
+                    <label className="form-label">Middle name (optional)</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Optional"
+                      value={formData.middleName}
+                      onChange={(e) => setFormData({ ...formData, middleName: e.target.value })}
                     />
                   </div>
                   <div className="form-group-custom">

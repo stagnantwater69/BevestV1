@@ -36,6 +36,7 @@ fun calculateAgeFromBirthdate(birthdate: String?): Int? {
 data class User(
     val uid: String = "",
     val firstName: String = "",
+    val middleName: String = "",
     val lastName: String = "",
     val email: String = "",
     val phone: String = "",
@@ -47,7 +48,7 @@ data class User(
     /** Contractors only; null means no plan chosen yet. */
     val subscription: Subscription? = null,
 ) {
-    val fullName: String get() = listOf(firstName, lastName).filter { it.isNotBlank() }.joinToString(" ")
+    val fullName: String get() = listOf(firstName, middleName, lastName).filter { it.isNotBlank() }.joinToString(" ")
 }
 
 val WORKER_JOB_POSITIONS = listOf(
@@ -70,6 +71,7 @@ val WORKER_JOB_POSITIONS = listOf(
 data class Worker(
     val workerId: String = "",
     val firstName: String = "",
+    val middleName: String = "",
     val lastName: String = "",
     val phone: String = "",
     val birthday: String? = null,
@@ -84,7 +86,7 @@ data class Worker(
     val currentStatus: SafetyStatus = SafetyStatus.OFFLINE,
     val active: Boolean = true,
 ) {
-    val fullName: String get() = listOf(firstName, lastName).filter { it.isNotBlank() }.joinToString(" ")
+    val fullName: String get() = listOf(firstName, middleName, lastName).filter { it.isNotBlank() }.joinToString(" ")
     val effectiveAge: Int? get() = age ?: calculateAgeFromBirthdate(birthday)
 }
 
