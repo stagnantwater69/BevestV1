@@ -47,6 +47,7 @@ fun DocumentSnapshot.toUser(): User = User(
     contractorId = strOrNull("contractorId"),
     siteId = strOrNull("siteId"),
     active = bool("active", true),
+    mustChangePassword = bool("mustChangePassword", false),
     subscription = (get("subscription") as? Map<*, *>)?.toSubscription(millis("createdAt")),
 )
 
@@ -103,6 +104,7 @@ fun DocumentSnapshot.toWorker(): Worker {
         photoUrl = strOrNull("photoUrl"),
         contractorId = strOrNull("contractorId"),
         siteId = strOrNull("siteId"),
+        createdBy = strOrNull("createdBy")?.takeIf { it.isNotBlank() },
         assignedVestId = strOrNull("assignedVestId"),
         currentStatus = SafetyStatus.fromRaw(strOrNull("currentStatus")),
         active = bool("active", true),
@@ -137,6 +139,7 @@ fun DocumentSnapshot.toVest(): Vest {
         inCompanyDirectory = inDir,
         companyId = strOrNull("companyId"),
         siteId = strOrNull("siteId"),
+        addedBySsoUid = strOrNull("addedBySsoUid")?.takeIf { it.isNotBlank() },
         macAddress = strOrNull("macAddress"),
         serialNumber = strOrNull("serialNumber") ?: strOrNull("esp32Serial"),
         wifiSsid = strOrNull("wifiSsid"),

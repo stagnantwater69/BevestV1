@@ -54,14 +54,6 @@ const ContractorReports = ({ data, onOpenReport, onOpenIncidents, onOpenSsos }) 
           </div>
           <FiChevronRight className="ct-row-chevron" />
         </button>
-        <button id="ct-open-ssos" className="ct-quick-link" onClick={onOpenSsos}>
-          <div className="ct-quick-icon"><FiUserCheck /></div>
-          <div>
-            <strong>Site Safety Officers</strong>
-            <span>Manage who monitors your sites</span>
-          </div>
-          <FiChevronRight className="ct-row-chevron" />
-        </button>
       </div>
 
       <SectionHeader title="Monthly reports" supporting="Select a month for detail and a PDF export" />

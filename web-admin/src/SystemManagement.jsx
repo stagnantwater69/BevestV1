@@ -6,11 +6,13 @@ import {
   FiClock, FiTag, FiMinimize2
 } from 'react-icons/fi';
 import { 
-  collection, doc, getDocs, updateDoc, onSnapshot 
+  collection, doc, getDoc, getDocs, updateDoc, deleteDoc, query, where, onSnapshot 
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { ref, remove } from 'firebase/database';
+import { db, rtdb } from './firebase';
 import QRCode from 'qrcode';
 import { logActivity } from './activityLogger';
+import ConfirmModal from './ConfirmModal';
 
 const getWifiSignalInfo = (rssi, isOnline) => {
   if (!isOnline || rssi == null || rssi === 0) {
@@ -40,6 +42,7 @@ const SystemManagement = ({ user }) => {
   // Modals state
   const [showQrViewerModal, setShowQrViewerModal] = useState(null); // vest object
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   // Current admin display info
   const currentAdminName = user?.profile?.firstName 
@@ -120,61 +123,130 @@ const SystemManagement = ({ user }) => {
   }, [showQrViewerModal]);
 
   // Force Unassign Vest from Worker (Admin Override)
-  const handleUnassignVest = async (vest) => {
+  const handleUnassignVest = (vest) => {
     if (!vest.assignedWorkerId) return;
-    const confirm = window.confirm(`Are you sure you want to unassign Vest ${vest.id} from Worker ${vest.assignedWorkerId}?`);
-    if (!confirm) return;
+    setConfirmDialog({
+      title: 'Unassign Vest?',
+      message: `Are you sure you want to unassign Vest ${vest.id} from Worker ${vest.assignedWorkerId}?`,
+      confirmLabel: 'Unassign Vest',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await updateDoc(doc(db, 'vests', vest.id), {
+            assignedWorkerId: null,
+            status: 'AVAILABLE',
+            openAssignmentId: null
+          });
 
-    try {
-      await updateDoc(doc(db, 'vests', vest.id), {
-        assignedWorkerId: null,
-        status: 'AVAILABLE',
-        openAssignmentId: null
-      });
-
-      // Clear assignedVestId on worker
-      if (vest.assignedWorkerId) {
-        await updateDoc(doc(db, 'workers', vest.assignedWorkerId), {
-          assignedVestId: null
-        });
-      }
-      logActivity(`Unassigned vest: ${vest.id}`, currentAdminEmail);
-      alert(`Vest ${vest.id} is now Unassigned and Available for SSO pairing.`);
-    } catch (err) {
-      console.error('Error unassigning vest:', err);
-      alert('Could not unassign vest: ' + err.message);
-    }
+          if (vest.assignedWorkerId) {
+            await updateDoc(doc(db, 'workers', vest.assignedWorkerId), {
+              assignedVestId: null
+            });
+          }
+          logActivity(`Unassigned vest: ${vest.id}`, currentAdminEmail);
+          setConfirmDialog({
+            title: 'Vest Unassigned',
+            message: `Vest ${vest.id} is now Unassigned and Available for SSO pairing.`,
+            variant: 'success',
+            noticeOnly: true,
+          });
+        } catch (err) {
+          console.error('Error unassigning vest:', err);
+          setConfirmDialog({
+            title: 'Error',
+            message: 'Could not unassign vest: ' + err.message,
+            variant: 'danger',
+            noticeOnly: true,
+          });
+        }
+      },
+    });
   };
 
-  // Remove Vest from Company Directory (safely detaches without destroying the hardware record)
-  const handleDeleteVest = async (vest) => {
-    const confirm = window.confirm(`Remove Vest ${vest.id} from your company directory?\n\nThe vest will be detached from your company and returned to unassigned inventory. It can be re-paired anytime.`);
-    if (!confirm) return;
+  // Permanently delete Vest and remove all remnants from Firestore and Realtime Database
+  const handleDeleteVest = (vest) => {
+    const vestId = vest.id || vest.vestId;
+    if (!vestId) return;
+    setConfirmDialog({
+      title: `Delete Vest ${vestId}?`,
+      message: `Permanently delete Vest ${vestId} and remove all of its remnants from Firestore and Realtime Database?\n\nThis will unassign any worker, delete its assignment history, remove live telemetry, and delete the vest record.`,
+      confirmLabel: 'Delete Vest',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          const workerIds = new Set();
+          if (vest.assignedWorkerId) workerIds.add(vest.assignedWorkerId);
 
-    try {
-      await updateDoc(doc(db, 'vests', vest.id), {
-        inCompanyDirectory: false,
-        companyId: null,
-        siteId: null,
-        addedByAdminId: null,
-        addedByAdminEmail: null,
-        addedByAdminName: null,
-        addedBySsoUid: null,
-        status: 'AVAILABLE',
-        assignedWorkerId: null,
-        removedFromDirectoryAt: new Date()
-      });
-      if (vest.assignedWorkerId) {
-        await updateDoc(doc(db, 'workers', vest.assignedWorkerId), {
-          assignedVestId: null
-        });
-      }
-      logActivity(`Removed vest: ${vest.id} from directory`, currentAdminEmail);
-      alert(`Vest ${vest.id} has been removed from your company directory.`);
-    } catch (err) {
-      console.error('Error removing vest:', err);
-      alert('Could not remove vest: ' + err.message);
-    }
+          try {
+            const wSnap = await getDocs(query(collection(db, 'workers'), where('assignedVestId', '==', vestId)));
+            wSnap.docs.forEach(w => workerIds.add(w.id));
+          } catch (_) {}
+
+          try {
+            const asgSnap = await getDocs(query(collection(db, 'vestAssignments'), where('vestId', '==', vestId)));
+            asgSnap.docs.forEach(a => {
+              const wId = a.data()?.workerId;
+              if (wId) workerIds.add(wId);
+            });
+            await Promise.all(asgSnap.docs.map(a => deleteDoc(a.ref)));
+          } catch (_) {}
+
+          for (const wId of workerIds) {
+            try {
+              const wDoc = await getDoc(doc(db, 'workers', wId));
+              if (wDoc.exists() && (!wDoc.data()?.assignedVestId || wDoc.data().assignedVestId === vestId)) {
+                await updateDoc(wDoc.ref, { assignedVestId: null });
+              }
+            } catch (_) {}
+            try { await remove(ref(rtdb, `workerToVest/${wId}`)); } catch (_) {}
+            try { await remove(ref(rtdb, `liveReadings/${wId}`)); } catch (_) {}
+          }
+
+          try {
+            await remove(ref(rtdb, `vestsLive/${vestId}`));
+            await remove(ref(rtdb, `liveReadingsByVest/${vestId}`));
+            await remove(ref(rtdb, `vestToWorker/${vestId}`));
+            const cleanMac = (vest.cleanMac || vest.macAddress || '').toUpperCase().replace(/[^A-F0-9]/g, '');
+            if (cleanMac.length === 12) {
+              const macVariants = new Set([cleanMac]);
+              const prefix = cleanMac.substring(0, 10);
+              const lastByte = parseInt(cleanMac.substring(10, 12), 16);
+              if (!isNaN(lastByte)) {
+                for (const delta of [-2, -1, 1, 2]) {
+                  const v = (lastByte + delta) & 0xff;
+                  macVariants.add(prefix + v.toString(16).toUpperCase().padStart(2, '0'));
+                }
+              }
+              for (const m of macVariants) {
+                try { await remove(ref(rtdb, `macToVest/${m}`)); } catch (_) {}
+                try { await remove(ref(rtdb, `vestsLiveByMac/${m}`)); } catch (_) {}
+                try { await remove(ref(rtdb, `liveReadingsByMac/${m}`)); } catch (_) {}
+              }
+            }
+          } catch (_) {}
+
+          await deleteDoc(doc(db, 'vests', vestId));
+
+          logActivity(`Permanently deleted vest: ${vestId} and removed all remnants`, currentAdminEmail);
+          setConfirmDialog({
+            title: 'Vest Deleted',
+            message: `Vest ${vestId} and all of its database remnants have been permanently deleted.`,
+            variant: 'success',
+            noticeOnly: true,
+          });
+        } catch (err) {
+          console.error('Error deleting vest:', err);
+          setConfirmDialog({
+            title: 'Delete Failed',
+            message: 'Could not delete vest: ' + err.message,
+            variant: 'danger',
+            noticeOnly: true,
+          });
+        }
+      },
+    });
   };
 
   // Filtered vests
@@ -636,6 +708,17 @@ const SystemManagement = ({ user }) => {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        variant={confirmDialog?.variant}
+        noticeOnly={confirmDialog?.noticeOnly}
+        onConfirm={confirmDialog?.onConfirm}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </div>
   );
 };

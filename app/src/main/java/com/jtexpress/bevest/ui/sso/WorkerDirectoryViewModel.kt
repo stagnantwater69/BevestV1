@@ -81,6 +81,12 @@ class WorkerDirectoryViewModel @Inject constructor(
     fun onQuery(value: String) { query.value = value }
     fun onFilter(value: WorkerFilter) { filter.value = value }
 
+    fun deleteWorker(workerId: String) {
+        viewModelScope.launch {
+            workerRepository.deleteWorker(workerId)
+        }
+    }
+
     fun refreshReadings() {
         if (_refreshing.value) return
         viewModelScope.launch {
@@ -125,7 +131,9 @@ class WorkerDirectoryViewModel @Inject constructor(
                     ) { readings, thresholds, alertsOutcome, q, f ->
                         val engine = SafetyStatusEngine(thresholds)
                         val now = System.currentTimeMillis()
+                        val myWorkerIds = workers.map { it.workerId }.toSet()
                         val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
+                            .filter { it.workerId in myWorkerIds }
                         val live = workers.map { w ->
                             val r = readings[w.workerId]
                             val age = w.effectiveAge

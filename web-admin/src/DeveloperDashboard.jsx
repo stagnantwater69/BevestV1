@@ -26,6 +26,7 @@ import {
   formatPhp 
 } from './subscriptionPlans';
 import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
+import ConfirmModal from './ConfirmModal';
 import logo from './assets/bevest_logo.png';
 import './developer.css';
 
@@ -168,19 +169,26 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
   };
 
-  const handleResetTiers = async () => {
-    const ok = window.confirm('Are you sure you want to reset all subscription tiers and inclusions back to factory defaults?');
-    if (!ok) return;
-    setSavingTiers(true);
-    try {
-      await resetSubscriptionPlans(devEmail);
-      showToast('success', '✔ Reset subscription tiers to factory default pricing and inclusions!');
-    } catch (err) {
-      console.error('Failed to reset subscription tiers:', err);
-      showToast('error', 'Failed to reset subscription tiers: ' + err.message);
-    } finally {
-      setSavingTiers(false);
-    }
+  const handleResetTiers = () => {
+    setConfirmDialog({
+      title: 'Reset Subscription Tiers?',
+      message: 'Are you sure you want to reset all subscription tiers and inclusions back to factory defaults?',
+      confirmLabel: 'Reset Defaults',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setSavingTiers(true);
+        try {
+          await resetSubscriptionPlans(devEmail);
+          showToast('success', '✔ Reset subscription tiers to factory default pricing and inclusions!');
+        } catch (err) {
+          console.error('Failed to reset subscription tiers:', err);
+          showToast('error', 'Failed to reset subscription tiers: ' + err.message);
+        } finally {
+          setSavingTiers(false);
+        }
+      },
+    });
   };
 
   // QR Generator Form state
@@ -204,6 +212,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [liveQrDataUrl, setLiveQrDataUrl] = useState('');
   const [uploading, setUploading] = useState(false);
   const [toastMsg, setToastMsg] = useState({ type: '', text: '' });
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   // Batch Generator Modal
   const [showBatchModal, setShowBatchModal] = useState(false);
@@ -700,80 +709,87 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
   };
 
-  const handleResetVitalThresholds = async () => {
-    const ok = window.confirm('Reset all age-based Heart Rate and Body Temperature thresholds back to factory defaults?');
-    if (!ok) return;
-    setVitalBrackets(DEFAULT_VITAL_BRACKETS);
-    setDefaultHrLowDanger(45);
-    setDefaultHrLowWarning(55);
-    setDefaultHrWarning(100);
-    setDefaultHrDanger(120);
-    setDefaultTempLowDanger(35.0);
-    setDefaultTempLowWarning(35.8);
-    setDefaultTempWarning(37.8);
-    setDefaultTempDanger(38.5);
-    setFallSensitivity('MEDIUM');
-    setFallFreefallG(0.65);
-    setFallImpactG(2.8);
-    setFallSevereImpactG(4.5);
-    setSavingVitals(true);
-    try {
-      const payload = {
-        heartRateLowDanger: 45,
-        heartRateLowWarning: 55,
-        heartRateHigh: 100,
-        heartRateDanger: 120,
-        temperatureLowDanger: 35.0,
-        temperatureLowWarning: 35.8,
-        temperatureHigh: 37.8,
-        temperatureDanger: 38.5,
-        fallSensitivity: 'MEDIUM',
-        fallFreefallG: 0.65,
-        fallImpactG: 2.8,
-        fallSevereImpactG: 4.5,
-        inactivitySeconds: 180,
-        offlineTimeoutSeconds: 60,
-        responseTimeoutSeconds: 60,
-        lowBatteryPercent: 20,
-        ageBrackets: DEFAULT_VITAL_BRACKETS,
-        updatedAtMs: Date.now(),
-        updatedBy: devEmail
-      };
+  const handleResetVitalThresholds = () => {
+    setConfirmDialog({
+      title: 'Reset Vital Thresholds?',
+      message: 'Reset all age-based Heart Rate and Body Temperature thresholds back to factory defaults?',
+      confirmLabel: 'Reset Defaults',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setVitalBrackets(DEFAULT_VITAL_BRACKETS);
+        setDefaultHrLowDanger(45);
+        setDefaultHrLowWarning(55);
+        setDefaultHrWarning(100);
+        setDefaultHrDanger(120);
+        setDefaultTempLowDanger(35.0);
+        setDefaultTempLowWarning(35.8);
+        setDefaultTempWarning(37.8);
+        setDefaultTempDanger(38.5);
+        setFallSensitivity('MEDIUM');
+        setFallFreefallG(0.65);
+        setFallImpactG(2.8);
+        setFallSevereImpactG(4.5);
+        setSavingVitals(true);
+        try {
+          const payload = {
+            heartRateLowDanger: 45,
+            heartRateLowWarning: 55,
+            heartRateHigh: 100,
+            heartRateDanger: 120,
+            temperatureLowDanger: 35.0,
+            temperatureLowWarning: 35.8,
+            temperatureHigh: 37.8,
+            temperatureDanger: 38.5,
+            fallSensitivity: 'MEDIUM',
+            fallFreefallG: 0.65,
+            fallImpactG: 2.8,
+            fallSevereImpactG: 4.5,
+            inactivitySeconds: 180,
+            offlineTimeoutSeconds: 60,
+            responseTimeoutSeconds: 60,
+            lowBatteryPercent: 20,
+            ageBrackets: DEFAULT_VITAL_BRACKETS,
+            updatedAtMs: Date.now(),
+            updatedBy: devEmail
+          };
 
-      let savedFirestore = false;
-      let savedRtdb = false;
-      let lastError = null;
+          let savedFirestore = false;
+          let savedRtdb = false;
+          let lastError = null;
 
-      try {
-        await setDoc(doc(db, 'settings', 'thresholds'), {
-          ...payload,
-          updatedAt: new Date()
-        }, { merge: true });
-        savedFirestore = true;
-      } catch (err) {
-        lastError = err;
-        console.warn('Firestore resetVitalThresholds warning:', err.message);
-      }
+          try {
+            await setDoc(doc(db, 'settings', 'thresholds'), {
+              ...payload,
+              updatedAt: new Date()
+            }, { merge: true });
+            savedFirestore = true;
+          } catch (err) {
+            lastError = err;
+            console.warn('Firestore resetVitalThresholds warning:', err.message);
+          }
 
-      try {
-        await set(ref(rtdb, 'settings/thresholds'), payload);
-        savedRtdb = true;
-      } catch (err) {
-        if (!lastError) lastError = err;
-        console.warn('RTDB resetVitalThresholds warning:', err.message);
-      }
+          try {
+            await set(ref(rtdb, 'settings/thresholds'), payload);
+            savedRtdb = true;
+          } catch (err) {
+            if (!lastError) lastError = err;
+            console.warn('RTDB resetVitalThresholds warning:', err.message);
+          }
 
-      if (!savedFirestore && !savedRtdb && lastError) {
-        throw lastError;
-      }
+          if (!savedFirestore && !savedRtdb && lastError) {
+            throw lastError;
+          }
 
-      await logActivity('Reset Vital Signs thresholds to factory defaults', devEmail);
-      showToast('success', '✓ Reset Vital Signs thresholds to factory defaults!');
-    } catch (err) {
-      showToast('error', 'Failed to reset thresholds: ' + err.message);
-    } finally {
-      setSavingVitals(false);
-    }
+          await logActivity('Reset Vital Signs thresholds to factory defaults', devEmail);
+          showToast('success', '✓ Reset Vital Signs thresholds to factory defaults!');
+        } catch (err) {
+          showToast('error', 'Failed to reset thresholds: ' + err.message);
+        } finally {
+          setSavingVitals(false);
+        }
+      },
+    });
   };
 
   const handleRegenerateId = () => {
@@ -952,50 +968,73 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         result.errors.push(`worker ${wId}: ${err.message}`);
       }
       try { await remove(ref(rtdb, `workerToVest/${wId}`)); } catch (_) {}
+      try { await remove(ref(rtdb, `liveReadings/${wId}`)); } catch (_) {}
     }
 
     try { await remove(ref(rtdb, `vestToWorker/${vestId}`)); } catch (_) {}
     return result;
   };
 
-  const handleDeleteVest = async (vestId) => {
+  const handleDeleteVest = (vestId) => {
     if (!vestId) return;
-    const ok = window.confirm(`Permanently delete Vest "${vestId}" from the Bevest hardware database?\n\nThis will remove the QR, MAC address, and Serial Number registration, unassign any assigned worker, delete its vest assignment records, and clean up live telemetry. This action cannot be undone.`);
-    if (!ok) return;
+    setConfirmDialog({
+      title: `Delete Vest "${vestId}"?`,
+      message: `Permanently delete Vest "${vestId}" from the Bevest hardware database?\n\nThis will remove the QR, MAC address, and Serial Number registration, unassign any assigned worker, delete its vest assignment records, and clean up live telemetry. This action cannot be undone.`,
+      confirmLabel: 'Delete Vest',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          const targetVest = catalog.find(v => (v.id === vestId || v.vestId === vestId));
 
-    try {
-      const targetVest = catalog.find(v => (v.id === vestId || v.vestId === vestId));
+          // 1. Unassign workers + delete vestAssignments records
+          const purge = await purgeVestAssignments(vestId, targetVest?.assignedWorkerId || null);
+          if (purge.errors.length) console.warn('Assignment cleanup warnings:', purge.errors);
 
-      // 1. Unassign workers + delete vestAssignments records
-      const purge = await purgeVestAssignments(vestId, targetVest?.assignedWorkerId || null);
-      if (purge.errors.length) console.warn('Assignment cleanup warnings:', purge.errors);
+          // 2. Remove Realtime Database live nodes & MAC mappings (including ±2 ESP32 MAC variants)
+          try {
+            await remove(ref(rtdb, `vestsLive/${vestId}`));
+            await remove(ref(rtdb, `liveReadingsByVest/${vestId}`));
+            await remove(ref(rtdb, `vestToWorker/${vestId}`));
+            if (targetVest?.assignedWorkerId) {
+              try { await remove(ref(rtdb, `liveReadings/${targetVest.assignedWorkerId}`)); } catch (_) {}
+              try { await remove(ref(rtdb, `workerToVest/${targetVest.assignedWorkerId}`)); } catch (_) {}
+            }
+            const cleanMac = (targetVest?.cleanMac || targetVest?.macAddress || '').toUpperCase().replace(/[^A-F0-9]/g, '');
+            if (cleanMac.length === 12) {
+              const macVariants = new Set([cleanMac]);
+              const prefix = cleanMac.substring(0, 10);
+              const lastByte = parseInt(cleanMac.substring(10, 12), 16);
+              if (!isNaN(lastByte)) {
+                for (const delta of [-2, -1, 1, 2]) {
+                  const v = (lastByte + delta) & 0xff;
+                  macVariants.add(prefix + v.toString(16).toUpperCase().padStart(2, '0'));
+                }
+              }
+              for (const m of macVariants) {
+                try { await remove(ref(rtdb, `macToVest/${m}`)); } catch (_) {}
+                try { await remove(ref(rtdb, `vestsLiveByMac/${m}`)); } catch (_) {}
+                try { await remove(ref(rtdb, `liveReadingsByMac/${m}`)); } catch (_) {}
+              }
+            }
+          } catch (rtdbErr) {
+            console.warn('RTDB cleanup warning:', rtdbErr);
+          }
 
-      // 2. Remove Realtime Database live nodes & MAC mappings
-      try {
-        await remove(ref(rtdb, `vestsLive/${vestId}`));
-        await remove(ref(rtdb, `liveReadingsByVest/${vestId}`));
-        const cleanMac = targetVest?.cleanMac || (targetVest?.macAddress ? targetVest.macAddress.toUpperCase().replace(/[^A-F0-9]/g, '') : null);
-        if (cleanMac) {
-          await remove(ref(rtdb, `macToVest/${cleanMac}`));
-          await remove(ref(rtdb, `vestsLiveByMac/${cleanMac}`));
-          await remove(ref(rtdb, `liveReadingsByMac/${cleanMac}`));
+          // 3. Delete from Firestore
+          await deleteDoc(doc(db, 'vests', vestId));
+          await logActivity(`Deleted smart vest ${vestId} from central hardware database (unlinked ${purge.workers} worker(s), removed ${purge.assignments} assignment record(s))`, devEmail);
+          if (purge.errors.length) {
+            showToast('error', `Vest ${vestId} deleted, but some assignment cleanup failed (${purge.errors[0]}). Deploy the latest firestore.rules and run "Repair Orphaned Assignments".`);
+          } else {
+            showToast('success', `✓ Vest ${vestId} removed. Unlinked ${purge.workers} worker(s) and deleted ${purge.assignments} assignment record(s).`);
+          }
+        } catch (err) {
+          console.error('Error deleting vest:', err);
+          showToast('error', 'Failed to delete vest: ' + err.message);
         }
-      } catch (rtdbErr) {
-        console.warn('RTDB cleanup warning:', rtdbErr);
-      }
-
-      // 3. Delete from Firestore
-      await deleteDoc(doc(db, 'vests', vestId));
-      await logActivity(`Deleted smart vest ${vestId} from central hardware database (unlinked ${purge.workers} worker(s), removed ${purge.assignments} assignment record(s))`, devEmail);
-      if (purge.errors.length) {
-        showToast('error', `Vest ${vestId} deleted, but some assignment cleanup failed (${purge.errors[0]}). Deploy the latest firestore.rules and run "Repair Orphaned Assignments".`);
-      } else {
-        showToast('success', `✓ Vest ${vestId} removed. Unlinked ${purge.workers} worker(s) and deleted ${purge.assignments} assignment record(s).`);
-      }
-    } catch (err) {
-      console.error('Error deleting vest:', err);
-      showToast('error', 'Failed to delete vest: ' + err.message);
-    }
+      },
+    });
   };
 
   /**
@@ -3627,6 +3666,17 @@ const DeveloperDashboard = ({ user, onLogout }) => {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        variant={confirmDialog?.variant}
+        noticeOnly={confirmDialog?.noticeOnly}
+        onConfirm={confirmDialog?.onConfirm}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </div>
   );
 };

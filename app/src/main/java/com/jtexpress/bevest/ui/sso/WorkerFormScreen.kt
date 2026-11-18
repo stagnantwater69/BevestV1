@@ -81,7 +81,9 @@ fun AddEditWorkerScreen(
 ) {
     val context = LocalContext.current
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    var confirmSave by remember { mutableStateOf(false) }
     var confirmDeactivate by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     var photoUri by remember { mutableStateOf<Uri?>(null) }
 
     LaunchedEffect(user.uid) {
@@ -278,21 +280,35 @@ fun AddEditWorkerScreen(
 
                 PrimaryButton(
                     text = if (state.isEdit) "Save changes" else "Add worker",
-                    onClick = viewModel::save,
+                    onClick = { confirmSave = true },
                     loading = state.submitting,
                     loadingText = if (state.isEdit) "Saving…" else "Adding…",
                 )
 
-                if (state.isEdit && state.active) {
+                if (state.isEdit) {
                     DangerButton(
-                        text = "Deactivate worker",
-                        onClick = { confirmDeactivate = true },
+                        text = "Delete worker",
+                        onClick = { confirmDelete = true },
                     )
                 }
 
                 Spacer(Modifier.height(Spacing.lg))
             }
         }
+    }
+
+    if (confirmSave) {
+        ConfirmationDialog(
+            title = if (state.isEdit) "Save worker changes?" else "Add new worker?",
+            message = if (state.isEdit) {
+                "Save the updated profile details for ${state.firstName} ${state.lastName}?"
+            } else {
+                "Create a new worker profile for ${state.firstName} ${state.lastName} (${state.workerId})?"
+            },
+            confirmLabel = if (state.isEdit) "Save" else "Add worker",
+            onConfirm = { confirmSave = false; viewModel.save() },
+            onDismiss = { confirmSave = false },
+        )
     }
 
     if (confirmDeactivate) {
@@ -302,6 +318,16 @@ fun AddEditWorkerScreen(
             confirmLabel = "Deactivate",
             onConfirm = { confirmDeactivate = false; viewModel.deactivate() },
             onDismiss = { confirmDeactivate = false },
+        )
+    }
+
+    if (confirmDelete) {
+        ConfirmationDialog(
+            title = "Delete this worker?",
+            message = "This permanently removes the worker profile and unassigns any paired vest.",
+            confirmLabel = "Delete",
+            onConfirm = { confirmDelete = false; viewModel.deleteWorker() },
+            onDismiss = { confirmDelete = false },
         )
     }
 }
@@ -444,18 +470,20 @@ private fun ProjectPicker(
     onSelect: (String) -> Unit,
     error: String?,
 ) {
-    val selected = projects.firstOrNull { it.projectId == selectedId }
-
-    if (projects.isEmpty()) {
-        // Fall back to whatever the operator is scoped to.
-        Text(
-            selectedId?.let { "Assigned to $it" }
-                ?: "No project site available. Ask your contractor to create one.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        return
+    val options = remember(projects, selectedId) {
+        if (projects.isEmpty() && !selectedId.isNullOrBlank()) {
+            listOf(
+                com.jtexpress.bevest.domain.model.ProjectSite(
+                    projectId = selectedId,
+                    name = selectedId,
+                    location = "Assigned Site",
+                ),
+            )
+        } else {
+            projects
+        }
     }
+    val selected = options.firstOrNull { it.projectId == selectedId }
 
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(
@@ -463,12 +491,16 @@ private fun ProjectPicker(
         onExpandedChange = { expanded = it },
     ) {
         OutlinedTextField(
-            value = selected?.let { "${it.name} · ${it.location}" } ?: "Select a project site",
+            value = selected?.let {
+                if (it.location.isNotBlank()) "${it.name} · ${it.location}" else it.name
+            } ?: selectedId?.takeIf { it.isNotBlank() } ?: "Select a project site",
             onValueChange = {},
             readOnly = true,
             label = { Text("Project site") },
             isError = error != null,
-            supportingText = error?.let { { Text(it) } },
+            supportingText = error?.let { { Text(it) } } ?: if (options.isEmpty()) {
+                { Text("No project sites created by your contractor yet") }
+            } else null,
             leadingIcon = { Icon(BevestIcons.Location, contentDescription = null) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             shape = RoundedCornerShape(Radius.md),
@@ -477,28 +509,43 @@ private fun ProjectPicker(
                 .menuAnchor(),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            projects.forEach { project ->
+            if (options.isEmpty()) {
                 DropdownMenuItem(
                     text = {
-                        Column {
-                            Text(project.name, style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                project.location,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        Text(
+                            "No project sites available — ask your contractor to create a site",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     },
-                    trailingIcon = {
-                        if (project.projectId == selectedId) {
-                            Icon(Icons.Outlined.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        }
-                    },
-                    onClick = {
-                        onSelect(project.projectId)
-                        expanded = false
-                    },
+                    onClick = { expanded = false },
                 )
+            } else {
+                options.forEach { project ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(project.name, style = MaterialTheme.typography.bodyLarge)
+                                if (project.location.isNotBlank()) {
+                                    Text(
+                                        project.location,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        },
+                        trailingIcon = {
+                            if (project.projectId == selectedId) {
+                                Icon(Icons.Outlined.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                        },
+                        onClick = {
+                            onSelect(project.projectId)
+                            expanded = false
+                        },
+                    )
+                }
             }
         }
     }

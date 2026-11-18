@@ -225,13 +225,16 @@ class SafetyWatcher @Inject constructor(
             .flatMapLatest { outcome ->
                 val workers = (outcome as? Outcome.Success)?.data.orEmpty()
                 if (workers.isEmpty()) return@flatMapLatest flowOf(null)
+                val myWorkerIds = workers.map { it.workerId }.toSet()
                 combine(
                     monitoringRepository.observeReadings(workers.map { it.workerId }),
                     settingsRepository.observeThresholds(),
                     alertRepository.observeActiveAlerts(null),
                     ticker,
                 ) { readings, thresholds, alerts, now ->
-                    Snapshot(workers, readings, thresholds, (alerts as? Outcome.Success)?.data.orEmpty(), now)
+                    val filteredAlerts = (alerts as? Outcome.Success)?.data.orEmpty()
+                        .filter { it.workerId in myWorkerIds }
+                    Snapshot(workers, readings, thresholds, filteredAlerts, now)
                 }
             }
             .collect { snap -> snap?.let { runCatching { evaluate(it) } } }

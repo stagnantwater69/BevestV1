@@ -58,6 +58,7 @@ class LiveMapViewModel @Inject constructor(
                     if (site.isNullOrBlank() && workers.isEmpty()) {
                         return@flatMapLatest flowOf(LiveMapState(loading = false, noSite = true))
                     }
+                    val myWorkerIds = workers.map { it.workerId }.toSet()
                     combine(
                         monitoringRepository.observeReadings(workers.map { it.workerId }),
                         settingsRepository.observeThresholds(),
@@ -66,6 +67,7 @@ class LiveMapViewModel @Inject constructor(
                         val engine = SafetyStatusEngine(thresholds)
                         val now = System.currentTimeMillis()
                         val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
+                            .filter { it.workerId in myWorkerIds }
                         LiveMapState(
                             loading = false,
                             markers = workers.map { w ->

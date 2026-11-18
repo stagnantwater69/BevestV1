@@ -23,6 +23,11 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.jtexpress.bevest.ui.common.ConfirmationDialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -56,6 +61,32 @@ fun SsoArea(
 ) {
     val siteId = user.siteId
     val navController = rememberNavController()
+    var showTempPassPrompt by remember(user.uid, user.mustChangePassword) {
+        mutableStateOf(user.mustChangePassword)
+    }
+
+    if (showTempPassPrompt) {
+        ConfirmationDialog(
+            title = "Change temporary password?",
+            message = "Welcome! Since this is your first time signing in with a temporary password, would you like to set a new personal password now?",
+            confirmLabel = "Change password",
+            onConfirm = {
+                showTempPassPrompt = false
+                runCatching {
+                    FirebaseFirestore.getInstance().collection("users").document(user.uid)
+                        .update("mustChangePassword", false)
+                }
+                navController.navigate(Routes.CHANGE_PASSWORD)
+            },
+            onDismiss = {
+                showTempPassPrompt = false
+                runCatching {
+                    FirebaseFirestore.getInstance().collection("users").document(user.uid)
+                        .update("mustChangePassword", false)
+                }
+            },
+        )
+    }
 
     // Fall detection + escalation runs on the phone while the SSO is signed in (the
     // project's free Firebase plan can't run the cloud functions that would do it).

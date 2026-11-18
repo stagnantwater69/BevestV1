@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.jtexpress.bevest.domain.model.Alert
 import com.jtexpress.bevest.domain.model.AlertStatus
 import com.jtexpress.bevest.domain.repository.AlertRepository
+import com.jtexpress.bevest.domain.repository.WorkerRepository
 import com.jtexpress.bevest.utils.DateTimeUtils
 import com.jtexpress.bevest.utils.Outcome
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -59,6 +60,7 @@ data class AlertHistoryState(
 @HiltViewModel
 class AlertHistoryViewModel @Inject constructor(
     private val alertRepository: AlertRepository,
+    private val workerRepository: WorkerRepository,
 ) : ViewModel() {
 
     private val siteId = MutableStateFlow<String?>(null)
@@ -76,13 +78,19 @@ class AlertHistoryViewModel @Inject constructor(
     }
 
     val state: StateFlow<AlertHistoryState> = siteId.flatMapLatest { site ->
-        // Filtering is combined in rather than re-queried, so changing tabs never
-        // re-hits the network or blanks a list the user is already reading.
-        combine(alertRepository.observeAlertHistory(site), filter) { outcome, f ->
+        // Alert Data Isolation: only show alerts for workers created by this SSO
+        combine(
+            alertRepository.observeAlertHistory(site),
+            workerRepository.observeWorkers(contractorId = null, siteId = site),
+            filter,
+        ) { outcome, workersOutcome, f ->
+            val myWorkerIds = (workersOutcome as? Outcome.Success)?.data.orEmpty()
+                .map { it.workerId }
+                .toSet()
             when (outcome) {
                 is Outcome.Success -> AlertHistoryState(
                     loading = false,
-                    alerts = outcome.data,
+                    alerts = outcome.data.filter { it.workerId in myWorkerIds },
                     filter = f,
                 )
                 is Outcome.Failure -> AlertHistoryState(

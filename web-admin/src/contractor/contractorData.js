@@ -286,20 +286,23 @@ export function evaluateStatus(reading, t = DEFAULT_THRESHOLDS, now = Date.now()
 // ------------------------------------------------------------ monthly reports
 // Port of ReportRepositoryImpl.monthlyReports — newest month first.
 
-export function buildMonthlyReports(incidents, activeWorkers, months = 6) {
+export function buildMonthlyReports(incidents, activeWorkers) {
   const byMonth = {};
   incidents.forEach((i) => {
     const k = monthKey(i.createdAt);
     (byMonth[k] = byMonth[k] || []).push(i);
   });
   const now = new Date();
-  const reports = [];
-  for (let offset = 0; offset < months; offset++) {
-    const key = monthKey(new Date(now.getFullYear(), now.getMonth() - offset, 1).getTime());
+  const currentKey = monthKey(new Date(now.getFullYear(), now.getMonth(), 1).getTime());
+  const keys = Array.from(
+    new Set([currentKey, ...Object.keys(byMonth).filter((k) => k >= currentKey)]),
+  ).sort((a, b) => b.localeCompare(a));
+
+  return keys.map((key) => {
     const list = byMonth[key] || [];
     const ratio = activeWorkers === 0 ? 0 : Math.floor((list.length * 100) / (activeWorkers * 30));
     const safety = activeWorkers === 0 ? 100 : 100 - Math.min(100, Math.max(0, ratio));
-    reports.push({
+    return {
       monthKey: key,
       totalIncidents: list.length,
       safetyPercentage: safety,
@@ -307,9 +310,8 @@ export function buildMonthlyReports(incidents, activeWorkers, months = 6) {
       warningCount: list.filter((i) => i.severity === 'WARNING').length,
       dangerCount: list.filter((i) => i.severity === 'DANGER').length,
       emergencyCount: list.filter((i) => i.severity === 'EMERGENCY').length,
-    });
-  }
-  return reports;
+    };
+  });
 }
 
 // ---------------------------------------------------------------------- hooks
@@ -563,7 +565,10 @@ export function useContractorSsos(contractorId) {
       (qs) => setState({
         loading: false,
         error: null,
-        ssos: qs.docs.map(toUser).sort((a, b) => (a.fullName || a.email).localeCompare(b.fullName || b.email)),
+        ssos: qs.docs
+          .map(toUser)
+          .filter((u) => u.contractorId === contractorId)
+          .sort((a, b) => (a.fullName || a.email).localeCompare(b.fullName || b.email)),
       }),
       (err) => setState({ loading: false, error: err.message, ssos: [] }),
     );

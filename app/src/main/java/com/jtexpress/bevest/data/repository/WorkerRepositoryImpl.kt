@@ -1,5 +1,7 @@
 package com.jtexpress.bevest.data.repository
 
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.storage.FirebaseStorage
@@ -25,6 +27,8 @@ import javax.inject.Singleton
 class WorkerRepositoryImpl @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val storage: FirebaseStorage,
+    private val database: FirebaseDatabase,
+    private val auth: FirebaseAuth,
 ) : WorkerRepository {
 
     private val workers get() = firestore.collection(FirebasePaths.WORKERS)
@@ -40,29 +44,25 @@ class WorkerRepositoryImpl @Inject constructor(
             query.snapshots(),
             vests.snapshots(),
         ) { workersSnap, vestsSnap ->
+            val currentUid = auth.currentUser?.uid
             val vestOwners = vestOwnersOf(vestsSnap)
             val list = workersSnap.documents.map { doc ->
                 val w = doc.toWorker()
                 val assigned = w.assignedVestId
                 if (assigned != null && !isValidAssignment(vestOwners, assigned, w.workerId)) {
-                    // Vest was deleted from database! Automatically self-heal worker record
-                    // Only persist the repair when the vest list came from the server, so a
-                    // partial offline cache can never wipe a valid assignment.
                     if (!vestsSnap.metadata.isFromCache) doc.reference.update("assignedVestId", null)
                     w.copy(assignedVestId = null)
                 } else {
                     w
                 }
             }
-            val filtered = if (targetSite != null) {
-                val matched = list.filter { it.siteId.equals(targetSite, ignoreCase = true) }
-                matched.ifEmpty {
-                    if (contractorId != null) {
-                        list.filter { it.contractorId == contractorId }.ifEmpty { list }
-                    } else {
-                        list
-                    }
-                }
+            val filtered = if (contractorId == null && currentUid != null) {
+                // SSO Data Isolation: an SSO only sees the workers that this SSO account created
+                list.filter { it.createdBy == currentUid }
+            } else if (targetSite != null) {
+                list.filter { it.siteId.equals(targetSite, ignoreCase = true) }
+            } else if (contractorId != null) {
+                list.filter { it.contractorId == contractorId }
             } else {
                 list
             }
@@ -186,6 +186,30 @@ class WorkerRepositoryImpl @Inject constructor(
         Outcome.Failure(e.toAppError())
     }
 
+    override suspend fun deleteWorker(workerId: String): Outcome<Unit> = try {
+        val snap = runCatching { workers.document(workerId).get().await() }.getOrNull()
+        val assignedVest = snap?.getString("assignedVestId")?.takeIf { it.isNotBlank() }
+        if (assignedVest != null) {
+            runCatching {
+                vests.document(assignedVest).update(
+                    mapOf(
+                        "assignedWorkerId" to null,
+                        "status" to "AVAILABLE",
+                        "openAssignmentId" to null,
+                    ),
+                ).await()
+            }
+            runCatching { database.getReference("vestsLive/$assignedVest/assignedWorkerId").removeValue() }
+            runCatching { database.getReference("vestToWorker/$assignedVest").removeValue() }
+        }
+        runCatching { database.getReference("workerToVest/$workerId").removeValue() }
+        runCatching { database.getReference(FirebasePaths.liveReading(workerId)).removeValue() }
+        workers.document(workerId).delete().await()
+        Outcome.Success(Unit)
+    } catch (e: Exception) {
+        Outcome.Failure(e.toAppError())
+    }
+
     override suspend fun uploadPhoto(workerId: String, bytes: ByteArray): Outcome<String> = try {
         val ref = storage.reference.child(FirebasePaths.workerPhoto(workerId))
         ref.putBytes(bytes).await()
@@ -207,6 +231,7 @@ class WorkerRepositoryImpl @Inject constructor(
         "photoUrl" to photoUrl,
         "contractorId" to contractorId,
         "siteId" to siteId,
+        "createdBy" to (createdBy ?: auth.currentUser?.uid),
         "assignedVestId" to assignedVestId,
         "currentStatus" to currentStatus.name,
         "active" to active,

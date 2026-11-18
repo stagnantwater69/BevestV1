@@ -1,5 +1,6 @@
 package com.jtexpress.bevest.data.repository
 
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
@@ -31,6 +32,7 @@ import javax.inject.Singleton
 class VestRepositoryImpl @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val database: FirebaseDatabase,
+    private val auth: FirebaseAuth,
 ) : VestRepository {
 
     private val vests get() = firestore.collection(FirebasePaths.VESTS)
@@ -245,8 +247,15 @@ class VestRepositoryImpl @Inject constructor(
             database.getReference("vestsLiveByMac").valueEventsOrNull(),
             ticker,
         ) { qs, rtSnap, readingsSnap, macRtSnap, _ ->
+            val currentUid = auth.currentUser?.uid
+            // SSO Data Isolation: only show vests paired/claimed by this SSO account
+            val docs = if (currentUid != null) {
+                qs.documents.filter { it.getString("addedBySsoUid") == currentUid }
+            } else {
+                qs.documents
+            }
             // Auto-publish MAC to Vest ID and Worker mapping for every claimed vest
-            qs.documents.forEach { doc ->
+            docs.forEach { doc ->
                 val vId = doc.id
                 val mac = doc.getString("cleanMac")
                     ?: doc.getString("macAddress")?.replace(Regex("[^A-Fa-f0-9]"), "")?.uppercase()
@@ -265,8 +274,8 @@ class VestRepositoryImpl @Inject constructor(
 
             val rtLoaded = rtSnap != null || readingsSnap != null || macRtSnap != null
             val liveMap = buildLiveMap(rtSnap, readingsSnap, macRtSnap)
-            val baseVests = qs.documents.map { it.toVest() }
-            val mapped = qs.documents.mapIndexed { idx, doc ->
+            val baseVests = docs.map { it.toVest() }
+            val mapped = docs.mapIndexed { idx, doc ->
                 val base = baseVests[idx]
                 val live = resolveLive(base, liveMap, baseVests.size, baseVests)
                 // Device is online if either RTDB or Firestore reports a fresh heartbeat within 45s

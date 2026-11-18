@@ -23,5 +23,7 @@ interface WorkerRepository {
 
     suspend fun setAssignedVest(workerId: String, vestId: String?): Outcome<Unit>
 
+    suspend fun deleteWorker(workerId: String): Outcome<Unit>
+
     suspend fun uploadPhoto(workerId: String, bytes: ByteArray): Outcome<String>
 }

@@ -26,11 +26,13 @@ class ProjectRepositoryImpl @Inject constructor(
     override fun observeProjects(contractorId: String): Flow<Outcome<List<ProjectSite>>> =
         projects
             .whereEqualTo("contractorId", contractorId)
-            .whereEqualTo("active", true)
             .snapshots()
             .map { qs ->
                 Outcome.Success(
-                    qs.documents.map { it.toProjectSite() }.sortedBy { it.name },
+                    qs.documents
+                        .map { it.toProjectSite() }
+                        .filter { it.active }
+                        .sortedBy { it.name },
                 ) as Outcome<List<ProjectSite>>
             }
             .catch { emit(Outcome.Failure(it.toAppError())) }

@@ -155,6 +155,7 @@ class SsoDashboardViewModel @Inject constructor(
                         flowOf(SsoDashboardState(loading = false, noSite = true, refreshing = isRefreshing))
                     } else {
                         val ids = workers.map { it.workerId }
+                        val idSet = ids.toSet()
                         combine(
                             monitoringRepository.observeReadings(ids),
                             thresholdsFlow,
@@ -162,7 +163,9 @@ class SsoDashboardViewModel @Inject constructor(
                         ) { readings, thresholds, alertsOutcome ->
                             val engine = SafetyStatusEngine(thresholds)
                             val now = System.currentTimeMillis()
+                            // Alert Data Isolation: only show alerts belonging to this SSO's workers
                             val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
+                                .filter { it.workerId in idSet }
                             val live = workers.map { w ->
                                 val r = readings[w.workerId]
                                 val age = w.effectiveAge

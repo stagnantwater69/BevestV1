@@ -66,7 +66,9 @@ service cloud.firestore {
       allow list: if isAdmin() || isDeveloper()
                   || (isContractor() && request.query.limit <= 200)
                   || (request.query.limit <= 5);
-      allow delete: if isDeveloper() || (isAdmin() && resource.data.role != 'DEVELOPER');
+      allow delete: if isDeveloper()
+                    || (isAdmin() && resource.data.role != 'DEVELOPER')
+                    || (isContractor() && resource.data.role == 'SSO' && resource.data.contractorId == request.auth.uid);
       // Developer provisions accounts. Admins can ONLY create accounts for Contractors. Contractors can provision SSO accounts under their own contractorId. Users can initialize their own doc.
       allow create: if isDeveloper()
                  || (isAdmin() && request.resource.data.role == 'CONTRACTOR')
@@ -107,7 +109,7 @@ service cloud.firestore {
       allow create, update: if isAdmin()
                             || isDeveloper()  // developer vest deletion unlinks workers
                             || isSso();
-      allow delete: if isAdmin() || isDeveloper();
+      allow delete: if isAdmin() || isDeveloper() || isSso();
     }
 
     // ---- vests ----

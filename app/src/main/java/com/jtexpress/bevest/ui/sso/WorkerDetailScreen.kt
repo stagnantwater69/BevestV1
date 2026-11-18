@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Apartment
 import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.Cake
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Phone
@@ -110,6 +111,7 @@ fun WorkerDetailScreen(
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val palette = LocalStatusPalette.current
     var confirmResponse by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     var showVitalLogs by remember { mutableStateOf(false) }
 
     if (showVitalLogs) {
@@ -143,6 +145,13 @@ fun WorkerDetailScreen(
             if (canControl && state.worker != null) {
                 IconButton(onClick = { onEdit(workerId) }) {
                     Icon(Icons.Outlined.Edit, contentDescription = "Edit worker")
+                }
+                IconButton(onClick = { confirmDelete = true }) {
+                    Icon(
+                        Icons.Outlined.Delete,
+                        contentDescription = "Delete worker",
+                        tint = palette.danger,
+                    )
                 }
             }
         },
@@ -352,6 +361,11 @@ fun WorkerDetailScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Spacer(Modifier.height(Spacing.xs))
+                        DangerButton(
+                            text = "Delete worker profile",
+                            onClick = { confirmDelete = true },
+                        )
                     }
 
                     state.actionMessage?.let { SuccessNote(it) }
@@ -359,6 +373,19 @@ fun WorkerDetailScreen(
                 }
             }
         }
+    }
+
+    if (confirmDelete) {
+        ConfirmationDialog(
+            title = "Delete this worker?",
+            message = "This will permanently remove ${state.worker?.fullName?.ifBlank { workerId } ?: workerId} and unassign any paired vest.",
+            confirmLabel = "Delete",
+            onConfirm = {
+                confirmDelete = false
+                viewModel.deleteWorker(onDeleted = onBack)
+            },
+            onDismiss = { confirmDelete = false },
+        )
     }
 
     if (confirmResponse) {

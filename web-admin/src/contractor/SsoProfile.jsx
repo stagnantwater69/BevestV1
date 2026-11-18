@@ -1,12 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { FiEdit2, FiMapPin, FiUsers, FiMail, FiPhone } from 'react-icons/fi';
-import { doc, updateDoc } from 'firebase/firestore';
+import { FiEdit2, FiMapPin, FiUsers, FiMail, FiPhone, FiTrash2 } from 'react-icons/fi';
+import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
   useContractorSsos, useContractorSites, siteLabel, STATUS_COLOR, initialsOf,
 } from './contractorData';
 import { PageHeader, Badge, EmptyState, ErrorState, Skeleton } from './ui';
 import PhoneInput, { formatPhoneWithCountryCode } from '../PhoneInput';
+import ConfirmModal from '../ConfirmModal';
 
 /**
  * Site Safety Officer profile for the contractor.
@@ -24,6 +25,7 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
   const [isCustomSite, setIsCustomSite] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   // Merged sites list: from projects collection, worker siteIds, and current SSO siteId
   const allSites = useMemo(() => {
@@ -101,15 +103,35 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
     }
   };
 
+  const handleDelete = async () => {
+    setConfirmDeleteOpen(false);
+    try {
+      await deleteDoc(doc(db, 'users', sso.uid));
+      onBack();
+    } catch (err) {
+      setErrorMsg('Failed to delete officer: ' + err.message);
+    }
+  };
+
   const header = (
     <PageHeader
       breadcrumb={breadcrumb}
       title={sso.fullName || sso.email}
       subtitle="Site Safety Officer"
       actions={!editing && (
-        <button id="ct-sso-edit-btn" className="btn-primary" onClick={startEdit}>
-          <FiEdit2 /> Edit profile
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button id="ct-sso-edit-btn" className="btn-primary" onClick={startEdit}>
+            <FiEdit2 /> Edit profile
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            style={{ color: '#dc2626', borderColor: '#fecaca' }}
+            onClick={() => setConfirmDeleteOpen(true)}
+          >
+            <FiTrash2 /> Delete SSO
+          </button>
+        </div>
       )}
     />
   );
@@ -244,6 +266,16 @@ const SsoProfile = ({ contractorId, uid, workers, onBack }) => {
           color={sso.active ? STATUS_COLOR.NORMAL : STATUS_COLOR.OFFLINE}
         />
       </div>
+
+      <ConfirmModal
+        open={confirmDeleteOpen}
+        title="Delete Site Safety Officer?"
+        message={`Are you sure you want to permanently delete Site Safety Officer "${sso.fullName || sso.email}"? This action cannot be undone.`}
+        confirmLabel="Delete SSO"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDeleteOpen(false)}
+      />
 
       {/* Assigned Workers Section */}
       <div className="ct-section-header">

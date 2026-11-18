@@ -43,6 +43,7 @@ data class User(
     val contractorId: String? = null,
     val siteId: String? = null,
     val active: Boolean = true,
+    val mustChangePassword: Boolean = false,
     /** Contractors only; null means no plan chosen yet. */
     val subscription: Subscription? = null,
 ) {
@@ -78,6 +79,7 @@ data class Worker(
     val photoUrl: String? = null,
     val contractorId: String? = null,
     val siteId: String? = null,
+    val createdBy: String? = null,
     val assignedVestId: String? = null,
     val currentStatus: SafetyStatus = SafetyStatus.OFFLINE,
     val active: Boolean = true,
@@ -96,6 +98,7 @@ data class Vest(
     val inCompanyDirectory: Boolean = false,
     val companyId: String? = null,
     val siteId: String? = null,
+    val addedBySsoUid: String? = null,
     val macAddress: String? = null,
     val serialNumber: String? = null,
     val wifiSsid: String? = null,

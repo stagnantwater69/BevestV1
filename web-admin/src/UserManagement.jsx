@@ -2,14 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { 
   FiPlus, FiEdit2, FiSlash, FiChevronLeft, FiChevronRight, 
   FiCheckCircle, FiLock, FiRefreshCw, FiSearch, FiX, FiUserCheck, FiUserX,
-  FiUser, FiMail, FiPhone, FiAlertCircle
+  FiUser, FiMail, FiPhone, FiAlertCircle, FiTrash2
 } from 'react-icons/fi';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
-import { secondaryAuth, db } from './firebase';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updatePassword, sendPasswordResetEmail } from 'firebase/auth';
+import { doc, setDoc, updateDoc, deleteDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { auth, secondaryAuth, db } from './firebase';
 import { getContractorSubscription } from './subscriptionPlans';
 import { logActivity } from './activityLogger';
 import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
+import ConfirmModal from './ConfirmModal';
 
 const UserManagement = () => {
   const [view, setView] = useState('list'); // 'list' | 'add'
@@ -40,11 +41,19 @@ const UserManagement = () => {
   const [editLastName, setEditLastName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editEmail, setEditEmail] = useState('');
+  const [editNewPassword, setEditNewPassword] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
   // Disable account confirmation modal state
   const [disablingUser, setDisablingUser] = useState(null);
   const [disablingLoading, setDisablingLoading] = useState(false);
+
+  // Delete account confirmation modal state
+  const [deletingUser, setDeletingUser] = useState(null);
+  const [deletingLoading, setDeletingLoading] = useState(false);
+
+  // Generic Confirmation / Notice Modal state
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const fetchUsers = async () => {
     try {
@@ -117,13 +126,24 @@ const UserManagement = () => {
     setFormData({ ...formData, password: `GID-2026-${randomNum}` });
   };
 
-  // 1. Create Contractor Account without Subscription Plan (Contractor chooses plan on their own portal)
-  const handleCreateUser = async () => {
+  // 1. Create Contractor Account without Subscription Plan (with Confirmation Modal)
+  const requestCreateUser = () => {
     if (!formData.firstName.trim() || !formData.lastName.trim() || !formData.email.trim() || !formData.phone.trim() || !formData.password) {
       setErrorMsg("Please fill in all required fields (including phone number) and generate a password.");
       return;
     }
-    
+    setErrorMsg('');
+    setConfirmDialog({
+      title: 'Confirm Create Contractor',
+      message: `Create new contractor account for ${formData.firstName.trim()} ${formData.lastName.trim()} (${formData.email.trim()})?`,
+      confirmLabel: 'Create Contractor',
+      variant: 'primary',
+      onConfirm: handleCreateUser,
+    });
+  };
+
+  const handleCreateUser = async () => {
+    setConfirmDialog(null);
     setLoading(true);
     setErrorMsg('');
     try {
@@ -142,6 +162,8 @@ const UserManagement = () => {
         role: 'CONTRACTOR',
         active: true,
         status: 'Active',
+        mustChangePassword: true,
+        initialTempPassword: formData.password,
         createdAt: now,
         subscription: null // Starts with NO subscription plan
       });
@@ -162,7 +184,12 @@ const UserManagement = () => {
         role: 'Contractor'
       });
       setView('list');
-      alert("Contractor account created successfully! The contractor will start with no subscription plan and can choose their package upon sign-in.");
+      setConfirmDialog({
+        title: 'Contractor Account Created',
+        message: 'Contractor account created successfully! The contractor will start with no subscription plan and can choose their package upon sign-in.',
+        variant: 'success',
+        noticeOnly: true,
+      });
     } catch (error) {
       console.error("Error creating contractor:", error);
       setErrorMsg(error.message);
@@ -178,35 +205,125 @@ const UserManagement = () => {
     setEditLastName(userToEdit.lastName || '');
     setEditPhone(userToEdit.phone || '');
     setEditEmail(userToEdit.email || '');
+    setEditNewPassword('');
   };
 
-  // Save updated user profile details in Firestore
+  const handleGenerateEditPassword = () => {
+    const randomNum = Math.floor(1000 + Math.random() * 9000);
+    setEditNewPassword(`GID-2026-${randomNum}`);
+  };
+
+  const handleSendPasswordReset = async () => {
+    if (!editingUser?.email) return;
+    try {
+      await sendPasswordResetEmail(auth, editingUser.email.trim());
+      await logActivity(`Sent password reset email to ${editingUser.email.trim()}`);
+      alert(`Password reset link sent to ${editingUser.email.trim()}.`);
+    } catch (err) {
+      alert('Failed to send password reset email: ' + err.message);
+    }
+  };
+
+  // Save updated user profile details (and optional password change) in Firestore
   const handleSaveUserEdit = async () => {
     if (!editingUser) return;
     if (!editFirstName.trim() || !editLastName.trim()) {
       alert("First name and last name are required.");
       return;
     }
+    if (editNewPassword && editNewPassword.trim().length < 6) {
+      alert("New password must be at least 6 characters.");
+      return;
+    }
 
     setSavingEdit(true);
     try {
-      const userDocRef = doc(db, "users", editingUser.id);
-      await updateDoc(userDocRef, {
+      const updates = {
         firstName: editFirstName.trim(),
         lastName: editLastName.trim(),
         phone: formatPhoneWithCountryCode(editPhone),
         email: editEmail.trim()
-      });
+      };
 
-      await logActivity(`Updated profile details for ${editFirstName.trim()} ${editLastName.trim()} (${editEmail.trim()})`);
+      let passwordNote = '';
+      if (editNewPassword.trim()) {
+        const cleanPass = editNewPassword.trim();
+        updates.mustChangePassword = true;
+        updates.initialTempPassword = cleanPass;
+        // Attempt direct Firebase Auth password change via secondaryAuth if known password exists
+        const prevPass = editingUser.initialTempPassword;
+        if (prevPass && editingUser.email) {
+          try {
+            const cred = await signInWithEmailAndPassword(secondaryAuth, editingUser.email, prevPass);
+            await updatePassword(cred.user, cleanPass);
+            await secondaryAuth.signOut();
+            passwordNote = ' and temporary password updated';
+          } catch (_) {
+            try { await secondaryAuth.signOut(); } catch (_) {}
+            try {
+              await sendPasswordResetEmail(auth, editEmail.trim());
+              passwordNote = ' (password reset email sent to user)';
+            } catch (_) {}
+          }
+        } else if (editEmail.trim()) {
+          try {
+            await sendPasswordResetEmail(auth, editEmail.trim());
+            passwordNote = ' (password reset email sent to user)';
+          } catch (_) {}
+        }
+      }
+
+      const userDocRef = doc(db, "users", editingUser.id);
+      await updateDoc(userDocRef, updates);
+
+      await logActivity(`Updated profile details${passwordNote} for ${editFirstName.trim()} ${editLastName.trim()} (${editEmail.trim()})`);
       setEditingUser(null);
       await fetchUsers();
-      alert("User profile updated successfully!");
+      setConfirmDialog({
+        title: 'Profile Updated',
+        message: `User profile updated successfully${passwordNote}!`,
+        variant: 'success',
+        noticeOnly: true,
+      });
     } catch (err) {
       console.error("Error updating user profile:", err);
-      alert("Failed to update profile: " + err.message);
+      setConfirmDialog({
+        title: 'Update Failed',
+        message: 'Failed to update profile: ' + err.message,
+        variant: 'danger',
+        noticeOnly: true,
+      });
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  // 2b. Permanently Delete Contractor Account
+  const handleConfirmDelete = async () => {
+    if (!deletingUser) return;
+    setDeletingLoading(true);
+    try {
+      const targetEmail = deletingUser.email;
+      await deleteDoc(doc(db, "users", deletingUser.id));
+      await logActivity(`Deleted contractor account for ${deletingUser.firstName || ''} ${deletingUser.lastName || ''} (${targetEmail})`);
+      setDeletingUser(null);
+      await fetchUsers();
+      setConfirmDialog({
+        title: 'Account Deleted',
+        message: `Account for ${targetEmail} has been permanently deleted.`,
+        variant: 'success',
+        noticeOnly: true,
+      });
+    } catch (err) {
+      console.error("Error deleting user:", err);
+      setConfirmDialog({
+        title: 'Delete Failed',
+        message: 'Failed to delete account: ' + err.message,
+        variant: 'danger',
+        noticeOnly: true,
+      });
+    } finally {
+      setDeletingLoading(false);
     }
   };
 
@@ -215,6 +332,7 @@ const UserManagement = () => {
     if (!disablingUser) return;
     setDisablingLoading(true);
     try {
+      const targetEmail = disablingUser.email;
       const userDocRef = doc(db, "users", disablingUser.id);
       await updateDoc(userDocRef, {
         active: false,
@@ -222,37 +340,63 @@ const UserManagement = () => {
         disabledAt: new Date()
       });
 
-      await logActivity(`Disabled account for ${disablingUser.firstName || ''} ${disablingUser.lastName || ''} (${disablingUser.email})`);
+      await logActivity(`Disabled account for ${disablingUser.firstName || ''} ${disablingUser.lastName || ''} (${targetEmail})`);
       setDisablingUser(null);
       await fetchUsers();
-      alert(`Account for ${disablingUser.email} has been disabled. It is preserved in the database and moved to the Disabled Accounts list.`);
+      setConfirmDialog({
+        title: 'Account Disabled',
+        message: `Account for ${targetEmail} has been disabled. It is preserved in the database and moved to the Disabled Accounts list.`,
+        variant: 'success',
+        noticeOnly: true,
+      });
     } catch (err) {
       console.error("Error disabling user:", err);
-      alert("Failed to disable user: " + err.message);
+      setConfirmDialog({
+        title: 'Disable Failed',
+        message: 'Failed to disable user: ' + err.message,
+        variant: 'danger',
+        noticeOnly: true,
+      });
     } finally {
       setDisablingLoading(false);
     }
   };
 
   // 4. Enable / Reactivate User Account
-  const handleEnableUser = async (userToEnable) => {
-    const confirm = window.confirm(`Re-activate access for ${userToEnable.firstName || ''} ${userToEnable.lastName || ''} (${userToEnable.email})?`);
-    if (!confirm) return;
+  const handleEnableUser = (userToEnable) => {
+    setConfirmDialog({
+      title: 'Re-enable Account?',
+      message: `Re-activate access for ${userToEnable.firstName || ''} ${userToEnable.lastName || ''} (${userToEnable.email})?`,
+      confirmLabel: 'Re-enable Account',
+      variant: 'primary',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          const userDocRef = doc(db, "users", userToEnable.id);
+          await updateDoc(userDocRef, {
+            active: true,
+            status: 'Active'
+          });
 
-    try {
-      const userDocRef = doc(db, "users", userToEnable.id);
-      await updateDoc(userDocRef, {
-        active: true,
-        status: 'Active'
-      });
-
-      await logActivity(`Re-enabled account for ${userToEnable.firstName || ''} ${userToEnable.lastName || ''} (${userToEnable.email})`);
-      await fetchUsers();
-      alert(`Account for ${userToEnable.email} has been re-enabled.`);
-    } catch (err) {
-      console.error("Error enabling user:", err);
-      alert("Failed to enable user: " + err.message);
-    }
+          await logActivity(`Re-enabled account for ${userToEnable.firstName || ''} ${userToEnable.lastName || ''} (${userToEnable.email})`);
+          await fetchUsers();
+          setConfirmDialog({
+            title: 'Account Re-enabled',
+            message: `Account for ${userToEnable.email} has been re-enabled.`,
+            variant: 'success',
+            noticeOnly: true,
+          });
+        } catch (err) {
+          console.error("Error enabling user:", err);
+          setConfirmDialog({
+            title: 'Error',
+            message: 'Failed to enable user: ' + err.message,
+            variant: 'danger',
+            noticeOnly: true,
+          });
+        }
+      }
+    });
   };
 
   // View: Add Contractor (Creation Only, No Subscription Provisioning)
@@ -325,19 +469,6 @@ const UserManagement = () => {
                 />
               </div>
 
-              {/* Read-only assigned role */}
-              <div className="form-group-custom">
-                <label className="form-label">ASSIGN ROLE</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  value="Contractor (Site Contractor)" 
-                  readOnly 
-                  disabled 
-                  style={{ backgroundColor: '#f8fafc', color: '#64748b', cursor: 'not-allowed' }}
-                />
-              </div>
-
               {/* Password Generator */}
               <div className="form-group-custom">
                 <label className="form-label">TEMPORARY PASSWORD *</label>
@@ -345,9 +476,9 @@ const UserManagement = () => {
                   <input 
                     type="text" 
                     className="form-input password-field" 
-                    placeholder="Click generate to create..." 
+                    placeholder="Enter or click generate..." 
                     value={formData.password}
-                    readOnly
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   />
                   <button className="icon-btn lock-btn" type="button" onClick={handleGeneratePassword} title="Generate Password">
                     {formData.password ? <FiLock /> : <FiRefreshCw />}
@@ -369,11 +500,22 @@ const UserManagement = () => {
             <button className="btn-secondary" onClick={() => setView('list')} disabled={loading}>
               Cancel
             </button>
-            <button className="btn-primary" onClick={handleCreateUser} disabled={loading}>
+            <button className="btn-primary" onClick={requestCreateUser} disabled={loading}>
               {loading ? 'CREATING ACCOUNT...' : 'CREATE CONTRACTOR ACCOUNT'}
             </button>
           </div>
         </div>
+        <ConfirmModal
+          open={Boolean(confirmDialog)}
+          title={confirmDialog?.title}
+          message={confirmDialog?.message}
+          confirmLabel={confirmDialog?.confirmLabel}
+          variant={confirmDialog?.variant}
+          noticeOnly={confirmDialog?.noticeOnly}
+          loading={loading}
+          onConfirm={confirmDialog?.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+        />
       </div>
     );
   }
@@ -597,11 +739,21 @@ const UserManagement = () => {
                               className="action-btn" 
                               title="Disable Account" 
                               onClick={() => setDisablingUser(user)}
-                              style={{ color: '#dc2626' }}
+                              style={{ color: '#d97706' }}
                             >
                               <FiSlash />
                             </button>
                           )}
+
+                          {/* Delete Account Button */}
+                          <button 
+                            className="action-btn" 
+                            title="Delete Account" 
+                            onClick={() => setDeletingUser(user)}
+                            style={{ color: '#dc2626' }}
+                          >
+                            <FiTrash2 />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -692,6 +844,32 @@ const UserManagement = () => {
                   style={{ width: '100%' }}
                 />
               </div>
+
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700, margin: 0 }}>CHANGE PASSWORD (OPTIONAL)</label>
+                  <button
+                    type="button"
+                    onClick={handleSendPasswordReset}
+                    style={{ background: 'none', border: 'none', color: '#ea580c', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Send Reset Email
+                  </button>
+                </div>
+                <div className="password-input-group">
+                  <input 
+                    type="text" 
+                    className="form-input password-field" 
+                    placeholder="Enter new password or click generate..." 
+                    value={editNewPassword} 
+                    onChange={(e) => setEditNewPassword(e.target.value)}
+                    style={{ width: '100%' }}
+                  />
+                  <button className="icon-btn lock-btn" type="button" onClick={handleGenerateEditPassword} title="Generate New Password">
+                    <FiRefreshCw />
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="modal-actions">
@@ -762,6 +940,58 @@ const UserManagement = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Account Confirmation Modal */}
+      {deletingUser && (
+        <div className="modal-backdrop" onClick={() => !deletingLoading && setDeletingUser(null)}>
+          <div className="modal-content sub-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '440px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.75rem' }}>
+              <div style={{ padding: '0.5rem', backgroundColor: '#fef2f2', color: '#dc2626', borderRadius: '8px' }}>
+                <FiTrash2 style={{ fontSize: '1.25rem' }} />
+              </div>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: '#0f172a' }}>
+                Delete Contractor Account
+              </h3>
+            </div>
+
+            <p style={{ color: '#475569', fontSize: '0.875rem', lineHeight: 1.5, marginBottom: '1.5rem' }}>
+              Are you sure you want to permanently remove the account for{' '}
+              <strong>{deletingUser.firstName} {deletingUser.lastName}</strong> ({deletingUser.email})? This action cannot be undone.
+            </p>
+
+            <div className="modal-actions">
+              <button 
+                type="button" 
+                className="btn-secondary" 
+                onClick={() => setDeletingUser(null)} 
+                disabled={deletingLoading}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                className="btn-primary" 
+                onClick={handleConfirmDelete} 
+                disabled={deletingLoading}
+                style={{ backgroundColor: '#dc2626', borderColor: '#dc2626' }}
+              >
+                {deletingLoading ? 'Deleting...' : 'Delete Account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        variant={confirmDialog?.variant}
+        noticeOnly={confirmDialog?.noticeOnly}
+        onConfirm={confirmDialog?.onConfirm}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </div>
   );
 };

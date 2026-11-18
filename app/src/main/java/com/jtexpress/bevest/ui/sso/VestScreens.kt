@@ -1743,6 +1743,7 @@ fun PairVestScreen(
                             }
                         }
                         if (!state.testing) {
+                            var confirmFinishPairing by remember { mutableStateOf(false) }
                             if (!state.checks.allPass) {
                                 Text(
                                     "Some modules aren't reporting or have no signal yet (e.g., GPS indoors or HR sensor not worn). You can still confirm and finish pairing.",
@@ -1757,11 +1758,23 @@ fun PairVestScreen(
                             )
                             PrimaryButton(
                                 text = "Confirm & Finish Pairing",
-                                onClick = viewModel::confirmWorkerPairing,
+                                onClick = { confirmFinishPairing = true },
                                 enabled = !state.submitting,
                                 loading = state.submitting,
                                 loadingText = "Saving…",
                             )
+                            if (confirmFinishPairing) {
+                                ConfirmationDialog(
+                                    title = "Confirm & Finish Pairing?",
+                                    message = "Assign smart vest ${state.identifiedVestId ?: ""} to worker ${state.selectedWorkerId ?: ""} and complete pairing?",
+                                    confirmLabel = "Confirm Pairing",
+                                    onConfirm = {
+                                        confirmFinishPairing = false
+                                        viewModel::confirmWorkerPairing.invoke()
+                                    },
+                                    onDismiss = { confirmFinishPairing = false },
+                                )
+                            }
                         }
                     }
 

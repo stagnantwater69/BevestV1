@@ -175,6 +175,15 @@ class WorkerDetailViewModel @Inject constructor(
 
     fun clearMessage() { actionMessage.value = null }
 
+    fun deleteWorker(onDeleted: () -> Unit) {
+        viewModelScope.launch {
+            when (val r = workerRepository.deleteWorker(workerId)) {
+                is Outcome.Success -> onDeleted()
+                is Outcome.Failure -> actionMessage.value = r.error.message
+            }
+        }
+    }
+
     private companion object {
         const val HISTORY_SIZE = 40
         const val SAFETY_TIMEOUT_SECONDS = 15

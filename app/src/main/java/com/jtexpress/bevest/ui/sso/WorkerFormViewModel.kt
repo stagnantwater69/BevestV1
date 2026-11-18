@@ -3,6 +3,8 @@ package com.jtexpress.bevest.ui.sso
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import com.jtexpress.bevest.domain.model.ProjectSite
 import com.jtexpress.bevest.domain.model.SafetyStatus
 import com.jtexpress.bevest.domain.model.Worker
@@ -19,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 
 data class WorkerFormState(
@@ -52,6 +55,8 @@ class WorkerFormViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val workerRepository: WorkerRepository,
     private val projectRepository: ProjectRepository,
+    private val auth: FirebaseAuth,
+    private val firestore: FirebaseFirestore,
 ) : ViewModel() {
 
     private val editingId: String? = savedStateHandle.get<String>("workerId")
@@ -68,10 +73,37 @@ class WorkerFormViewModel @Inject constructor(
         defaultSiteId = site
 
         viewModelScope.launch {
-            // Projects the operator can assign a worker to.
-            val projects = contractor?.let {
+            var resolvedContractor = contractor?.takeIf { it.isNotBlank() }
+            if (resolvedContractor == null) {
+                val uid = auth.currentUser?.uid
+                if (uid != null) {
+                    val userSnap = runCatching { firestore.collection("users").document(uid).get().await() }.getOrNull()
+                    resolvedContractor = userSnap?.getString("contractorId")?.takeIf { it.isNotBlank() }
+                    if (defaultSiteId.isNullOrBlank()) {
+                        defaultSiteId = userSnap?.getString("siteId")?.takeIf { it.isNotBlank() }
+                    }
+                }
+            }
+            contractorId = resolvedContractor
+
+            // Projects the operator can assign a worker to (created by their Contractor).
+            val projects = resolvedContractor?.let {
                 (projectRepository.observeProjects(it).first() as? Outcome.Success)?.data
             }.orEmpty()
+
+            if (resolvedContractor != null) {
+                viewModelScope.launch {
+                    projectRepository.observeProjects(resolvedContractor).collect { outcome ->
+                        val liveProjects = (outcome as? Outcome.Success)?.data ?: return@collect
+                        _state.update { cur ->
+                            cur.copy(
+                                projects = liveProjects,
+                                selectedProjectId = cur.selectedProjectId ?: defaultSiteId ?: liveProjects.firstOrNull()?.projectId,
+                            )
+                        }
+                    }
+                }
+            }
 
             if (editingId == null) {
                 _state.update {
@@ -79,7 +111,7 @@ class WorkerFormViewModel @Inject constructor(
                         loaded = true,
                         workerId = generateWorkerId(defaultSiteId),
                         projects = projects,
-                        selectedProjectId = site ?: projects.firstOrNull()?.projectId,
+                        selectedProjectId = defaultSiteId ?: projects.firstOrNull()?.projectId,
                     )
                 }
             } else {
@@ -215,6 +247,7 @@ class WorkerFormViewModel @Inject constructor(
                 photoUrl = s.photoUrl,
                 contractorId = contractorId,
                 siteId = siteId,
+                createdBy = auth.currentUser?.uid,
                 assignedVestId = null,
                 currentStatus = SafetyStatus.OFFLINE,
                 active = true,
@@ -251,6 +284,16 @@ class WorkerFormViewModel @Inject constructor(
         val id = _state.value.workerId
         viewModelScope.launch {
             when (val r = workerRepository.setActive(id, false)) {
+                is Outcome.Success -> _state.update { it.copy(saved = true) }
+                is Outcome.Failure -> _state.update { it.copy(formError = r.error.message) }
+            }
+        }
+    }
+
+    fun deleteWorker() {
+        val id = _state.value.workerId
+        viewModelScope.launch {
+            when (val r = workerRepository.deleteWorker(id)) {
                 is Outcome.Success -> _state.update { it.copy(saved = true) }
                 is Outcome.Failure -> _state.update { it.copy(formError = r.error.message) }
             }
