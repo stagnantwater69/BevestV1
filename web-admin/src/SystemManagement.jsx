@@ -73,6 +73,7 @@ const SystemManagement = ({ user }) => {
     const q = collection(db, 'vests');
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const vestList = [];
+      const currentAdminOrgId = user?.profile?.organizationId || null;
       const currentAdminComp = (user?.companyId || user?.profile?.company || user?.profile?.companyName || '').trim().toLowerCase();
 
       snapshot.forEach((docSnap) => {
@@ -81,8 +82,10 @@ const SystemManagement = ({ user }) => {
         // Only vests that have been paired/scanned and added to the company directory are shown.
         if (!data.inCompanyDirectory) return;
 
-        // RULE 2: If the current admin belongs to a specific company, scope to this company
-        if (currentAdminComp && data.companyId) {
+        // RULE 2: Organization isolation — scope to the current admin's organization
+        if (currentAdminOrgId) {
+          if (data.organizationId !== currentAdminOrgId) return;
+        } else if (currentAdminComp && data.companyId) {
           if (data.companyId.trim().toLowerCase() !== currentAdminComp) return;
         }
 

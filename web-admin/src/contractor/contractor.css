@@ -678,12 +678,13 @@
 /* Quick links */
 .ct-quick-links {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
 
 .ct-quick-link {
+  width: 100%;
   background-color: #ffffff;
   border: 1px solid var(--border-color, #cbd5e1);
   border-radius: 10px;
@@ -694,6 +695,10 @@
   cursor: pointer;
   text-align: left;
   transition: all 0.15s ease;
+}
+
+.ct-quick-link .ct-row-chevron {
+  margin-left: auto;
 }
 
 .ct-quick-link:hover {

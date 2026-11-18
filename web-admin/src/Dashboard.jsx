@@ -4,7 +4,7 @@ import {
 } from 'react-icons/fi';
 import logo from './assets/bevest_logo.png';
 import { auth, db } from './firebase';
-import { collection, getDocs, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, doc, getDocs, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import UserManagement from './UserManagement';
 import SystemManagement from './SystemManagement';
 import AdminProfile from './AdminProfile';
@@ -18,7 +18,32 @@ const Dashboard = ({ user, onLogout }) => {
   const [officerCount, setOfficerCount] = useState(0);
   const [workerCount, setWorkerCount] = useState(0);
   const [vestCount, setVestCount] = useState(0);
-  const [vestStats, setVestStats] = useState({ active: 0, offline: 0, other: 0 });
+  const [liveProfile, setLiveProfile] = useState(user?.profile || null);
+
+  useEffect(() => {
+    setLiveProfile(user?.profile || null);
+    if (!user?.uid) return;
+    const unsub = onSnapshot(
+      doc(db, 'users', user.uid),
+      (snap) => {
+        if (snap.exists()) {
+          setLiveProfile(snap.data());
+        }
+      },
+      (err) => {
+        console.warn('Failed to listen to admin profile:', err);
+      }
+    );
+    return () => unsub();
+  }, [user?.uid, user?.profile]);
+
+  const adminName = [liveProfile?.firstName, liveProfile?.middleName, liveProfile?.lastName]
+    .map((s) => (s || '').trim())
+    .filter(Boolean)
+    .join(' ') || user?.email || 'Administrator';
+
+  const adminInitials = ((liveProfile?.firstName?.[0] || '') + (liveProfile?.lastName?.[0] || '')).toUpperCase() ||
+    (adminName.slice(0, 2).toUpperCase() || 'AD');
 
   // Real-time Activity Logs from Firestore database
   const [activityLogs, setActivityLogs] = useState([]);
@@ -101,11 +126,15 @@ const Dashboard = ({ user, onLogout }) => {
   useEffect(() => {
     const fetchCounts = async () => {
       try {
+        const myOrgId = user?.profile?.organizationId || null;
         const usersSnapshot = await getDocs(collection(db, 'users'));
         let contractors = 0;
         let officers = 0;
-        usersSnapshot.forEach((doc) => {
-          const role = doc.data().role;
+        usersSnapshot.forEach((docSnap) => {
+          const u = docSnap.data();
+          if (myOrgId && u.organizationId && u.organizationId !== myOrgId) return;
+          if (myOrgId && !u.organizationId) return;
+          const role = u.role;
           if (role && role.toLowerCase() === 'contractor') contractors++;
           if (role && role.toUpperCase() === 'SSO') officers++;
         });
@@ -113,20 +142,24 @@ const Dashboard = ({ user, onLogout }) => {
         setOfficerCount(officers);
 
         const workersSnapshot = await getDocs(collection(db, 'workers'));
-        setWorkerCount(workersSnapshot.size);
+        let scopedWorkers = 0;
+        workersSnapshot.forEach((d) => {
+          const w = d.data();
+          if (myOrgId && w.organizationId !== myOrgId) return;
+          scopedWorkers++;
+        });
+        setWorkerCount(scopedWorkers);
 
         const vestsSnapshot = await getDocs(collection(db, 'vests'));
-        let activeVests = 0;
-        let offlineVests = 0;
-        let otherVests = 0;
-        vestsSnapshot.forEach((doc) => {
-          const data = doc.data();
-          if (data.online === 'true' || data.online === true) activeVests++;
-          else if (data.online === 'false' || data.online === false) offlineVests++;
-          else otherVests++;
+        let scopedVests = 0;
+        vestsSnapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (!data.inCompanyDirectory) return;
+          if (myOrgId && data.organizationId && data.organizationId !== myOrgId) return;
+          if (myOrgId && !data.organizationId) return;
+          scopedVests++;
         });
-        setVestCount(vestsSnapshot.size);
-        setVestStats({ active: activeVests, offline: offlineVests, other: otherVests });
+        setVestCount(scopedVests);
       } catch (err) {
         console.error("Error fetching counts:", err);
       }
@@ -134,12 +167,7 @@ const Dashboard = ({ user, onLogout }) => {
     if (activeTab === 'Overview') {
       fetchCounts();
     }
-  }, [activeTab]);
-
-  const totalVests = vestStats.active + vestStats.offline + vestStats.other;
-  const activePct = totalVests ? Math.round((vestStats.active / totalVests) * 100) : 0;
-  const offlinePct = totalVests ? Math.round((vestStats.offline / totalVests) * 100) : 0;
-  const otherPct = totalVests ? Math.round((vestStats.other / totalVests) * 100) : 0;
+  }, [activeTab, user]);
 
   const handleSignOut = () => {
     auth.signOut();
@@ -171,14 +199,32 @@ const Dashboard = ({ user, onLogout }) => {
         </div>
         
         <div 
-          className="sidebar-user" 
+          className={`sidebar-user ${activeTab === 'Profile' ? 'active' : ''}`}
           onClick={() => { setActiveTab('Profile'); setIsMobileMenuOpen(false); }}
-          style={{ cursor: 'pointer' }}
+          style={{
+            cursor: 'pointer',
+            ...(activeTab === 'Profile' ? { backgroundColor: '#fff7ed', borderRadius: '10px' } : {})
+          }}
         >
           <div className="avatar" style={{ backgroundColor: '#fce7db', color: '#ea580c', fontWeight: 700, fontSize: '0.875rem' }}>
-            WA
+            {adminInitials}
           </div>
-          <span className="username">Web Admin</span>
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <span
+              className="username"
+              style={{
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                ...(activeTab === 'Profile' ? { color: '#ea580c', fontWeight: 700 } : {})
+              }}
+            >
+              {adminName}
+            </span>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+              Administrator
+            </span>
+          </div>
         </div>
 
         <nav className="sidebar-nav">
@@ -246,58 +292,8 @@ const Dashboard = ({ user, onLogout }) => {
               </div>
             </div>
 
-            {/* Dashboard Columns */}
-            <div className="dashboard-columns">
-              
-              {/* Fleet Health Column */}
-              <div className="fleet-health-column">
-                <div className="section-header">
-                  <h2>Fleet health</h2>
-                  <p className="section-subtitle">How the vest hardware is doing</p>
-                  <hr className="section-divider" />
-                </div>
-                
-                <div className="fleet-card">
-                  {/* Progress Bar */}
-                  <div className="fleet-progress-bar">
-                    <div className="progress-segment active" style={{ width: `${activePct}%` }}></div>
-                    <div className="progress-segment offline" style={{ width: `${offlinePct}%` }}></div>
-                    <div className="progress-segment other" style={{ width: `${otherPct}%` }}></div>
-                  </div>
-                  
-                  {/* Legend/Stats */}
-                  <div className="fleet-stats">
-                    <div className="fleet-stat-row">
-                      <div className="stat-label">
-                        <span className="dot dot-active"></span> Active
-                      </div>
-                      <div className="stat-values">
-                        <span className="count">{vestStats.active}</span>
-                        <span className="pct">{activePct}%</span>
-                      </div>
-                    </div>
-                    <div className="fleet-stat-row">
-                      <div className="stat-label">
-                        <span className="dot dot-offline"></span> Offline
-                      </div>
-                      <div className="stat-values">
-                        <span className="count">{vestStats.offline}</span>
-                        <span className="pct">{offlinePct}%</span>
-                      </div>
-                    </div>
-                    <div className="fleet-stat-row">
-                      <div className="stat-label">
-                        <span className="dot dot-other"></span> Other
-                      </div>
-                      <div className="stat-values">
-                        <span className="count">{vestStats.other}</span>
-                        <span className="pct">{otherPct}%</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
+            {/* Recent Activity Section */}
+            <div style={{ marginTop: '2rem' }}>
               {/* Recent Activity Column */}
               <div className="recent-activity-column">
                 <div className="section-header">
@@ -348,7 +344,7 @@ const Dashboard = ({ user, onLogout }) => {
         )}
 
         {activeTab === 'User Management' && (
-          <UserManagement />
+          <UserManagement user={user} />
         )}
 
         {activeTab === 'System Management' && (

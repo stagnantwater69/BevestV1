@@ -12,8 +12,10 @@ import { logActivity } from './activityLogger';
 import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
 import ConfirmModal from './ConfirmModal';
 
-const UserManagement = () => {
-  const [view, setView] = useState('list'); // 'list' | 'add'
+const UserManagement = ({ user }) => {
+  const adminOrgId = user?.profile?.organizationId || null;
+  const adminOrgName = user?.profile?.organizationName || user?.profile?.company || user?.profile?.companyName || '';
+  const [showAddModal, setShowAddModal] = useState(false);
   const [accountStatusTab, setAccountStatusTab] = useState('active'); // 'active' | 'disabled'
 
   // Add Contractor form state - NO subscription fields (admin only provisions account credentials)
@@ -39,6 +41,7 @@ const UserManagement = () => {
   // Edit user profile details modal state
   const [editingUser, setEditingUser] = useState(null);
   const [editFirstName, setEditFirstName] = useState('');
+  const [editMiddleName, setEditMiddleName] = useState('');
   const [editLastName, setEditLastName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editEmail, setEditEmail] = useState('');
@@ -59,10 +62,16 @@ const UserManagement = () => {
   const fetchUsers = async () => {
     try {
       const querySnapshot = await getDocs(collection(db, "users"));
+      const currentUid = auth.currentUser?.uid;
       const usersData = [];
       querySnapshot.forEach((docSnap) => {
+        if (currentUid && docSnap.id === currentUid) return;
         const uData = docSnap.data();
-        if ((uData.role || '').toUpperCase() === 'DEVELOPER') return;
+        const roleUpper = (uData.role || '').trim().toUpperCase();
+        // Admin User Management only displays Contractor and Site Safety Officer (SSO) accounts
+        if (roleUpper !== 'CONTRACTOR' && roleUpper !== 'SSO') return;
+        // Organization isolation: if Admin belongs to an organization, only show users in the same organization
+        if (adminOrgId && uData.organizationId !== adminOrgId) return;
         usersData.push({ id: docSnap.id, ...uData });
       });
       setUsers(usersData);
@@ -88,10 +97,8 @@ const UserManagement = () => {
   };
 
   useEffect(() => {
-    if (view === 'list') {
-      fetchUsers();
-    }
-  }, [view]);
+    fetchUsers();
+  }, [adminOrgId]);
 
   // Compute Active and Disabled counts
   const activeUsersCount = users.filter(u => u.active !== false && u.status !== 'Disabled').length;
@@ -154,7 +161,7 @@ const UserManagement = () => {
       
       const now = new Date();
 
-      // Contractors start with no subscription plan
+      // Contractors start with no subscription plan and inherit the Admin's Organization
       await setDoc(doc(db, "users", newUser.uid), {
         firstName: formData.firstName.trim(),
         middleName: (formData.middleName || '').trim(),
@@ -162,6 +169,11 @@ const UserManagement = () => {
         phone: formatPhoneWithCountryCode(formData.phone),
         email: formData.email.trim(),
         role: 'CONTRACTOR',
+        organizationId: adminOrgId,
+        organizationName: adminOrgName || null,
+        company: adminOrgName || null,
+        companyName: adminOrgName || null,
+        createdByAdminId: user?.uid || auth.currentUser?.uid || null,
         active: true,
         status: 'Active',
         mustChangePassword: true,
@@ -176,7 +188,7 @@ const UserManagement = () => {
       // Save activity log in database
       await logActivity(`Contractor account created for ${formData.email.trim()}`);
       
-      // Reset form and go back to list
+      // Reset form, close modal, and refresh users list
       setFormData({
         firstName: '',
         middleName: '',
@@ -186,7 +198,8 @@ const UserManagement = () => {
         password: '',
         role: 'Contractor'
       });
-      setView('list');
+      setShowAddModal(false);
+      await fetchUsers();
       setConfirmDialog({
         title: 'Contractor Account Created',
         message: 'Contractor account created successfully! The contractor will start with no subscription plan and can choose their package upon sign-in.',
@@ -205,6 +218,7 @@ const UserManagement = () => {
   const handleOpenEditUser = (userToEdit) => {
     setEditingUser(userToEdit);
     setEditFirstName(userToEdit.firstName || '');
+    setEditMiddleName(userToEdit.middleName || '');
     setEditLastName(userToEdit.lastName || '');
     setEditPhone(userToEdit.phone || '');
     setEditEmail(userToEdit.email || '');
@@ -243,6 +257,7 @@ const UserManagement = () => {
     try {
       const updates = {
         firstName: editFirstName.trim(),
+        middleName: editMiddleName.trim(),
         lastName: editLastName.trim(),
         phone: formatPhoneWithCountryCode(editPhone),
         email: editEmail.trim()
@@ -402,138 +417,6 @@ const UserManagement = () => {
     });
   };
 
-  // View: Add Contractor (Creation Only, No Subscription Provisioning)
-  if (view === 'add') {
-    return (
-      <div className="dashboard-content">
-        <div className="breadcrumb">
-          <span className="bc-link" onClick={() => setView('list')}>User Management</span> 
-          <span className="bc-separator">&gt;</span> 
-          <span className="bc-current">Add Contractor</span>
-        </div>
-        
-        <div className="page-header" style={{ marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: '0.25rem' }}>Onboard New Contractor</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-            Create the contractor user account. The contractor will start with no subscription plan and can select their tier upon signing in.
-          </p>
-        </div>
-
-        <div className="add-user-card">
-          <div className="form-section-container" style={{ display: 'flex', flexWrap: 'wrap', gap: '2rem' }}>
-            <div className="form-section-info" style={{ flex: '1 1 250px' }}>
-              <h3>Contractor Identity</h3>
-              <p>Core contact details and initial authentication credentials for the contractor.</p>
-            </div>
-            
-            <div className="form-grid um-form-grid" style={{ flex: '2 1 400px' }}>
-              <div className="form-group-custom">
-                <label className="form-label">FIRST NAME *</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="e.g. Marcus" 
-                  value={formData.firstName}
-                  onChange={(e) => setFormData({...formData, firstName: e.target.value})}
-                  required
-                />
-              </div>
-
-              <div className="form-group-custom">
-                <label className="form-label">PHONE NUMBER *</label>
-                <PhoneInput 
-                  value={formData.phone}
-                  onChange={(phone) => setFormData({ ...formData, phone })}
-                  required
-                />
-              </div>
-
-              <div className="form-group-custom">
-                <label className="form-label">MIDDLE NAME (OPTIONAL)</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="Optional" 
-                  value={formData.middleName}
-                  onChange={(e) => setFormData({...formData, middleName: e.target.value})}
-                />
-              </div>
-
-              <div className="form-group-custom">
-                <label className="form-label">LAST NAME *</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="e.g. Thorne" 
-                  value={formData.lastName}
-                  onChange={(e) => setFormData({...formData, lastName: e.target.value})}
-                  required
-                />
-              </div>
-
-              <div className="form-group-custom">
-                <label className="form-label">EMAIL ADDRESS *</label>
-                <input 
-                  type="email" 
-                  className="form-input" 
-                  placeholder="contractor@buildcorp.com" 
-                  value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
-                  required
-                />
-              </div>
-
-              {/* Password Generator */}
-              <div className="form-group-custom">
-                <label className="form-label">TEMPORARY PASSWORD *</label>
-                <div className="password-input-group">
-                  <input 
-                    type="text" 
-                    className="form-input password-field" 
-                    placeholder="Enter or click generate..." 
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  />
-                  <button className="icon-btn lock-btn" type="button" onClick={handleGeneratePassword} title="Generate Password">
-                    {formData.password ? <FiLock /> : <FiRefreshCw />}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <hr className="form-divider" />
-          
-          {errorMsg && (
-            <div className="error-message" style={{ marginBottom: '1rem', textAlign: 'left' }}>
-              {errorMsg}
-            </div>
-          )}
-
-          <div className="form-actions">
-            <button className="btn-secondary" onClick={() => setView('list')} disabled={loading}>
-              Cancel
-            </button>
-            <button className="btn-primary" onClick={requestCreateUser} disabled={loading}>
-              {loading ? 'CREATING ACCOUNT...' : 'CREATE CONTRACTOR ACCOUNT'}
-            </button>
-          </div>
-        </div>
-        <ConfirmModal
-          open={Boolean(confirmDialog)}
-          title={confirmDialog?.title}
-          message={confirmDialog?.message}
-          confirmLabel={confirmDialog?.confirmLabel}
-          variant={confirmDialog?.variant}
-          noticeOnly={confirmDialog?.noticeOnly}
-          loading={loading}
-          onConfirm={confirmDialog?.onConfirm}
-          onCancel={() => setConfirmDialog(null)}
-        />
-      </div>
-    );
-  }
-
   // View: User Management List
   return (
     <div className="dashboard-content">
@@ -542,7 +425,13 @@ const UserManagement = () => {
           <h1>User Management</h1>
           <p>Manage system credentials, edit personnel details, and oversee active or disabled accounts.</p>
         </div>
-        <button className="btn-primary" onClick={() => setView('add')}>
+        <button
+          className="btn-primary"
+          onClick={() => {
+            setErrorMsg('');
+            setShowAddModal(true);
+          }}
+        >
           <FiPlus style={{ fontSize: '1.2rem' }} /> Add Contractor
         </button>
       </div>
@@ -626,7 +515,6 @@ const UserManagement = () => {
               <option value="">All Roles</option>
               <option value="Contractor">Contractor</option>
               <option value="SSO">Site Safety Officer</option>
-              <option value="Admin">Admin</option>
             </select>
           </div>
         </div>
@@ -830,6 +718,18 @@ const UserManagement = () => {
               </div>
 
               <div>
+                <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>MIDDLE NAME (OPTIONAL)</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  placeholder="Optional"
+                  value={editMiddleName} 
+                  onChange={(e) => setEditMiddleName(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
                 <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>LAST NAME *</label>
                 <input 
                   type="text" 
@@ -996,6 +896,138 @@ const UserManagement = () => {
         </div>
       )}
 
+      {/* Add Contractor Modal Popup */}
+      {showAddModal && (
+        <div className="modal-backdrop" onClick={() => !loading && setShowAddModal(false)}>
+          <div
+            className="modal-content sub-modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '480px', width: '95%', maxHeight: '90vh', overflowY: 'auto' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+                <div style={{ padding: '0.45rem', backgroundColor: '#fff7ed', color: '#ea580c', borderRadius: '8px' }}>
+                  <FiUser />
+                </div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+                  Onboard New Contractor
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !loading && setShowAddModal(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.25rem', color: '#64748b' }}
+              >
+                <FiX />
+              </button>
+            </div>
+
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.25rem', lineHeight: 1.45 }}>
+              Create the contractor user account. The contractor will start with no subscription plan and can select their tier upon signing in.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginBottom: '1rem' }}>
+              <div className="form-group-custom">
+                <label className="form-label">FIRST NAME *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Marcus"
+                  value={formData.firstName}
+                  onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="form-group-custom">
+                <label className="form-label">MIDDLE NAME (OPTIONAL)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Optional"
+                  value={formData.middleName}
+                  onChange={(e) => setFormData({ ...formData, middleName: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group-custom">
+                <label className="form-label">LAST NAME *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Thorne"
+                  value={formData.lastName}
+                  onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="form-group-custom">
+                <label className="form-label">PHONE NUMBER *</label>
+                <PhoneInput
+                  value={formData.phone}
+                  onChange={(phone) => setFormData({ ...formData, phone })}
+                  required
+                />
+              </div>
+
+              <div className="form-group-custom">
+                <label className="form-label">EMAIL ADDRESS *</label>
+                <input
+                  type="email"
+                  className="form-input"
+                  placeholder="contractor@buildcorp.com"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="form-group-custom">
+                <label className="form-label">TEMPORARY PASSWORD *</label>
+                <div className="password-input-group">
+                  <input
+                    type="text"
+                    className="form-input password-field"
+                    placeholder="Enter or click generate..."
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  />
+                  <button className="icon-btn lock-btn" type="button" onClick={handleGeneratePassword} title="Generate Password">
+                    {formData.password ? <FiLock /> : <FiRefreshCw />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {errorMsg && (
+              <div className="error-message" style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                {errorMsg}
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowAddModal(false)}
+                disabled={loading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={requestCreateUser}
+                disabled={loading}
+              >
+                {loading ? 'Creating Account...' : 'Create Contractor Account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ConfirmModal
         open={Boolean(confirmDialog)}
         title={confirmDialog?.title}
@@ -1003,6 +1035,7 @@ const UserManagement = () => {
         confirmLabel={confirmDialog?.confirmLabel}
         variant={confirmDialog?.variant}
         noticeOnly={confirmDialog?.noticeOnly}
+        loading={loading}
         onConfirm={confirmDialog?.onConfirm}
         onCancel={() => setConfirmDialog(null)}
       />

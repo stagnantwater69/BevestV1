@@ -62,6 +62,7 @@ class WorkerFormViewModel @Inject constructor(
 
     private val editingId: String? = savedStateHandle.get<String>("workerId")
     private var contractorId: String? = null
+    private var organizationId: String? = null
     private var defaultSiteId: String? = null
     private var pendingPhoto: ByteArray? = null
 
@@ -75,15 +76,16 @@ class WorkerFormViewModel @Inject constructor(
 
         viewModelScope.launch {
             var resolvedContractor = contractor?.takeIf { it.isNotBlank() }
-            if (resolvedContractor == null) {
-                val uid = auth.currentUser?.uid
-                if (uid != null) {
-                    val userSnap = runCatching { firestore.collection("users").document(uid).get().await() }.getOrNull()
+            val uid = auth.currentUser?.uid
+            if (uid != null) {
+                val userSnap = runCatching { firestore.collection("users").document(uid).get().await() }.getOrNull()
+                if (resolvedContractor == null) {
                     resolvedContractor = userSnap?.getString("contractorId")?.takeIf { it.isNotBlank() }
-                    if (defaultSiteId.isNullOrBlank()) {
-                        defaultSiteId = userSnap?.getString("siteId")?.takeIf { it.isNotBlank() }
-                    }
                 }
+                if (defaultSiteId.isNullOrBlank()) {
+                    defaultSiteId = userSnap?.getString("siteId")?.takeIf { it.isNotBlank() }
+                }
+                organizationId = userSnap?.getString("organizationId")?.takeIf { it.isNotBlank() }
             }
             contractorId = resolvedContractor
 
@@ -222,6 +224,7 @@ class WorkerFormViewModel @Inject constructor(
             jobPosition = s.jobPosition.trim().takeIf { it.isNotBlank() },
             photoUrl = s.photoUrl,
             contractorId = contractorId,
+            organizationId = organizationId,
             siteId = siteId,
             active = s.active,
         )
@@ -251,6 +254,7 @@ class WorkerFormViewModel @Inject constructor(
                 jobPosition = s.jobPosition.trim().takeIf { it.isNotBlank() },
                 photoUrl = s.photoUrl,
                 contractorId = contractorId,
+                organizationId = organizationId,
                 siteId = siteId,
                 createdBy = auth.currentUser?.uid,
                 assignedVestId = null,

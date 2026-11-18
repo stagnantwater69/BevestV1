@@ -7,10 +7,12 @@ import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 
 import { auth, db } from '../firebase';
 import { initialsOf } from './contractorData';
 import PhoneInput, { formatPhoneWithCountryCode } from '../PhoneInput';
+import ConfirmModal from '../ConfirmModal';
 
 const ContractorProfile = ({ user, profile, onProfileChange }) => {
   const [showEdit, setShowEdit] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [passwordSuccessOpen, setPasswordSuccessOpen] = useState(false);
 
   const [editFirstName, setEditFirstName] = useState(profile.firstName || '');
   const [editLastName, setEditLastName] = useState(profile.lastName || '');
@@ -95,8 +97,11 @@ const ContractorProfile = ({ user, profile, onProfileChange }) => {
       await reauthenticateWithCredential(currentUser, credential);
       await updatePassword(currentUser, newPassword);
 
-      alert('Password updated successfully!');
       setShowPassword(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordSuccessOpen(true);
     } catch (err) {
       console.error('Error updating password:', err);
       if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
@@ -292,6 +297,15 @@ const ContractorProfile = ({ user, profile, onProfileChange }) => {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        open={passwordSuccessOpen}
+        title="Password Updated Successfully!"
+        message="Your password has been updated successfully!"
+        variant="success"
+        noticeOnly
+        onCancel={() => setPasswordSuccessOpen(false)}
+      />
     </div>
   );
 };

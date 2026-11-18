@@ -7,6 +7,7 @@ import Login from './Login';
 import Dashboard from './Dashboard';
 import ContractorDashboard from './contractor/ContractorDashboard';
 import DeveloperDashboard from './DeveloperDashboard';
+import ConfirmModal from './ConfirmModal';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -15,6 +16,7 @@ function App() {
   const [passError, setPassError] = useState('');
   const [passSaving, setPassSaving] = useState(false);
   const [dismissedPrompt, setDismissedPrompt] = useState(false);
+  const [passUpdatedModal, setPassUpdatedModal] = useState(false);
 
   const showPasswordPrompt = Boolean(user && user.profile?.mustChangePassword && !dismissedPrompt);
 
@@ -40,9 +42,10 @@ function App() {
         passwordChangedAt: new Date(),
       });
       setUser((prev) => prev ? { ...prev, profile: { ...prev.profile, mustChangePassword: false } } : prev);
+      setDismissedPrompt(true);
       setNewPass('');
       setConfirmPass('');
-      alert('Your password has been updated successfully!');
+      setPassUpdatedModal(true);
     } catch (err) {
       setPassError(err.message || 'Failed to update password.');
     } finally {
@@ -128,6 +131,14 @@ function App() {
             </div>
           </div>
         )}
+        <ConfirmModal
+          open={passUpdatedModal}
+          title="Password Updated Successfully!"
+          message="Your password has been updated successfully! You can now continue using your BeVest account."
+          variant="success"
+          noticeOnly
+          onCancel={() => setPassUpdatedModal(false)}
+        />
       </>
     );
   }

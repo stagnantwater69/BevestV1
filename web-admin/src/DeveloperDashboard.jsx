@@ -233,6 +233,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [adminCreating, setAdminCreating] = useState(false);
 
   // Admin Form state
+  const [adminOrgId, setAdminOrgId] = useState('');
   const [adminCompany, setAdminCompany] = useState('');
   const [adminFirstName, setAdminFirstName] = useState('');
   const [adminMiddleName, setAdminMiddleName] = useState('');
@@ -240,6 +241,20 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPhone, setAdminPhone] = useState('');
   const [adminPassword, setAdminPassword] = useState(`ADM-2026-${Math.floor(1000 + Math.random() * 9000)}`);
+
+  // Organizations Collection state
+  const [organizations, setOrganizations] = useState([]);
+  const [orgsLoading, setOrgsLoading] = useState(true);
+  const [orgSearch, setOrgSearch] = useState('');
+  const [showCreateOrgModal, setShowCreateOrgModal] = useState(false);
+  const [orgSaving, setOrgSaving] = useState(false);
+  const [orgForm, setOrgForm] = useState({
+    name: '',
+    address: '',
+    phone: '',
+    email: '',
+    pointOfContact: ''
+  });
 
   // Subscriptions & Contractors state
   const [contractors, setContractors] = useState([]);
@@ -355,6 +370,23 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       setCatalogLoading(false);
     });
 
+    return () => unsubscribe();
+  }, []);
+
+  // 2b. Subscribe to Organizations collection
+  useEffect(() => {
+    setOrgsLoading(true);
+    const orgsRef = collection(db, 'organizations');
+    const unsubscribe = onSnapshot(orgsRef, (snap) => {
+      const list = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      setOrganizations(list);
+      setOrgsLoading(false);
+    }, (err) => {
+      console.warn('Error fetching organizations:', err.message);
+      setOrgsLoading(false);
+    });
     return () => unsubscribe();
   }, []);
 
@@ -1193,11 +1225,85 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     printWin.document.close();
   };
 
+  // DEVELOPER FUNCTION: CREATE & DELETE ORGANIZATION
+  const handleCreateOrganization = (e) => {
+    e.preventDefault();
+    if (!orgForm.name.trim() || !orgForm.address.trim() || !orgForm.phone.trim() || !orgForm.email.trim() || !orgForm.pointOfContact.trim()) {
+      showToast('error', 'Please fill in all required Organization fields.');
+      return;
+    }
+
+    setConfirmDialog({
+      title: 'Confirm Create Organization',
+      message: `Create organization "${orgForm.name.trim()}" in Firestore?\nThis organization will isolate its Admins, Contractors, SSOs, and Workers from other organizations.`,
+      confirmLabel: 'Create Organization',
+      variant: 'primary',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setOrgSaving(true);
+        try {
+          const slug = orgForm.name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 14) || 'ORG';
+          const autoRef = doc(collection(db, 'organizations'));
+          const orgId = `ORG-${slug}-${autoRef.id.slice(0, 5).toUpperCase()}`;
+          const orgDoc = {
+            organizationId: orgId,
+            name: orgForm.name.trim(),
+            address: orgForm.address.trim(),
+            phone: formatPhoneWithCountryCode(orgForm.phone),
+            email: orgForm.email.trim(),
+            pointOfContact: orgForm.pointOfContact.trim(),
+            active: true,
+            createdAt: new Date(),
+            createdByDeveloper: devEmail
+          };
+          await setDoc(doc(db, 'organizations', orgId), orgDoc);
+          await logActivity(`Created organization ${orgDoc.name} (${orgId})`, devEmail);
+          setOrgForm({ name: '', address: '', phone: '', email: '', pointOfContact: '' });
+          setAdminOrgId(orgId);
+          setAdminCompany(orgDoc.name);
+          setShowCreateOrgModal(false);
+          setConfirmDialog({
+            title: 'Organization Created',
+            message: `Organization "${orgDoc.name}" has been created and saved in Firestore.`,
+            variant: 'success',
+            noticeOnly: true,
+          });
+        } catch (err) {
+          console.error('Error creating organization:', err);
+          showToast('error', 'Failed to create organization: ' + err.message);
+        } finally {
+          setOrgSaving(false);
+        }
+      },
+    });
+  };
+
+  const handleDeleteOrganization = (org) => {
+    setConfirmDialog({
+      title: `Delete Organization "${org.name}"?`,
+      message: `Are you sure you want to delete organization "${org.name}" (${org.id})? Existing user links will remain untouched unless reassigned.`,
+      confirmLabel: 'Delete Organization',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await deleteDoc(doc(db, 'organizations', org.id));
+          await logActivity(`Deleted organization ${org.name} (${org.id})`, devEmail);
+          showToast('success', `✓ Organization "${org.name}" deleted.`);
+        } catch (err) {
+          showToast('error', 'Failed to delete organization: ' + err.message);
+        }
+      },
+    });
+  };
+
   // DEVELOPER FUNCTION: CREATE ACCOUNT FOR ADMIN
   const handleCreateAdmin = async (e) => {
     e.preventDefault();
-    if (!adminCompany.trim() || !adminFirstName.trim() || !adminLastName.trim() || !adminEmail.trim() || !adminPhone.trim() || !adminPassword) {
-      showToast('error', 'Please fill in all required fields including Company Name and Phone.');
+    const selectedOrg = organizations.find(o => o.id === adminOrgId) || null;
+    const resolvedCompany = selectedOrg ? selectedOrg.name : adminCompany.trim();
+    if ((!resolvedCompany && !adminOrgId) || !adminFirstName.trim() || !adminLastName.trim() || !adminEmail.trim() || !adminPhone.trim() || !adminPassword) {
+      showToast('error', 'Please select an Organization and fill in all required Admin fields.');
       return;
     }
 
@@ -1222,8 +1328,10 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         firstName: adminFirstName.trim(),
         middleName: adminMiddleName.trim(),
         lastName: adminLastName.trim(),
-        company: adminCompany.trim(),
-        companyName: adminCompany.trim(),
+        organizationId: selectedOrg ? selectedOrg.id : null,
+        organizationName: resolvedCompany,
+        company: resolvedCompany,
+        companyName: resolvedCompany,
         phone: formatPhoneWithCountryCode(adminPhone),
         email: adminEmail.trim(),
         role: 'ADMIN',
@@ -1246,19 +1354,22 @@ const DeveloperDashboard = ({ user, onLogout }) => {
           firstName: adminFirstName.trim(),
           middleName: adminMiddleName.trim(),
           lastName: adminLastName.trim(),
-          company: adminCompany.trim(),
-          companyName: adminCompany.trim()
+          organizationId: selectedOrg ? selectedOrg.id : null,
+          organizationName: resolvedCompany,
+          company: resolvedCompany,
+          companyName: resolvedCompany
         };
         localStorage.setItem('bevest_user_directory', JSON.stringify(directory));
       } catch (_) {}
 
       // Log activity
-      await logActivity(`Provisioned Admin account for ${adminEmail.trim()} (${adminCompany.trim()})`, devEmail);
+      await logActivity(`Provisioned Admin account for ${adminEmail.trim()} (${resolvedCompany})`, devEmail);
 
-      showToast('success', `✓ Admin account for ${adminCompany.trim()} (${adminEmail.trim()}) registered in users collection!`);
+      showToast('success', `✓ Admin account for ${resolvedCompany} (${adminEmail.trim()}) registered in users collection!`);
       setShowAddAdminModal(false);
       
       // Reset form fields
+      setAdminOrgId('');
       setAdminCompany('');
       setAdminFirstName('');
       setAdminMiddleName('');
@@ -1277,23 +1388,30 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
   };
 
-  // Toggle Admin Active / Disabled status
-  const handleToggleAdminStatus = async (adminAccount) => {
-    const currentActive = adminAccount.active !== false && adminAccount.status !== 'Disabled';
-    const newActive = !currentActive;
-    const newStatus = newActive ? 'Active' : 'Disabled';
-
-    try {
-      await updateDoc(doc(db, 'users', adminAccount.id), {
-        active: newActive,
-        status: newStatus
-      });
-      await logActivity(`Status updated for Admin account: ${adminAccount.email}`, devEmail);
-      showToast('success', `✓ Admin account for ${adminAccount.email} is now ${newStatus}.`);
-    } catch (err) {
-      console.error('Error toggling admin status:', err);
-      showToast('error', 'Failed to update admin: ' + err.message);
-    }
+  // Delete Admin account with confirmation modal
+  const handleDeleteAdmin = (adminAccount) => {
+    setConfirmDialog({
+      title: 'Delete Admin Account?',
+      message: `Are you sure you want to permanently delete the Admin account for ${adminAccount.firstName || ''} ${adminAccount.lastName || ''} (${adminAccount.email})? This action cannot be undone.`,
+      confirmLabel: 'Delete Account',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await deleteDoc(doc(db, 'users', adminAccount.id));
+          await logActivity(`Deleted Admin account: ${adminAccount.email}`, devEmail);
+          setConfirmDialog({
+            title: 'Admin Account Deleted',
+            message: `Admin account for ${adminAccount.email} has been permanently deleted.`,
+            variant: 'success',
+            noticeOnly: true,
+          });
+        } catch (err) {
+          console.error('Error deleting admin account:', err);
+          showToast('error', 'Failed to delete admin: ' + err.message);
+        }
+      },
+    });
   };
 
 
@@ -1502,6 +1620,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             <FiCpu /> Vest Hardware & QR
           </button>
           <button 
+            className={`nav-item ${activeTab === 'organizations' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('organizations'); setIsMobileMenuOpen(false); }}
+          >
+            <FiLayers /> Organizations
+          </button>
+          <button 
             className={`nav-item ${activeTab === 'admins' ? 'active' : ''}`}
             onClick={() => { setActiveTab('admins'); setIsMobileMenuOpen(false); }}
           >
@@ -1543,6 +1667,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               <h1>
                 {activeTab === 'hardware' && 'Smart Vest Hardware & QR Generator'}
                 {activeTab === 'admins' && 'Admin Account Provisioning & Companies'}
+                {activeTab === 'organizations' && 'Organizations Management & Data Isolation'}
                 {activeTab === 'subscriptions' && 'Subscription & Payment Management'}
                 {activeTab === 'vitals' && 'Vital Signs Threshold Configuration (By Worker Age)'}
                 {activeTab === 'troubleshoot' && 'Subscription Diagnostics & Troubleshooting'}
@@ -1550,6 +1675,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
               <p>
                 {activeTab === 'hardware' && 'Generate official scannable QR codes and upload authentic smart vests to the central Bevest database.'}
                 {activeTab === 'admins' && 'Onboard and manage Admin accounts for client companies and project sites.'}
+                {activeTab === 'organizations' && 'Create and manage Organizations in Firestore to isolate Admins, Contractors, Site Safety Officers, and Workers.'}
                 {activeTab === 'subscriptions' && 'Manage contractor subscription tiers, verify manual payments, and monitor subscription expiration dates.'}
                 {activeTab === 'vitals' && 'Adjust and customize Heart Rate (BPM) and Body Temperature (°C) Warning (Yellow) and Danger (Red) thresholds based on worker age.'}
                 {activeTab === 'troubleshoot' && 'Diagnose subscription errors, grant temporary quota boosts, and override account statuses.'}
@@ -2145,15 +2271,119 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                 <button
                                   type="button"
                                   className="dev-btn-secondary"
-                                  onClick={() => handleToggleAdminStatus(a)}
-                                  style={{ padding: '0.45rem 0.75rem', fontSize: '0.8rem' }}
+                                  onClick={() => handleDeleteAdmin(a)}
+                                  style={{ padding: '0.45rem 0.75rem', fontSize: '0.8rem', color: '#dc2626', borderColor: '#fecaca' }}
                                 >
-                                  {isActive ? 'Disable Account' : 'Activate Account'}
+                                  <FiTrash2 /> Delete Account
                                 </button>
                               </td>
                             </tr>
                           );
                         })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2B: ORGANIZATIONS COLLECTION & DATA ISOLATION */}
+          {activeTab === 'organizations' && (
+            <div>
+              <div className="dev-card">
+                <div className="dev-card-header">
+                  <div>
+                    <h3 className="dev-card-title">
+                      <FiLayers /> Organizations Directory ({organizations.length})
+                    </h3>
+                    <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                      Each organization has an isolated workspace for its Admins, Contractors, Site Safety Officers, and Workers.
+                    </p>
+                  </div>
+                  <div className="dev-search-filter-row" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <input
+                      type="text"
+                      className="dev-input"
+                      placeholder="Search organization name, contact, email..."
+                      value={orgSearch}
+                      onChange={(e) => setOrgSearch(e.target.value)}
+                      style={{ minWidth: '260px' }}
+                    />
+                    <button
+                      type="button"
+                      className="dev-btn-orange"
+                      onClick={() => setShowCreateOrgModal(true)}
+                    >
+                      <FiPlus /> Create Organization
+                    </button>
+                  </div>
+                </div>
+
+                <div className="dev-table-wrapper">
+                  <table className="dev-table">
+                    <thead>
+                      <tr>
+                        <th>Organization Name</th>
+                        <th>Address</th>
+                        <th>Phone Number</th>
+                        <th>Email Address</th>
+                        <th>Point of Contact</th>
+                        <th style={{ textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orgsLoading ? (
+                        <tr>
+                          <td colSpan={6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                            Loading organizations...
+                          </td>
+                        </tr>
+                      ) : organizations.filter(o => {
+                        const q = orgSearch.toLowerCase();
+                        return !q ||
+                          (o.name || '').toLowerCase().includes(q) ||
+                          (o.address || '').toLowerCase().includes(q) ||
+                          (o.email || '').toLowerCase().includes(q) ||
+                          (o.pointOfContact || '').toLowerCase().includes(q);
+                      }).length === 0 ? (
+                        <tr>
+                          <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                            No organizations created yet. Click <strong>Create Organization</strong> to add one.
+                          </td>
+                        </tr>
+                      ) : (
+                        organizations.filter(o => {
+                          const q = orgSearch.toLowerCase();
+                          return !q ||
+                            (o.name || '').toLowerCase().includes(q) ||
+                            (o.address || '').toLowerCase().includes(q) ||
+                            (o.email || '').toLowerCase().includes(q) ||
+                            (o.pointOfContact || '').toLowerCase().includes(q);
+                        }).map((org) => (
+                          <tr key={org.id}>
+                            <td>
+                              <strong style={{ color: 'var(--text-main)' }}>{org.name}</strong>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                                {org.id}
+                              </div>
+                            </td>
+                            <td>{org.address || '—'}</td>
+                            <td>{org.phone || '—'}</td>
+                            <td>{org.email || '—'}</td>
+                            <td>{org.pointOfContact || '—'}</td>
+                            <td style={{ textAlign: 'right' }}>
+                              <button
+                                type="button"
+                                className="dev-btn-secondary"
+                                onClick={() => handleDeleteOrganization(org)}
+                                style={{ color: '#dc2626', borderColor: '#fecaca', padding: '0.4rem 0.7rem', fontSize: '0.8rem' }}
+                              >
+                                <FiTrash2 /> Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))
                       )}
                     </tbody>
                   </table>
@@ -3248,20 +3478,43 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             </p>
 
             <form onSubmit={handleCreateAdmin}>
-              {/* WHICH COMPANY IS THE ADMIN (EXPLICIT USER REQUIREMENT) */}
+              {/* ORGANIZATION ASSIGNMENT */}
               <div className="dev-form-group">
-                <label className="dev-form-label">WHICH COMPANY IS THE ADMIN? (COMPANY / CLIENT NAME) *</label>
-                <input
-                  type="text"
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
+                  <label className="dev-form-label" style={{ margin: 0 }}>ORGANIZATION *</label>
+                  <button
+                    type="button"
+                    className="dev-btn-secondary"
+                    style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem' }}
+                    onClick={() => setShowCreateOrgModal(true)}
+                  >
+                    <FiPlus /> New Organization
+                  </button>
+                </div>
+                <select
                   className="dev-input"
-                  placeholder="e.g. BuildCorp Infrastructure, J&T Express Philippines, Apex Builders"
-                  value={adminCompany}
-                  onChange={(e) => setAdminCompany(e.target.value)}
+                  value={adminOrgId}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setAdminOrgId(val);
+                    const found = organizations.find(o => o.id === val);
+                    setAdminCompany(found ? (found.name || '') : '');
+                  }}
                   required
-                  autoFocus
-                />
+                >
+                  <option value="">
+                    {organizations.length === 0
+                      ? 'No organizations created yet — click "+ New Organization"'
+                      : 'Select Organization...'}
+                  </option>
+                  {organizations.map((org) => (
+                    <option key={org.id} value={org.id}>
+                      {org.name}{org.address ? ` — ${org.address}` : ''}
+                    </option>
+                  ))}
+                </select>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                  Specify the organization or client enterprise this Admin oversees.
+                  Isolates this Admin, their Contractors, Site Safety Officers, and Workers within the selected Organization.
                 </div>
               </div>
 
@@ -3341,18 +3594,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
                   required
-                />
-              </div>
-
-              <div className="dev-form-group">
-                <label className="dev-form-label">ASSIGNED ROLE</label>
-                <input
-                  type="text"
-                  className="dev-input"
-                  value="ADMIN (System Safety Oversight)"
-                  readOnly
-                  disabled
-                  style={{ backgroundColor: '#f8fafc', color: '#ea580c', fontWeight: 600 }}
                 />
               </div>
 
@@ -3679,6 +3920,106 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 <FiTrash2 /> Delete
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CREATE ORGANIZATION */}
+      {showCreateOrgModal && (
+        <div className="dev-modal-overlay" style={{ zIndex: 9998 }}>
+          <div className="dev-modal-card">
+            <div className="dev-modal-header">
+              <h3>Create Organization</h3>
+              <button
+                type="button"
+                className="dev-modal-close"
+                onClick={() => !orgSaving && setShowCreateOrgModal(false)}
+              >
+                <FiX />
+              </button>
+            </div>
+
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1.25rem', lineHeight: '1.4' }}>
+              Create an Organization record in Firestore to isolate Admins, Contractors, Site Safety Officers, and Workers from other organizations.
+            </p>
+
+            <form onSubmit={handleCreateOrganization}>
+              <div className="dev-form-group">
+                <label className="dev-form-label">ORGANIZATION NAME *</label>
+                <input
+                  type="text"
+                  className="dev-input"
+                  placeholder="e.g. BuildCorp Infrastructure"
+                  value={orgForm.name}
+                  onChange={(e) => setOrgForm({ ...orgForm, name: e.target.value })}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="dev-form-group">
+                <label className="dev-form-label">ADDRESS *</label>
+                <input
+                  type="text"
+                  className="dev-input"
+                  placeholder="e.g. 123 Ayala Ave, Makati City"
+                  value={orgForm.address}
+                  onChange={(e) => setOrgForm({ ...orgForm, address: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="dev-form-group">
+                <label className="dev-form-label">PHONE NUMBER *</label>
+                <PhoneInput
+                  value={orgForm.phone}
+                  onChange={(phone) => setOrgForm({ ...orgForm, phone })}
+                  required
+                />
+              </div>
+
+              <div className="dev-form-group">
+                <label className="dev-form-label">EMAIL ADDRESS *</label>
+                <input
+                  type="email"
+                  className="dev-input"
+                  placeholder="contact@organization.com"
+                  value={orgForm.email}
+                  onChange={(e) => setOrgForm({ ...orgForm, email: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="dev-form-group">
+                <label className="dev-form-label">POINT OF CONTACT *</label>
+                <input
+                  type="text"
+                  className="dev-input"
+                  placeholder="e.g. Juan Dela Cruz"
+                  value={orgForm.pointOfContact}
+                  onChange={(e) => setOrgForm({ ...orgForm, pointOfContact: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="dev-btn-secondary"
+                  onClick={() => setShowCreateOrgModal(false)}
+                  disabled={orgSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="dev-btn-orange"
+                  disabled={orgSaving}
+                >
+                  {orgSaving ? 'Creating...' : 'Create Organization'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

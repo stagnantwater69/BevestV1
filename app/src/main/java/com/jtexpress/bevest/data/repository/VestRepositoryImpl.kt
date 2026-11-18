@@ -413,6 +413,7 @@ class VestRepositoryImpl @Inject constructor(
         claimedByEmail: String,
         companyId: String?,
         siteId: String?,
+        organizationId: String?,
     ): Outcome<Unit> = try {
         val snap = vests.document(vestId).get().await()
         if (!snap.exists()) {
@@ -439,6 +440,7 @@ class VestRepositoryImpl @Inject constructor(
                             "inCompanyDirectory" to true,
                             "status" to (snap.getString("status") ?: VestStatus.AVAILABLE.name),
                             "companyId" to companyId,
+                            "organizationId" to organizationId,
                             "siteId" to siteId,
                             "addedBySsoUid" to claimedByUid,
                             "addedBySsoName" to claimedByName,

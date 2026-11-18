@@ -226,14 +226,18 @@ export const toAlertRecord = (snap) => {
 export const toUser = (snap) => {
   const d = snap.data();
   const firstName = d.firstName || '';
+  const middleName = d.middleName || '';
   const lastName = d.lastName || '';
   return {
     uid: snap.id,
     firstName,
+    middleName,
     lastName,
-    fullName: `${firstName} ${lastName}`.trim(),
+    fullName: [firstName, middleName, lastName].map((s) => s.trim()).filter(Boolean).join(' '),
     email: d.email || '',
     phone: formatPhoneWithCountryCode(d.phone || ''),
+    role: d.role || '',
+    contractorId: d.contractorId || null,
     siteId: d.siteId || null,
     active: d.active !== false,
   };

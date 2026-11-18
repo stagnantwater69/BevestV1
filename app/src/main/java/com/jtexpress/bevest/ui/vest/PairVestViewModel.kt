@@ -237,7 +237,8 @@ class PairVestViewModel @Inject constructor(
                 claimedByName = userName,
                 claimedByEmail = userEmail,
                 companyId = company,
-                siteId = user?.siteId
+                siteId = user?.siteId,
+                organizationId = user?.organizationId
             )) {
                 is Outcome.Failure -> {
                     _state.update { it.copy(checking = false, error = result.error.message) }

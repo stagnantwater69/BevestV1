@@ -232,6 +232,7 @@ class WorkerRepositoryImpl @Inject constructor(
         "jobPosition" to jobPosition,
         "photoUrl" to photoUrl,
         "contractorId" to contractorId,
+        "organizationId" to organizationId,
         "siteId" to siteId,
         "createdBy" to (createdBy ?: auth.currentUser?.uid),
         "assignedVestId" to assignedVestId,

@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import {
-  FiUserCheck, FiPlus, FiSlash, FiSearch, FiLock, FiRefreshCw, FiX, FiTrash2, FiMapPin
+  FiUserCheck, FiPlus, FiSearch, FiLock, FiRefreshCw, FiX, FiTrash2, FiMapPin
 } from 'react-icons/fi';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { collection, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { secondaryAuth, db } from '../firebase';
 import { useContractorSsos, useContractorSites, siteLabel, STATUS_COLOR, initialsOf } from './contractorData';
 import { PageHeader, SearchBox, Badge, EmptyState, ErrorState, Skeleton } from './ui';
@@ -16,12 +16,10 @@ import ConfirmModal from '../ConfirmModal';
  * Includes Add Site Safety Officer modal, Contractor Site creation (isolated by contractorId),
  * and SSO Delete / Disable actions.
  */
-const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' }) => {
+const ContractorSsos = ({ contractorId, organizationId = null, organizationName = null, onOpen, onBack, backLabel = 'Dashboard' }) => {
   const { loading, error, ssos } = useContractorSsos(contractorId);
   const { sites } = useContractorSites(contractorId);
   const [queryText, setQueryText] = useState('');
-  const [pendingDisable, setPendingDisable] = useState(null);
-  const [disabling, setDisabling] = useState(false);
 
   // Delete SSO confirmation modal state
   const [pendingDelete, setPendingDelete] = useState(null);
@@ -96,6 +94,8 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
       name: cleanName,
       location: cleanLocation,
       contractorId: contractorId,
+      organizationId: organizationId || null,
+      organizationName: organizationName || null,
       active: true,
       createdAt: new Date()
     });
@@ -180,6 +180,10 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
             phone: formatPhoneWithCountryCode(formData.phone),
             role: 'SSO',
             contractorId: contractorId,
+            organizationId: organizationId || null,
+            organizationName: organizationName || null,
+            company: organizationName || null,
+            companyName: organizationName || null,
             siteId: resolvedSiteId,
             active: true,
             status: 'Active',
@@ -204,24 +208,6 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
         }
       },
     });
-  };
-
-  const handleDisable = async () => {
-    if (!pendingDisable) return;
-    setDisabling(true);
-    try {
-      await updateDoc(doc(db, 'users', pendingDisable.uid), {
-        active: false,
-        status: 'Inactive'
-      });
-      logActivity(`Disabled Site Safety Officer: ${pendingDisable.fullName || pendingDisable.email}`);
-      setPendingDisable(null);
-    } catch (err) {
-      console.error('Error disabling SSO:', err);
-      alert('Failed to disable officer: ' + err.message);
-    } finally {
-      setDisabling(false);
-    }
   };
 
   const handleDeleteSso = async () => {
@@ -365,15 +351,6 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
               />
 
               <div style={{ display: 'flex', gap: '0.4rem' }} onClick={(e) => e.stopPropagation()}>
-                {sso.active && (
-                  <button
-                    className="btn-secondary ct-disable-btn"
-                    title="Disable access"
-                    onClick={() => setPendingDisable(sso)}
-                  >
-                    <FiSlash /> Disable
-                  </button>
-                )}
                 <button
                   className="btn-secondary ct-disable-btn"
                   title="Delete Site Safety Officer"
@@ -385,53 +362,6 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
               </div>
             </div>
           ))}
-        </div>
-      )}
-
-      {/* Disable Confirmation Dialog */}
-      {pendingDisable && (
-        <div className="modal-overlay" onClick={() => setPendingDisable(null)}>
-          <div className="modal-content ct-modal-sm" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Disable this officer?</h2>
-              <button
-                className="close-btn"
-                onClick={() => setPendingDisable(null)}
-                aria-label="Close"
-              >
-                <FiX />
-              </button>
-            </div>
-            <div className="modal-body ct-modal-body">
-              <p className="ct-muted" style={{ lineHeight: 1.5 }}>
-                <strong>{pendingDisable.fullName || pendingDisable.email}</strong> will lose access
-                on their next app open and will stop receiving safety alerts for their site.
-                Their records will be kept.
-              </p>
-              <div className="form-actions" style={{ marginTop: '1.5rem' }}>
-                <button
-                  className="btn-secondary"
-                  onClick={() => setPendingDisable(null)}
-                  disabled={disabling}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="submit-btn"
-                  style={{
-                    backgroundColor: '#dc2626',
-                    marginTop: 0,
-                    width: 'auto',
-                    padding: '0.65rem 1.25rem'
-                  }}
-                  onClick={handleDisable}
-                  disabled={disabling}
-                >
-                  {disabling ? 'Disabling...' : 'Disable access'}
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
@@ -541,7 +471,7 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
       {/* Add Site Safety Officer Modal / Pop-up */}
       {showAddModal && (
         <div className="modal-overlay" onClick={() => !submitting && setShowAddModal(false)}>
-          <div className="modal-content" style={{ maxWidth: '560px', width: '95%', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" style={{ maxWidth: '480px', width: '95%', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Add Site Safety Officer</h2>
               <button
@@ -554,9 +484,9 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
             </div>
             <div className="modal-body ct-modal-body">
               <form onSubmit={handleCreateSso}>
-                <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.85rem', marginBottom: '0.85rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginBottom: '1rem' }}>
                   <div className="form-group-custom">
-                    <label className="form-label">First name *</label>
+                    <label className="form-label">First Name *</label>
                     <input
                       type="text"
                       className="form-input"
@@ -566,8 +496,9 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
                       required
                     />
                   </div>
+
                   <div className="form-group-custom">
-                    <label className="form-label">Middle name (optional)</label>
+                    <label className="form-label">Middle Name (Optional)</label>
                     <input
                       type="text"
                       className="form-input"
@@ -576,8 +507,9 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
                       onChange={(e) => setFormData({ ...formData, middleName: e.target.value })}
                     />
                   </div>
+
                   <div className="form-group-custom">
-                    <label className="form-label">Last name *</label>
+                    <label className="form-label">Last Name *</label>
                     <input
                       type="text"
                       className="form-input"
@@ -587,101 +519,101 @@ const ContractorSsos = ({ contractorId, onOpen, onBack, backLabel = 'Dashboard' 
                       required
                     />
                   </div>
-                </div>
 
-                <div className="form-group-custom" style={{ marginBottom: '0.85rem' }}>
-                  <label className="form-label">Email address *</label>
-                  <input
-                    type="email"
-                    className="form-input"
-                    placeholder="sso@contractor.com"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div className="form-group-custom" style={{ marginBottom: '0.85rem' }}>
-                  <label className="form-label">Phone number</label>
-                  <PhoneInput
-                    value={formData.phone}
-                    onChange={(phone) => setFormData({ ...formData, phone })}
-                  />
-                </div>
-
-                <div className="form-group-custom" style={{ marginBottom: '0.85rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-                    <label className="form-label" style={{ margin: 0 }}>Assigned Project Site</label>
-                    <button
-                      type="button"
-                      onClick={() => setCreatingNewSiteInline(!creatingNewSiteInline)}
-                      style={{ background: 'none', border: 'none', color: '#ea580c', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
-                    >
-                      {creatingNewSiteInline ? 'Choose Existing Site' : '+ Create New Site'}
-                    </button>
+                  <div className="form-group-custom">
+                    <label className="form-label">Phone Number</label>
+                    <PhoneInput
+                      value={formData.phone}
+                      onChange={(phone) => setFormData({ ...formData, phone })}
+                    />
                   </div>
-                  {!creatingNewSiteInline ? (
-                    <select
-                      className="form-input"
-                      value={formData.siteId}
-                      onChange={(e) => setFormData({ ...formData, siteId: e.target.value })}
-                    >
-                      <option value="">Select a project site...</option>
-                      {sites.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}{s.location ? ` — ${s.location}` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', backgroundColor: '#fff7ed', padding: '0.75rem', borderRadius: '8px', border: '1px solid #fed7aa' }}>
-                      <div>
-                        <label className="form-label" style={{ fontSize: '0.72rem' }}>New Site Name *</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="e.g. Site Alpha"
-                          value={inlineSiteName}
-                          onChange={(e) => setInlineSiteName(e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <label className="form-label" style={{ fontSize: '0.72rem' }}>Location</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="e.g. Taguig City"
-                          value={inlineSiteLocation}
-                          onChange={(e) => setInlineSiteLocation(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
 
-                <div className="form-group-custom" style={{ marginBottom: '1rem' }}>
-                  <label className="form-label">Temporary password *</label>
-                  <div className="password-input-group">
+                  <div className="form-group-custom">
+                    <label className="form-label">Email Address *</label>
                     <input
-                      type="text"
-                      className="form-input password-field"
-                      placeholder="Click generate to create..."
-                      value={formData.tempPassword}
-                      onChange={(e) => setFormData({ ...formData, tempPassword: e.target.value })}
+                      type="email"
+                      className="form-input"
+                      placeholder="sso@contractor.com"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       required
                     />
-                    <button
-                      className="icon-btn lock-btn"
-                      type="button"
-                      onClick={handleGeneratePassword}
-                      title="Generate Password"
-                    >
-                      {formData.tempPassword ? <FiLock /> : <FiRefreshCw />}
-                    </button>
                   </div>
-                  <span className="input-hint" style={{ margin: '0.35rem 0 0' }}>
-                    The officer will be prompted to change this temporary password on first sign-in.
-                  </span>
+
+                  <div className="form-group-custom">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                      <label className="form-label" style={{ margin: 0 }}>Project Site</label>
+                      <button
+                        type="button"
+                        onClick={() => setCreatingNewSiteInline(!creatingNewSiteInline)}
+                        style={{ background: 'none', border: 'none', color: '#ea580c', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        {creatingNewSiteInline ? 'Choose Existing Site' : '+ Create New Site'}
+                      </button>
+                    </div>
+                    {!creatingNewSiteInline ? (
+                      <select
+                        className="form-input"
+                        value={formData.siteId}
+                        onChange={(e) => setFormData({ ...formData, siteId: e.target.value })}
+                      >
+                        <option value="">Select a project site...</option>
+                        {sites.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}{s.location ? ` — ${s.location}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', backgroundColor: '#fff7ed', padding: '0.75rem', borderRadius: '8px', border: '1px solid #fed7aa' }}>
+                        <div>
+                          <label className="form-label" style={{ fontSize: '0.72rem' }}>New Site Name *</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            placeholder="e.g. Site Alpha"
+                            value={inlineSiteName}
+                            onChange={(e) => setInlineSiteName(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="form-label" style={{ fontSize: '0.72rem' }}>Location</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            placeholder="e.g. Taguig City"
+                            value={inlineSiteLocation}
+                            onChange={(e) => setInlineSiteLocation(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="form-group-custom">
+                    <label className="form-label">Temporary Password *</label>
+                    <div className="password-input-group">
+                      <input
+                        type="text"
+                        className="form-input password-field"
+                        placeholder="Click generate to create..."
+                        value={formData.tempPassword}
+                        onChange={(e) => setFormData({ ...formData, tempPassword: e.target.value })}
+                        required
+                      />
+                      <button
+                        className="icon-btn lock-btn"
+                        type="button"
+                        onClick={handleGeneratePassword}
+                        title="Generate Password"
+                      >
+                        {formData.tempPassword ? <FiLock /> : <FiRefreshCw />}
+                      </button>
+                    </div>
+                    <span className="input-hint" style={{ margin: '0.35rem 0 0' }}>
+                      The officer will be prompted to change this temporary password on first sign-in.
+                    </span>
+                  </div>
                 </div>
 
                 {errorMsg && (

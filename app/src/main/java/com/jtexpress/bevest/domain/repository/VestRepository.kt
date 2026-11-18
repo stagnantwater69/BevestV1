@@ -27,6 +27,7 @@ interface VestRepository {
         claimedByEmail: String,
         companyId: String?,
         siteId: String?,
+        organizationId: String? = null,
     ): Outcome<Unit>
 
     suspend fun setStatus(vestId: String, status: VestStatus): Outcome<Unit>

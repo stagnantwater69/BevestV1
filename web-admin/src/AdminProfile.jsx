@@ -9,6 +9,7 @@ const AdminProfile = ({ user }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [profile, setProfile] = useState({
     firstName: user?.profile?.firstName || 'Web',
+    middleName: user?.profile?.middleName || '',
     lastName: user?.profile?.lastName || 'Admin',
     email: user?.email || user?.profile?.email || 'testwebadmin@bevest.com',
     phone: (user?.profile?.phone && user.profile.phone !== 'Not set' ? formatPhoneWithCountryCode(user.profile.phone) : '') || 'Not set',
@@ -23,6 +24,7 @@ const AdminProfile = ({ user }) => {
           setProfile(prev => ({
             ...prev,
             firstName: d.firstName || prev.firstName,
+            middleName: d.middleName != null ? d.middleName : prev.middleName,
             lastName: d.lastName || prev.lastName,
             email: d.email || prev.email,
             phone: (d.phone && d.phone !== 'Not set' ? formatPhoneWithCountryCode(d.phone) : '') || prev.phone,
@@ -34,6 +36,7 @@ const AdminProfile = ({ user }) => {
   }, [user]);
 
   const [editFirstName, setEditFirstName] = useState(profile.firstName);
+  const [editMiddleName, setEditMiddleName] = useState(profile.middleName || '');
   const [editLastName, setEditLastName] = useState(profile.lastName);
   const [editPhone, setEditPhone] = useState(profile.phone !== 'Not set' ? profile.phone : '');
 
@@ -41,6 +44,7 @@ const AdminProfile = ({ user }) => {
 
   const handleOpenEdit = () => {
     setEditFirstName(profile.firstName);
+    setEditMiddleName(profile.middleName || '');
     setEditLastName(profile.lastName);
     setEditPhone(profile.phone !== 'Not set' ? profile.phone : '');
     setShowEdit(true);
@@ -52,6 +56,7 @@ const AdminProfile = ({ user }) => {
     setProfile(prev => ({
       ...prev,
       firstName: editFirstName.trim(),
+      middleName: editMiddleName.trim(),
       lastName: editLastName.trim(),
       phone: formattedPhone || 'Not set'
     }));
@@ -59,6 +64,7 @@ const AdminProfile = ({ user }) => {
       try {
         await updateDoc(doc(db, 'users', user.uid), {
           firstName: editFirstName.trim(),
+          middleName: editMiddleName.trim(),
           lastName: editLastName.trim(),
           phone: formattedPhone
         });
@@ -72,6 +78,7 @@ const AdminProfile = ({ user }) => {
             ...(directory[profile.email.toLowerCase().trim()] || {}),
             phone: formattedPhone || null,
             firstName: editFirstName.trim(),
+            middleName: editMiddleName.trim(),
             lastName: editLastName.trim(),
             role: profile.role || 'ADMIN',
             company: profile.company || ''
@@ -95,7 +102,7 @@ const AdminProfile = ({ user }) => {
         {/* Profile Header Card */}
         <div className="profile-header-card">
           <div className="profile-avatar">{initials}</div>
-          <h2>{profile.firstName} {profile.lastName}</h2>
+          <h2>{[profile.firstName, profile.middleName, profile.lastName].filter(Boolean).join(' ')}</h2>
           <div className="admin-badge">
             <FiShield /> ADMINISTRATOR
           </div>
@@ -176,6 +183,16 @@ const AdminProfile = ({ user }) => {
                     placeholder=" "
                   />
                   <label>First name *</label>
+                </div>
+
+                <div className="floating-input-group">
+                  <input
+                    type="text"
+                    value={editMiddleName}
+                    onChange={(e) => setEditMiddleName(e.target.value)}
+                    placeholder=" "
+                  />
+                  <label>Middle name (optional)</label>
                 </div>
                 
                 <div className="floating-input-group">

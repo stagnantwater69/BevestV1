@@ -96,6 +96,8 @@ const ContractorDashboard = ({ user, onLogout }) => {
         return (
           <ContractorSsos
             contractorId={contractorId}
+            organizationId={profile.organizationId || null}
+            organizationName={profile.organizationName || profile.company || profile.companyName || null}
             onAdd={() => go('AddSso')}
             onOpen={(uid) => go('SsoProfile', uid)}
             onBack={route.from === 'Dashboard' || route.from === 'Reports' ? () => go(route.from) : null}
