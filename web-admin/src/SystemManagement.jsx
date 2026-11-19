@@ -13,6 +13,7 @@ import { db, rtdb } from './firebase';
 import QRCode from 'qrcode';
 import { logActivity } from './activityLogger';
 import ConfirmModal from './ConfirmModal';
+import { useRtdbVestPresence } from './rtdbVestStatus';
 
 const getWifiSignalInfo = (rssi, isOnline) => {
   if (!isOnline || rssi == null || rssi === 0) {
@@ -34,6 +35,7 @@ const SystemManagement = ({ user }) => {
   const [vests, setVests] = useState([]);
   const [workersMap, setWorkersMap] = useState({});
   const [loading, setLoading] = useState(true);
+  const { enrichVestWithRtdb } = useRtdbVestPresence();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [currentPage, setCurrentPage] = useState(1);
@@ -252,8 +254,11 @@ const SystemManagement = ({ user }) => {
     });
   };
 
+  // Enrich Firestore vest directory with live Realtime Database presence (online, RSSI, battery, lastSeen)
+  const liveVests = vests.map(enrichVestWithRtdb);
+
   // Filtered vests
-  const filteredVests = vests.filter(vest => {
+  const filteredVests = liveVests.filter(vest => {
     const vId = (vest.id || vest.vestId || '').toLowerCase();
     const worker = vest.assignedWorkerId ? workersMap[vest.assignedWorkerId] : null;
     const workerName = worker ? `${worker.firstName || ''} ${worker.lastName || ''}`.toLowerCase() : '';
@@ -265,8 +270,8 @@ const SystemManagement = ({ user }) => {
 
     const matchesStatus = statusFilter === 'ALL' ? true : 
                           statusFilter === 'ASSIGNED' ? Boolean(vest.assignedWorkerId) :
-                          statusFilter === 'AVAILABLE' ? (!vest.assignedWorkerId && vest.status !== 'OFFLINE') :
-                          statusFilter === 'OFFLINE' ? (vest.status === 'OFFLINE' || vest.online === false) : true;
+                          statusFilter === 'AVAILABLE' ? (!vest.assignedWorkerId && vest.online === true) :
+                          statusFilter === 'OFFLINE' ? (vest.online !== true) : true;
 
     return matchesSearch && matchesStatus;
   });
@@ -274,11 +279,11 @@ const SystemManagement = ({ user }) => {
   const totalPages = Math.ceil(filteredVests.length / itemsPerPage) || 1;
   const paginatedVests = filteredVests.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-  // Stats calculation
-  const totalVestsCount = vests.length;
-  const assignedVestsCount = vests.filter(v => v.assignedWorkerId).length;
-  const availableVestsCount = vests.filter(v => !v.assignedWorkerId && v.status !== 'OFFLINE').length;
-  const offlineVestsCount = vests.filter(v => v.status === 'OFFLINE' || v.online === false).length;
+  // Stats calculation (driven by Realtime Database online status)
+  const totalVestsCount = liveVests.length;
+  const assignedVestsCount = liveVests.filter(v => v.assignedWorkerId).length;
+  const availableVestsCount = liveVests.filter(v => !v.assignedWorkerId && v.online === true).length;
+  const offlineVestsCount = liveVests.filter(v => v.online !== true).length;
 
   return (
     <div className="dashboard-content system-mgmt-container">
@@ -406,9 +411,7 @@ const SystemManagement = ({ user }) => {
                 paginatedVests.map((vest) => {
                   const worker = vest.assignedWorkerId ? workersMap[vest.assignedWorkerId] : null;
                   const isAssigned = Boolean(vest.assignedWorkerId);
-                  const lastSeenMs = vest.lastSeen?.toDate ? vest.lastSeen.toDate().getTime() : (typeof vest.lastSeen === 'number' ? vest.lastSeen : 0);
-                  const isRecent = lastSeenMs > 0 && (Date.now() - lastSeenMs < 45000);
-                  const isOnline = (vest.online === true || vest.online === 'true') && (lastSeenMs === 0 || isRecent);
+                  const isOnline = vest.online === true;
 
                   return (
                     <tr key={vest.id}>
@@ -460,7 +463,6 @@ const SystemManagement = ({ user }) => {
                                 Battery: {vest.battery != null ? `${vest.battery}%` : '100%'}
                               </span>
                               {(() => {
-                                const isOnline = vest.online === true || vest.status === 'AVAILABLE' || vest.status === 'ACTIVE';
                                 const wifi = getWifiSignalInfo(vest.wifiRssi ?? vest.rssi, isOnline);
                                 return (
                                   <span
@@ -487,14 +489,14 @@ const SystemManagement = ({ user }) => {
                         </div>
                       </td>
 
-                      {/* HARDWARE STATUS */}
+                      {/* HARDWARE STATUS (Live from Realtime Database) */}
                       <td>
                         {isAssigned ? (
-                          <span className="sub-status-pill" style={{ backgroundColor: '#dbeafe', color: '#1e40af' }}>
-                            <span className="sub-status-dot" style={{ backgroundColor: '#2563eb' }}></span>
-                            Assigned
+                          <span className="sub-status-pill" style={{ backgroundColor: isOnline ? '#dbeafe' : '#f1f5f9', color: isOnline ? '#1e40af' : '#475569' }}>
+                            <span className="sub-status-dot" style={{ backgroundColor: isOnline ? '#2563eb' : '#94a3b8' }}></span>
+                            {isOnline ? 'Assigned · Online' : 'Assigned · Offline'}
                           </span>
-                        ) : vest.status === 'OFFLINE' ? (
+                        ) : !isOnline ? (
                           <span className="sub-status-pill" style={{ backgroundColor: '#f1f5f9', color: '#475569' }}>
                             <span className="sub-status-dot" style={{ backgroundColor: '#94a3b8' }}></span>
                             Offline
@@ -502,7 +504,7 @@ const SystemManagement = ({ user }) => {
                         ) : (
                           <span className="sub-status-pill active">
                             <span className="sub-status-dot"></span>
-                            Available
+                            Available · Online
                           </span>
                         )}
                       </td>

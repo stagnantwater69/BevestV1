@@ -93,7 +93,7 @@ class VestRepositoryImpl @Inject constructor(
                 ?: child.safeLong("timestamp")
                 ?: child.safeLong("lastSeen")
             val diff = if (lastSeen != null) now - lastSeen else Long.MAX_VALUE
-            val isRecent = lastSeen != null && diff <= 90_000L && diff >= -86_400_000L
+            val isRecent = lastSeen != null && diff <= 60_000L && diff >= -86_400_000L
             val isLive = rawOnline && (isRecent || lastSeen == null || lastSeen <= 100_000_000_000L)
 
             val info = LiveInfo(
@@ -278,8 +278,8 @@ class VestRepositoryImpl @Inject constructor(
             val mapped = docs.mapIndexed { idx, doc ->
                 val base = baseVests[idx]
                 val live = resolveLive(base, liveMap, baseVests.size, baseVests)
-                // Device is online if either RTDB or Firestore reports a fresh heartbeat within 45s
-                val liveOnline = (live?.online == true) || base.online
+                // Realtime Database is the authoritative source of truth for live online presence once loaded
+                val liveOnline = if (rtLoaded) (live?.online == true) else base.online
                 val effectiveStatus = when {
                     base.status == VestStatus.MAINTENANCE -> VestStatus.MAINTENANCE
                     liveOnline && !base.assignedWorkerId.isNullOrBlank() -> VestStatus.ACTIVE
@@ -337,7 +337,7 @@ class VestRepositoryImpl @Inject constructor(
                 val rtLoaded = rtSnap != null || readingsSnap != null || macRtSnap != null
                 val liveMap = buildLiveMap(rtSnap, readingsSnap, macRtSnap)
                 val live = resolveLive(base, liveMap, 1)
-                val liveOnline = (live?.online == true) || base.online
+                val liveOnline = if (rtLoaded) (live?.online == true) else base.online
                 val effectiveStatus = when {
                     base.status == VestStatus.MAINTENANCE -> VestStatus.MAINTENANCE
                     liveOnline && !base.assignedWorkerId.isNullOrBlank() -> VestStatus.ACTIVE

@@ -13,8 +13,9 @@ import {
   query, where, onSnapshot 
 } from 'firebase/firestore';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { ref, remove, set, onValue } from 'firebase/database';
+import { ref, remove, set, onValue, get } from 'firebase/database';
 import { auth, secondaryAuth, db, rtdb } from './firebase';
+import { useRtdbVestPresence } from './rtdbVestStatus';
 import QRCode from 'qrcode';
 import { logActivity } from './activityLogger';
 import { 
@@ -41,6 +42,8 @@ import './developer.css';
 const DeveloperDashboard = ({ user, onLogout }) => {
   const [activeTab, setActiveTab] = useState('hardware'); // 'hardware' | 'admins' | 'subscriptions' | 'troubleshoot'
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { enrichVestWithRtdb } = useRtdbVestPresence();
+  const [cleaningRtdb, setCleaningRtdb] = useState(false);
   
   // Vest Catalog state
   const [catalog, setCatalog] = useState([]);
@@ -682,10 +685,20 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       });
     };
 
+    let latestThresholdUpdatedAt = -1;
+    const applyIfNewer = (d) => {
+      if (!d) return;
+      const ts = Number(d.updatedAtMs) || 0;
+      if (ts >= latestThresholdUpdatedAt) {
+        latestThresholdUpdatedAt = ts;
+        applyThresholdData(d);
+      }
+    };
+
     const threshRef = doc(db, 'settings', 'thresholds');
     const unsubFirestore = onSnapshot(threshRef, (snap) => {
       if (snap.exists()) {
-        applyThresholdData(snap.data());
+        applyIfNewer(snap.data());
       }
     }, (err) => {
       console.warn('Vital thresholds Firestore load error:', err.message);
@@ -693,7 +706,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
     const unsubRtdb = onValue(ref(rtdb, 'settings/thresholds'), (snap) => {
       if (snap.exists()) {
-        applyThresholdData(snap.val());
+        applyIfNewer(snap.val());
       }
     }, (err) => {
       console.warn('Vital thresholds RTDB load error:', err.message);
@@ -765,38 +778,44 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const handleSaveVitalThresholds = async () => {
     setSavingVitals(true);
     try {
+      const toFiniteNum = (val, fallback) => {
+        if (val === '' || val === null || val === undefined) return fallback;
+        const n = Number(val);
+        return Number.isFinite(n) ? n : fallback;
+      };
+
       const sanitized = vitalBrackets.map(b => ({
         id: String(b.id || `${b.minAge}-${b.maxAge}`),
         label: String(b.label || `${b.minAge} – ${b.maxAge} yrs`),
-        minAge: Number(b.minAge) || 18,
-        maxAge: Number(b.maxAge) || 99,
-        hrLowDanger: Number(b.hrLowDanger) || 45,
-        hrLowWarning: Number(b.hrLowWarning) || 55,
-        hrWarning: Number(b.hrWarning) || 100,
-        hrDanger: Number(b.hrDanger) || 120,
-        tempLowDanger: Number(b.tempLowDanger) || 35.0,
-        tempLowWarning: Number(b.tempLowWarning) || 35.8,
-        tempWarning: Number(b.tempWarning) || 37.8,
-        tempDanger: Number(b.tempDanger) || 38.5
+        minAge: toFiniteNum(b.minAge, 18),
+        maxAge: toFiniteNum(b.maxAge, 99),
+        hrLowDanger: toFiniteNum(b.hrLowDanger, 45),
+        hrLowWarning: toFiniteNum(b.hrLowWarning, 55),
+        hrWarning: toFiniteNum(b.hrWarning, 100),
+        hrDanger: toFiniteNum(b.hrDanger, 120),
+        tempLowDanger: toFiniteNum(b.tempLowDanger, 35.0),
+        tempLowWarning: toFiniteNum(b.tempLowWarning, 35.8),
+        tempWarning: toFiniteNum(b.tempWarning, 37.8),
+        tempDanger: toFiniteNum(b.tempDanger, 38.5)
       }));
 
       const payload = {
-        heartRateLowDanger: Number(defaultHrLowDanger) || 45,
-        heartRateLowWarning: Number(defaultHrLowWarning) || 55,
-        heartRateHigh: Number(defaultHrWarning) || 100,
-        heartRateDanger: Number(defaultHrDanger) || 120,
-        temperatureLowDanger: Number(defaultTempLowDanger) || 35.0,
-        temperatureLowWarning: Number(defaultTempLowWarning) || 35.8,
-        temperatureHigh: Number(defaultTempWarning) || 37.8,
-        temperatureDanger: Number(defaultTempDanger) || 38.5,
+        heartRateLowDanger: toFiniteNum(defaultHrLowDanger, 45),
+        heartRateLowWarning: toFiniteNum(defaultHrLowWarning, 55),
+        heartRateHigh: toFiniteNum(defaultHrWarning, 100),
+        heartRateDanger: toFiniteNum(defaultHrDanger, 120),
+        temperatureLowDanger: toFiniteNum(defaultTempLowDanger, 35.0),
+        temperatureLowWarning: toFiniteNum(defaultTempLowWarning, 35.8),
+        temperatureHigh: toFiniteNum(defaultTempWarning, 37.8),
+        temperatureDanger: toFiniteNum(defaultTempDanger, 38.5),
         fallSensitivity: String(fallSensitivity || 'MEDIUM'),
-        fallFreefallG: Number(fallFreefallG) || 0.65,
-        fallImpactG: Number(fallImpactG) || 2.8,
-        fallSevereImpactG: Number(fallSevereImpactG) || 4.5,
-        inactivitySeconds: Number(vitalMeta.inactivitySeconds) || 180,
-        offlineTimeoutSeconds: Number(vitalMeta.offlineTimeoutSeconds) || 60,
-        responseTimeoutSeconds: Number(vitalMeta.responseTimeoutSeconds) || 60,
-        lowBatteryPercent: Number(vitalMeta.lowBatteryPercent) || 20,
+        fallFreefallG: toFiniteNum(fallFreefallG, 0.65),
+        fallImpactG: toFiniteNum(fallImpactG, 2.8),
+        fallSevereImpactG: toFiniteNum(fallSevereImpactG, 4.5),
+        inactivitySeconds: toFiniteNum(vitalMeta.inactivitySeconds, 180),
+        offlineTimeoutSeconds: toFiniteNum(vitalMeta.offlineTimeoutSeconds, 60),
+        responseTimeoutSeconds: toFiniteNum(vitalMeta.responseTimeoutSeconds, 60),
+        lowBatteryPercent: toFiniteNum(vitalMeta.lowBatteryPercent, 20),
         ageBrackets: sanitized,
         updatedAtMs: Date.now(),
         updatedBy: devEmail
@@ -830,7 +849,13 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       }
 
       await logActivity('Updated age-based Vital Signs Warning & Danger thresholds for Heart Rate and Body Temperature', devEmail, null);
-      showToast('success', '✓ Vital Signs age-based Warning & Danger thresholds saved and synced to SSO devices!');
+      if (savedFirestore && savedRtdb) {
+        showToast('success', '✓ Vital Signs thresholds saved to Firestore & Realtime DB and synced to SSO devices!');
+      } else if (savedRtdb) {
+        showToast('error', `Saved to Realtime DB, but Firestore write failed (${lastError?.message || 'permission denied'}). Check Firestore rules.`);
+      } else {
+        showToast('error', `Saved to Firestore, but Realtime DB write failed (${lastError?.message || 'permission denied'}).`);
+      }
     } catch (err) {
       console.error('Failed to save vital thresholds:', err);
       showToast('error', 'Failed to save Vital Signs thresholds: ' + err.message);
@@ -1162,6 +1187,113 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         } catch (err) {
           console.error('Error deleting vest:', err);
           showToast('error', 'Failed to delete vest: ' + err.message);
+        }
+      },
+    });
+  };
+
+  const handleCleanOrphanedRtdb = () => {
+    setConfirmDialog({
+      title: 'Clean Orphaned Realtime Database Entries?',
+      message: 'This will scan Firebase Realtime Database and delete stale vest/worker telemetry nodes (such as previously deleted vests) that no longer exist in Firestore.',
+      confirmLabel: 'Clean RTDB',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setCleaningRtdb(true);
+        try {
+          const [vestsSnap, workersSnap] = await Promise.all([
+            getDocs(collection(db, 'vests')),
+            getDocs(collection(db, 'workers')),
+          ]);
+
+          const validVestIds = new Set();
+          const validMacs = new Set();
+          vestsSnap.docs.forEach((d) => {
+            validVestIds.add(d.id);
+            const data = d.data() || {};
+            if (data.vestId) validVestIds.add(String(data.vestId));
+            const cleanMac = String(data.cleanMac || data.macAddress || '')
+              .toUpperCase()
+              .replace(/[^A-F0-9]/g, '');
+            if (cleanMac.length === 12) {
+              validMacs.add(cleanMac);
+              const prefix = cleanMac.substring(0, 10);
+              const lastByte = parseInt(cleanMac.substring(10, 12), 16);
+              if (!Number.isNaN(lastByte)) {
+                for (const delta of [-2, -1, 1, 2]) {
+                  const v = (lastByte + delta) & 0xff;
+                  validMacs.add(prefix + v.toString(16).toUpperCase().padStart(2, '0'));
+                }
+              }
+            }
+          });
+
+          const validWorkerIds = new Set(workersSnap.docs.map((d) => d.id));
+          let removedCount = 0;
+
+          const cleanVestNode = async (rootPath) => {
+            const snap = await get(ref(rtdb, rootPath));
+            if (!snap.exists()) return;
+            const obj = snap.val() || {};
+            for (const key of Object.keys(obj)) {
+              if (!validVestIds.has(key)) {
+                await remove(ref(rtdb, `${rootPath}/${key}`));
+                removedCount++;
+              }
+            }
+          };
+
+          const cleanWorkerNode = async (rootPath) => {
+            const snap = await get(ref(rtdb, rootPath));
+            if (!snap.exists()) return;
+            const obj = snap.val() || {};
+            for (const key of Object.keys(obj)) {
+              if (!validWorkerIds.has(key)) {
+                await remove(ref(rtdb, `${rootPath}/${key}`));
+                removedCount++;
+              }
+            }
+          };
+
+          const cleanMacNode = async (rootPath) => {
+            const snap = await get(ref(rtdb, rootPath));
+            if (!snap.exists()) return;
+            const obj = snap.val() || {};
+            for (const [key, val] of Object.entries(obj)) {
+              const normKey = String(key).toUpperCase().replace(/[^A-F0-9]/g, '');
+              const mappedVestId = typeof val === 'string' ? val : (val?.vestId ? String(val.vestId) : null);
+              const keep =
+                (normKey && validMacs.has(normKey)) ||
+                (mappedVestId && validVestIds.has(mappedVestId));
+              if (!keep) {
+                await remove(ref(rtdb, `${rootPath}/${key}`));
+                removedCount++;
+              }
+            }
+          };
+
+          await cleanVestNode('liveReadingsByVest');
+          await cleanVestNode('vestsLive');
+          await cleanVestNode('vestToWorker');
+          await cleanWorkerNode('liveReadings');
+          await cleanWorkerNode('workerToVest');
+          await cleanMacNode('macToVest');
+          await cleanMacNode('vestsLiveByMac');
+          await cleanMacNode('liveReadingsByMac');
+
+          await logActivity(`Cleaned ${removedCount} orphaned Realtime Database node(s)`, devEmail, null);
+          showToast(
+            'success',
+            removedCount > 0
+              ? `✓ Removed ${removedCount} orphaned Realtime Database node(s)!`
+              : '✓ Realtime Database is already clean — no orphaned entries found.'
+          );
+        } catch (err) {
+          console.error('Error cleaning orphaned RTDB entries:', err);
+          showToast('error', 'Failed to clean Realtime Database: ' + err.message);
+        } finally {
+          setCleaningRtdb(false);
         }
       },
     });
@@ -1554,10 +1686,11 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     }
     return sum;
   }, 0);
-  const registeredVestsCount = catalog.filter(v => v.status === 'ASSIGNED' || v.status === 'ACTIVE' || v.inCompanyDirectory === true).length;
-  const unregisteredVestsCount = catalog.filter(v => (v.status || 'AVAILABLE') === 'AVAILABLE' || v.catalogStatus === 'UNREGISTERED').length;
+  const liveCatalog = catalog.map(enrichVestWithRtdb);
+  const registeredVestsCount = liveCatalog.filter(v => v.status === 'ASSIGNED' || v.status === 'ACTIVE' || v.inCompanyDirectory === true).length;
+  const unregisteredVestsCount = liveCatalog.filter(v => (v.status || 'AVAILABLE') === 'AVAILABLE' || v.catalogStatus === 'UNREGISTERED').length;
 
-  const filteredCatalog = catalog.filter(v => {
+  const filteredCatalog = liveCatalog.filter(v => {
     const q = catalogSearch.toLowerCase().replace(/[^a-z0-9]/g, '');
     const matchesSearch = (v.vestId || v.id || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
                           (v.batchNumber || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
@@ -2022,6 +2155,17 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       <option value="OFFLINE">OFFLINE</option>
                       <option value="MAINTENANCE">MAINTENANCE</option>
                     </select>
+
+                    <button
+                      type="button"
+                      className="dev-btn-secondary"
+                      onClick={handleCleanOrphanedRtdb}
+                      disabled={cleaningRtdb}
+                      title="Delete leftover RTDB telemetry nodes for vests/workers that were already removed from Firestore"
+                      style={{ color: '#dc2626', borderColor: '#fecaca', whiteSpace: 'nowrap' }}
+                    >
+                      <FiTrash2 /> {cleaningRtdb ? 'Cleaning RTDB...' : 'Clean Orphaned RTDB'}
+                    </button>
                   </div>
                 </div>
 
@@ -3229,7 +3373,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                               type="number"
                               step="0.1"
                               className="dev-input"
-                              min={30.0}
+                              min={15.0}
                               max={37.0}
                               value={bracket.tempLowDanger ?? 35.0}
                               onChange={(e) => handleVitalBracketChange(idx, 'tempLowDanger', e.target.value)}
@@ -3242,7 +3386,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                               type="number"
                               step="0.1"
                               className="dev-input"
-                              min={31.0}
+                              min={15.0}
                               max={37.5}
                               value={bracket.tempLowWarning ?? 35.8}
                               onChange={(e) => handleVitalBracketChange(idx, 'tempLowWarning', e.target.value)}
@@ -3286,10 +3430,38 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
               {/* Fallback Thresholds (when worker age is not specified) */}
               <div className="dev-card" style={{ marginBottom: '1.5rem' }}>
-                <div className="dev-card-header">
-                  <h3 className="dev-card-title">
+                <div className="dev-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <h3 className="dev-card-title" style={{ marginBottom: 0 }}>
                     <FiShield /> Default Fallback Thresholds (When Worker Age is Unspecified)
                   </h3>
+                  <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="dev-btn-secondary"
+                      onClick={() => {
+                        setVitalBrackets(prev => prev.map(b => ({
+                          ...b,
+                          hrLowDanger: defaultHrLowDanger,
+                          hrLowWarning: defaultHrLowWarning,
+                          tempLowDanger: defaultTempLowDanger,
+                          tempLowWarning: defaultTempLowWarning,
+                          tempWarning: defaultTempWarning,
+                          tempDanger: defaultTempDanger
+                        })));
+                        showToast('success', 'Applied default low/temp thresholds to all age groups — click Save Vital Thresholds to sync.');
+                      }}
+                    >
+                      <FiCheck /> Apply Temp & Low HR to All Age Groups
+                    </button>
+                    <button
+                      type="button"
+                      className="dev-btn-orange"
+                      onClick={handleSaveVitalThresholds}
+                      disabled={savingVitals}
+                    >
+                      <FiSave /> {savingVitals ? 'Saving...' : 'Save Vital Thresholds'}
+                    </button>
+                  </div>
                 </div>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 0, marginBottom: '1rem' }}>
                   Used automatically on the SSO app if a worker profile does not yet have a birthdate or saved age.

@@ -535,7 +535,8 @@ private fun VitalSignsCombinedCard(
                             fontWeight = FontWeight.SemiBold,
                             color = hrColor,
                         )
-                    } else if (ageBracket != null) {
+                    }
+                    if (ageBracket != null) {
                         Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                             Text(
                                 text = "Warn ≤${ageBracket.hrLowWarning} / ≥${ageBracket.hrWarning}",
@@ -613,7 +614,8 @@ private fun VitalSignsCombinedCard(
                             fontWeight = FontWeight.SemiBold,
                             color = tempColor,
                         )
-                    } else if (ageBracket != null) {
+                    }
+                    if (ageBracket != null) {
                         Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                             Text(
                                 text = "Warn ≤${"%.1f".format(ageBracket.tempLowWarning)}° / ≥${"%.1f".format(ageBracket.tempWarning)}°",
