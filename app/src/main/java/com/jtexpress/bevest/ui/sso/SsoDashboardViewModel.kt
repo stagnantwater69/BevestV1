@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
@@ -156,13 +157,19 @@ class SsoDashboardViewModel @Inject constructor(
                     } else {
                         val ids = workers.map { it.workerId }
                         val idSet = ids.toSet()
+                        val clockTicker = flow {
+                            while (true) {
+                                emit(System.currentTimeMillis())
+                                delay(2_000L)
+                            }
+                        }
                         combine(
                             monitoringRepository.observeReadings(ids),
                             thresholdsFlow,
                             alertsFlow,
-                        ) { readings, thresholds, alertsOutcome ->
+                            clockTicker,
+                        ) { readings, thresholds, alertsOutcome, now ->
                             val engine = SafetyStatusEngine(thresholds)
-                            val now = System.currentTimeMillis()
                             // Alert Data Isolation: only show alerts belonging to this SSO's workers
                             val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
                                 .filter { it.workerId in idSet }

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { ref, onValue } from 'firebase/database';
 import { rtdb } from './firebase';
 
-const ONLINE_TIMEOUT_MS = 60_000;
+const ONLINE_TIMEOUT_MS = 12_000;
 
 const normalizeMac = (mac) =>
   String(mac || '')
@@ -78,7 +78,7 @@ export function useRtdbVestPresence() {
       () => setRtLoaded(true)
     );
 
-    const timer = setInterval(() => setNow(Date.now()), 10_000);
+    const timer = setInterval(() => setNow(Date.now()), 2_000);
     return () => {
       unsub1();
       unsub2();
@@ -107,8 +107,8 @@ export function useRtdbVestPresence() {
           toNum(raw.timestamp) ??
           toNum(raw.lastSeen);
         const diff = lastSeen != null ? now - lastSeen : Number.MAX_SAFE_INTEGER;
-        const isRecent = lastSeen != null && diff <= ONLINE_TIMEOUT_MS && diff >= -86_400_000;
-        const isLive = rawOnline && (isRecent || lastSeen == null || lastSeen <= 100_000_000_000);
+        const isRecent = lastSeen != null && lastSeen > 100_000_000_000 && diff <= ONLINE_TIMEOUT_MS && diff >= -86_400_000;
+        const isLive = rawOnline && isRecent;
 
         const info = {
           online: isLive,

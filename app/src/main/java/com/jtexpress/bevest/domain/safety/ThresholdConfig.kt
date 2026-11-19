@@ -35,7 +35,7 @@ data class ThresholdConfig(
     val fallSevereImpactG: Double = 4.5,
     val warningDurationSeconds: Int = 30,
     val inactivitySeconds: Int = 180,
-    val offlineTimeoutSeconds: Int = 60,
+    val offlineTimeoutSeconds: Int = 12,
     val responseTimeoutSeconds: Int = 60,
     val lowBatteryPercent: Int = 20,
     val ageBrackets: List<AgeVitalThreshold> = DEFAULT_AGE_BRACKETS,

@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
@@ -69,13 +70,27 @@ class WorkerDetailViewModel @Inject constructor(
     private var ackResetJob: Job? = null
 
     private val heartRateHistory = MutableStateFlow<List<Int>>(emptyList())
+    private val clockTicker = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(2_000L)
+        }
+    }
+
+    private data class MetaSnapshot(
+        val message: String?,
+        val hrHistory: List<Int>,
+        val countdown: Int?,
+        val now: Long,
+    )
 
     private val metaFlow = combine(
         actionMessage,
         heartRateHistory,
         safetyCountdownSec,
-    ) { msg, hrHistory, countdown ->
-        Triple(msg, hrHistory, countdown)
+        clockTicker,
+    ) { msg, hrHistory, countdown, now ->
+        MetaSnapshot(msg, hrHistory, countdown, now)
     }
 
     private fun scheduleAckReset() {
@@ -115,9 +130,9 @@ class WorkerDetailViewModel @Inject constructor(
                     alertRepository.observeActiveAlerts(workerOutcome.data.siteId),
                     monitoringRepository.observeVitalLogs(workerId),
                     metaFlow,
-                ) { reading, thresholds, alertsOutcome, vitalLogs, (message, history, countdown) ->
+                ) { reading, thresholds, alertsOutcome, vitalLogs, meta ->
                     val engine = SafetyStatusEngine(thresholds)
-                    val now = System.currentTimeMillis()
+                    val now = meta.now
                     val worker = workerOutcome.data
                     val age = worker.effectiveAge
                     WorkerDetailState(
@@ -135,10 +150,10 @@ class WorkerDetailViewModel @Inject constructor(
                         tempStatus = engine.evaluateTemperature(reading?.temperature, age),
                         ageBracket = thresholds.forAge(age),
                         stale = engine.isStale(reading, now),
-                        actionMessage = message,
-                        heartRateHistory = history,
+                        actionMessage = meta.message,
+                        heartRateHistory = meta.hrHistory,
                         vitalLogs = vitalLogs,
-                        safetyCountdownSec = countdown,
+                        safetyCountdownSec = meta.countdown,
                     )
                 }
             }

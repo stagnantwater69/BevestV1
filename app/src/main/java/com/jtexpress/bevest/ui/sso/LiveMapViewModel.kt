@@ -11,11 +11,13 @@ import com.jtexpress.bevest.domain.safety.SafetyStatusEngine
 import com.jtexpress.bevest.utils.Outcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
@@ -59,13 +61,19 @@ class LiveMapViewModel @Inject constructor(
                         return@flatMapLatest flowOf(LiveMapState(loading = false, noSite = true))
                     }
                     val myWorkerIds = workers.map { it.workerId }.toSet()
+                    val clockTicker = flow {
+                        while (true) {
+                            emit(System.currentTimeMillis())
+                            delay(2_000L)
+                        }
+                    }
                     combine(
                         monitoringRepository.observeReadings(workers.map { it.workerId }),
                         settingsRepository.observeThresholds(),
                         alertRepository.observeActiveAlerts(site),
-                    ) { readings, thresholds, alertsOutcome ->
+                        clockTicker,
+                    ) { readings, thresholds, alertsOutcome, now ->
                         val engine = SafetyStatusEngine(thresholds)
-                        val now = System.currentTimeMillis()
                         val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
                             .filter { it.workerId in myWorkerIds }
                         LiveMapState(

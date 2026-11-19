@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
@@ -122,15 +123,24 @@ class WorkerDirectoryViewModel @Inject constructor(
                     } else {
                         alertRepository.observeActiveAlerts(siteId)
                     }
+                    val filterAndClockFlow = combine(
+                        query,
+                        filter,
+                        flow {
+                            while (true) {
+                                emit(System.currentTimeMillis())
+                                delay(2_000L)
+                            }
+                        },
+                    ) { q, f, now -> Triple(q, f, now) }
+
                     combine(
                         monitoringRepository.observeReadings(workers.map { it.workerId }),
                         settingsRepository.observeThresholds(),
                         alertsFlow,
-                        query,
-                        filter,
-                    ) { readings, thresholds, alertsOutcome, q, f ->
+                        filterAndClockFlow,
+                    ) { readings, thresholds, alertsOutcome, (q, f, now) ->
                         val engine = SafetyStatusEngine(thresholds)
-                        val now = System.currentTimeMillis()
                         val myWorkerIds = workers.map { it.workerId }.toSet()
                         val alerts = (alertsOutcome as? Outcome.Success)?.data.orEmpty()
                             .filter { it.workerId in myWorkerIds }

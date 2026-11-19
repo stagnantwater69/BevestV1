@@ -364,7 +364,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
   const [fallSevereImpactG, setFallSevereImpactG] = useState(4.5);
   const [vitalMeta, setVitalMeta] = useState({
     inactivitySeconds: 180,
-    offlineTimeoutSeconds: 60,
+    offlineTimeoutSeconds: 12,
     responseTimeoutSeconds: 60,
     lowBatteryPercent: 20
   });
@@ -677,9 +677,10 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       if (d.fallFreefallG != null) setFallFreefallG(Number(d.fallFreefallG));
       if (d.fallImpactG != null) setFallImpactG(Number(d.fallImpactG));
       if (d.fallSevereImpactG != null) setFallSevereImpactG(Number(d.fallSevereImpactG));
+      const rawOffline = Number(d.offlineTimeoutSeconds);
       setVitalMeta({
         inactivitySeconds: Number(d.inactivitySeconds) || 180,
-        offlineTimeoutSeconds: Number(d.offlineTimeoutSeconds) || 60,
+        offlineTimeoutSeconds: (rawOffline > 0 && rawOffline < 60) ? rawOffline : 12,
         responseTimeoutSeconds: Number(d.responseTimeoutSeconds) || 60,
         lowBatteryPercent: Number(d.lowBatteryPercent) || 20
       });
@@ -813,7 +814,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         fallImpactG: toFiniteNum(fallImpactG, 2.8),
         fallSevereImpactG: toFiniteNum(fallSevereImpactG, 4.5),
         inactivitySeconds: toFiniteNum(vitalMeta.inactivitySeconds, 180),
-        offlineTimeoutSeconds: toFiniteNum(vitalMeta.offlineTimeoutSeconds, 60),
+        offlineTimeoutSeconds: toFiniteNum(vitalMeta.offlineTimeoutSeconds, 12),
         responseTimeoutSeconds: toFiniteNum(vitalMeta.responseTimeoutSeconds, 60),
         lowBatteryPercent: toFiniteNum(vitalMeta.lowBatteryPercent, 20),
         ageBrackets: sanitized,
@@ -901,7 +902,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             fallImpactG: 2.8,
             fallSevereImpactG: 4.5,
             inactivitySeconds: 180,
-            offlineTimeoutSeconds: 60,
+            offlineTimeoutSeconds: 12,
             responseTimeoutSeconds: 60,
             lowBatteryPercent: 20,
             ageBrackets: DEFAULT_VITAL_BRACKETS,

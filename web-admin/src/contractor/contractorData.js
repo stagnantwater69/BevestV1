@@ -20,7 +20,7 @@ import { logActivity } from '../activityLogger';
 export const DEFAULT_THRESHOLDS = {
   heartRateHigh: 100,
   temperatureHigh: 38.0,
-  offlineTimeoutSeconds: 60,
+  offlineTimeoutSeconds: 12,
 };
 
 export const STATUS_COLOR = {
@@ -346,9 +346,9 @@ export function useContractorData(contractorId) {
   const [readings, setReadings] = useState({});
   const [now, setNow] = useState(Date.now());
 
-  // Re-evaluate staleness periodically, so a silent vest flips to Offline.
+  // Re-evaluate staleness periodically, so a silent vest flips to Offline in real time.
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 10_000);
+    const t = setInterval(() => setNow(Date.now()), 2_000);
     return () => clearInterval(t);
   }, []);
 
@@ -483,10 +483,13 @@ export function useContractorData(contractorId) {
     (snap) => {
       if (!snap.exists()) return setThresholds(DEFAULT_THRESHOLDS);
       const d = snap.data();
+      const rawOffline = num(d.offlineTimeoutSeconds);
       setThresholds({
         heartRateHigh: num(d.heartRateHigh) ?? DEFAULT_THRESHOLDS.heartRateHigh,
         temperatureHigh: num(d.temperatureHigh) ?? DEFAULT_THRESHOLDS.temperatureHigh,
-        offlineTimeoutSeconds: num(d.offlineTimeoutSeconds) ?? DEFAULT_THRESHOLDS.offlineTimeoutSeconds,
+        offlineTimeoutSeconds: (rawOffline != null && rawOffline > 0 && rawOffline < 60)
+          ? rawOffline
+          : DEFAULT_THRESHOLDS.offlineTimeoutSeconds,
       });
       return undefined;
     },

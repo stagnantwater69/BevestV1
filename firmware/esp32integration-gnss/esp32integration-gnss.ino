@@ -129,8 +129,8 @@
 RTC_DATA_ATTR int rtcDoubleTapFlag = 0;
 
 // ── Timing & Intervals ───────────────────────────────────────────────────────
-#define PUSH_INTERVAL_MS 2500      // Telemetry push to Firebase every 2.5s
-#define VESTLIVE_INTERVAL_MS 10000 // Heartbeat to /vestsLive every 10s
+#define PUSH_INTERVAL_MS 2500     // Telemetry push to Firebase every 2.5s
+#define VESTLIVE_INTERVAL_MS 5000 // Heartbeat to /vestsLive every 5s
 #define FALL_COOLDOWN_MS 6000      // Hold fall status for 6s before resolving
 #define SAFETY_RESPONSE_TIMEOUT_MS                                             \
   15000 // 15-second buzzer window for worker safety response (D15 1-click)

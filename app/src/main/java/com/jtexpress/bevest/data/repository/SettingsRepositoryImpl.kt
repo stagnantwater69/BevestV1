@@ -74,6 +74,9 @@ class SettingsRepositoryImpl @Inject constructor(
             )
         }?.takeIf { it.isNotEmpty() } ?: d.ageBrackets
 
+        val rawOffline = data["offlineTimeoutSeconds"].asInt(d.offlineTimeoutSeconds)
+        val effectiveOffline = if (rawOffline <= 0 || rawOffline >= 60) d.offlineTimeoutSeconds else rawOffline
+
         return ThresholdConfig(
             heartRateLowDanger = data["heartRateLowDanger"].asInt(d.heartRateLowDanger),
             heartRateLowWarning = data["heartRateLowWarning"].asInt(d.heartRateLowWarning),
@@ -88,7 +91,7 @@ class SettingsRepositoryImpl @Inject constructor(
             fallImpactG = data["fallImpactG"].asDouble(d.fallImpactG),
             fallSevereImpactG = data["fallSevereImpactG"].asDouble(d.fallSevereImpactG),
             inactivitySeconds = data["inactivitySeconds"].asInt(d.inactivitySeconds),
-            offlineTimeoutSeconds = data["offlineTimeoutSeconds"].asInt(d.offlineTimeoutSeconds),
+            offlineTimeoutSeconds = effectiveOffline,
             responseTimeoutSeconds = data["responseTimeoutSeconds"].asInt(d.responseTimeoutSeconds),
             lowBatteryPercent = data["lowBatteryPercent"].asInt(d.lowBatteryPercent),
             ageBrackets = parsedBrackets,

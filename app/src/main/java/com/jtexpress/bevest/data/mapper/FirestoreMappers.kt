@@ -119,9 +119,9 @@ fun DocumentSnapshot.toWorker(): Worker {
 fun DocumentSnapshot.toVest(): Vest {
     val rawOnline = bool("online")
     val lastSeen = millis("lastSeen")
-    // Freshness check: must have communicated within the last 45 seconds to be considered active online
+    // Freshness check: must have communicated within the last 12 seconds to be considered active online
     val diff = if (lastSeen != null) System.currentTimeMillis() - lastSeen else Long.MAX_VALUE
-    val isRecentlySeen = lastSeen != null && (lastSeen > 100_000_000_000L) && diff <= 45_000L && diff >= -120_000L
+    val isRecentlySeen = lastSeen != null && (lastSeen > 100_000_000_000L) && diff <= 12_000L && diff >= -120_000L
     val isOnline = rawOnline && isRecentlySeen
     val rawStatus = VestStatus.fromRaw(strOrNull("status"))
     val assignedWorker = strOrNull("assignedWorkerId")?.takeIf { it.isNotBlank() }

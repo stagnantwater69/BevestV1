@@ -38,7 +38,7 @@ class VestRepositoryImpl @Inject constructor(
     private val vests get() = firestore.collection(FirebasePaths.VESTS)
     private val workers get() = firestore.collection(FirebasePaths.WORKERS)
     private val assignments get() = firestore.collection(FirebasePaths.VEST_ASSIGNMENTS)
-    private val ticker = flow { while (true) { emit(System.currentTimeMillis()); delay(10_000L) } }
+    private val ticker = flow { while (true) { emit(System.currentTimeMillis()); delay(2_000L) } }
 
     private data class LiveInfo(
         val online: Boolean,
@@ -93,8 +93,8 @@ class VestRepositoryImpl @Inject constructor(
                 ?: child.safeLong("timestamp")
                 ?: child.safeLong("lastSeen")
             val diff = if (lastSeen != null) now - lastSeen else Long.MAX_VALUE
-            val isRecent = lastSeen != null && diff <= 60_000L && diff >= -86_400_000L
-            val isLive = rawOnline && (isRecent || lastSeen == null || lastSeen <= 100_000_000_000L)
+            val isRecent = lastSeen != null && lastSeen > 100_000_000_000L && diff <= 12_000L && diff >= -86_400_000L
+            val isLive = rawOnline && isRecent
 
             val info = LiveInfo(
                 online = isLive,
