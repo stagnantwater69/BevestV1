@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FiGrid, FiUsers, FiFileText, FiCreditCard, FiX, FiMenu } from 'react-icons/fi';
+import { FiGrid, FiUsers, FiMapPin, FiFileText, FiCreditCard, FiX, FiMenu } from 'react-icons/fi';
 import { doc, onSnapshot } from 'firebase/firestore';
 import logo from '../assets/bevest_logo.png';
 import { auth, db } from '../firebase';
@@ -8,6 +8,7 @@ import { formatProfileName } from '../validation';
 import ContractorOverview from './ContractorOverview';
 import ContractorReports, { MonthlyReportDetail, IncidentHistory } from './ContractorReports';
 import ContractorSsos, { AddSso } from './ContractorSsos';
+import ContractorSites from './ContractorSites';
 import SsoProfile from './SsoProfile';
 import ContractorProfile from './ContractorProfile';
 import ContractorSubscription from './ContractorSubscription';
@@ -15,11 +16,12 @@ import './contractor.css';
 
 /**
  * Contractor web area. Same shell as the Admin dashboard (sidebar, user chip,
- * nav items, sign-out footer, mobile burger menu) with the contractor's mobile
- * tabs — Dashboard, SSOs, Reports, Subscription — as its navigation.
+ * nav items, sign-out footer, mobile burger menu) with the contractor's tabs —
+ * Dashboard, Project Sites, Site Safety Officers, Reports, Subscription.
  */
 const NAV = [
   { key: 'Dashboard', label: 'Dashboard', icon: FiGrid },
+  { key: 'Sites', label: 'Project Sites', icon: FiMapPin },
   { key: 'SSOs', label: 'Site Safety Officers', icon: FiUsers },
   { key: 'Reports', label: 'Reports', icon: FiFileText },
   { key: 'Subscription', label: 'Subscription', icon: FiCreditCard },
@@ -28,6 +30,7 @@ const NAV = [
 // Which nav tab each sub-page belongs to (for the active highlight).
 const PARENT_TAB = {
   Dashboard: 'Dashboard',
+  Sites: 'Sites',
   SSOs: 'SSOs',
   SsoProfile: 'SSOs',
   AddSso: 'SSOs',
@@ -41,6 +44,7 @@ const PARENT_TAB = {
 const ContractorDashboard = ({ user, onLogout }) => {
   const [profile, setProfile] = useState(user.profile || {});
   const [route, setRoute] = useState({ page: 'Dashboard', param: null, from: null });
+  const [sitesResetKey, setSitesResetKey] = useState(0);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // A contractor's own uid is their contractorId (see firestore.rules / AccountRepositoryImpl).
@@ -62,6 +66,9 @@ const ContractorDashboard = ({ user, onLogout }) => {
   const activeTab = PARENT_TAB[route.page];
 
   const go = (page, param = null) => {
+    if (page === 'Sites') {
+      setSitesResetKey((k) => k + 1);
+    }
     setRoute((r) => ({ page, param, from: r.page }));
     setIsMobileMenuOpen(false);
   };
@@ -93,6 +100,17 @@ const ContractorDashboard = ({ user, onLogout }) => {
         );
       case 'Incidents':
         return <IncidentHistory data={data} onBack={() => go('Reports')} />;
+      case 'Sites':
+        return (
+          <ContractorSites
+            contractorId={contractorId}
+            organizationId={profile.organizationId || null}
+            organizationName={profile.organizationName || profile.company || profile.companyName || null}
+            workers={data.workers}
+            onOpenSso={(uid) => go('SsoProfile', uid)}
+            resetSignal={sitesResetKey}
+          />
+        );
       case 'SSOs':
         return (
           <ContractorSsos

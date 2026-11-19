@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import {
-  FiUserCheck, FiPlus, FiSearch, FiLock, FiRefreshCw, FiX, FiTrash2, FiMapPin
+  FiUserCheck, FiPlus, FiSearch, FiLock, FiRefreshCw, FiX, FiTrash2
 } from 'react-icons/fi';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { collection, doc, setDoc } from 'firebase/firestore';
 import { secondaryAuth, db } from '../firebase';
-import { useContractorSsos, useContractorSites, siteLabel, STATUS_COLOR, initialsOf, deleteSsoWithWorkers } from './contractorData';
+import { useContractorSsos, useContractorSites, siteLabel, STATUS_COLOR, initialsOf, deleteSsoWithWorkers, createContractorSite } from './contractorData';
 import { PageHeader, SearchBox, Badge, EmptyState, ErrorState, Skeleton } from './ui';
 import { logActivity } from '../activityLogger';
 import PhoneInput, { formatPhoneWithCountryCode } from '../PhoneInput';
@@ -45,14 +45,6 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
   const [inlineSiteLocation, setInlineSiteLocation] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-
-  // Standalone Create Site modal state
-  const [showCreateSiteModal, setShowCreateSiteModal] = useState(false);
-  const [newSiteName, setNewSiteName] = useState('');
-  const [newSiteLocation, setNewSiteLocation] = useState('');
-  const [siteSubmitted, setSiteSubmitted] = useState(false);
-  const [savingSite, setSavingSite] = useState(false);
-  const [siteError, setSiteError] = useState('');
   const [confirmDialog, setConfirmDialog] = useState(null);
 
   const hasExistingSsos = ssos.length > 0;
@@ -90,61 +82,17 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
     setFormData((prev) => ({ ...prev, tempPassword: `SSO-2026-${randomNum}` }));
   };
 
-  const createContractorSiteDoc = async (nameRaw, locationRaw) => {
-    const cleanName = nameRaw.trim();
-    const cleanLocation = locationRaw.trim();
-    const slug = cleanName.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 16) || 'SITE';
-    const siteDocRef = doc(collection(db, 'projects'));
-    const siteId = `${slug}-${siteDocRef.id.slice(0, 5).toUpperCase()}`;
-    await setDoc(doc(db, 'projects', siteId), {
-      projectId: siteId,
-      name: cleanName,
-      location: cleanLocation,
-      contractorId: contractorId,
-      organizationId: organizationId || null,
-      organizationName: organizationName || null,
-      active: true,
-      createdAt: new Date()
-    });
-    await logActivity(`Contractor created project site: ${cleanName} (${siteId})`);
-    return siteId;
-  };
-
-  const handleCreateStandaloneSite = (e) => {
-    e.preventDefault();
-    setSiteError('');
-    setSiteSubmitted(true);
-    if (!newSiteName.trim()) {
-      setSiteError('Site name is required.');
-      return;
-    }
-    setConfirmDialog({
-      title: 'Confirm Create Project Site',
-      message: `Create project site "${newSiteName.trim()}"${newSiteLocation.trim() ? ` (${newSiteLocation.trim()})` : ''}?`,
-      confirmLabel: 'Create Site',
-      variant: 'primary',
-      onConfirm: async () => {
-        setConfirmDialog(null);
-        setSavingSite(true);
-        try {
-          await createContractorSiteDoc(newSiteName, newSiteLocation);
-          setNewSiteName('');
-          setNewSiteLocation('');
-          setShowCreateSiteModal(false);
-          setConfirmDialog({
-            title: 'Project Site Created',
-            message: 'Project site created successfully and is now available for your Site Safety Officers and workers.',
-            variant: 'success',
-            noticeOnly: true,
-          });
-        } catch (err) {
-          setSiteError(err.message || 'Failed to create project site.');
-        } finally {
-          setSavingSite(false);
-        }
-      },
-    });
-  };
+  const createContractorSiteDoc = async (nameRaw, locationRaw, startDateRaw = '', durationRaw = null) => (
+    createContractorSite({
+      contractorId,
+      organizationId,
+      organizationName,
+      name: nameRaw,
+      address: locationRaw,
+      startDate: startDateRaw,
+      durationMonths: durationRaw,
+    })
+  );
 
   const handleCreateSso = (e) => {
     e.preventDefault();
@@ -258,20 +206,11 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
       title="Site Safety Officers"
       subtitle="Officers monitoring workers on your sites"
       actions={
-        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => { setSiteError(''); setSiteSubmitted(false); setShowCreateSiteModal(true); }}
-          >
-            <FiMapPin /> Add Project Site
+        hasExistingSsos && (
+          <button id="ct-add-sso-btn" className="btn-primary" onClick={openAddSsoModal}>
+            <FiPlus /> Add Site Safety Officer
           </button>
-          {hasExistingSsos && (
-            <button id="ct-add-sso-btn" className="btn-primary" onClick={openAddSsoModal}>
-              <FiPlus /> Add Site Safety Officer
-            </button>
-          )}
-        </div>
+        )
       }
     />
   );
@@ -282,35 +221,6 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
   return (
     <>
       {header}
-
-      {/* Contractor's Isolated Project Sites Pill Strip */}
-      {sites.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
-            Your Project Sites ({sites.length}):
-          </span>
-          {sites.map((s) => (
-            <span
-              key={s.id}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.35rem',
-                padding: '0.25rem 0.65rem',
-                borderRadius: '999px',
-                fontSize: '0.78rem',
-                fontWeight: 600,
-                backgroundColor: '#fff7ed',
-                color: '#ea580c',
-                border: '1px solid #fed7aa'
-              }}
-            >
-              <FiMapPin style={{ fontSize: '0.75rem' }} />
-              {s.name}{s.location ? ` · ${s.location}` : ''}
-            </span>
-          ))}
-        </div>
-      )}
 
       {hasExistingSsos && (
         <div className="ct-toolbar">
@@ -433,62 +343,6 @@ const ContractorSsos = ({ contractorId, organizationId = null, organizationName 
                   {deleting ? 'Deleting...' : 'Delete Officer'}
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Create Project Site Modal */}
-      {showCreateSiteModal && (
-        <div className="modal-overlay" onClick={() => !savingSite && setShowCreateSiteModal(false)}>
-          <div className="modal-content ct-modal-sm" style={{ maxWidth: '460px' }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Create Project Site</h2>
-              <button
-                className="close-btn"
-                onClick={() => setShowCreateSiteModal(false)}
-                aria-label="Close"
-              >
-                <FiX />
-              </button>
-            </div>
-            <div className="modal-body ct-modal-body">
-              <p className="ct-muted" style={{ marginBottom: '1rem' }}>
-                Create a project site for your construction company. Only your Site Safety Officers and workers can be assigned to it.
-              </p>
-              <form onSubmit={handleCreateStandaloneSite} noValidate>
-                <div className="form-group-custom" style={{ marginBottom: '0.9rem' }}>
-                  <label className="form-label">Site Name *</label>
-                  <input
-                    type="text"
-                    className={`form-input${siteSubmitted && !newSiteName.trim() ? ' input-error' : ''}`}
-                    placeholder="e.g. North Tower Site A"
-                    value={newSiteName}
-                    onChange={(e) => setNewSiteName(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="form-group-custom" style={{ marginBottom: '1rem' }}>
-                  <label className="form-label">Location / Address</label>
-                  <AddressAutocomplete
-                    className="form-input"
-                    placeholder="e.g. Makati CBD, Metro Manila"
-                    value={newSiteLocation}
-                    onChange={(val) => setNewSiteLocation(val)}
-                  />
-                </div>
-                {siteError && (
-                  <div className="error-message" style={{ textAlign: 'left', marginBottom: '1rem' }}>{siteError}</div>
-                )}
-                <div className="form-actions">
-                  <button type="button" className="btn-secondary" onClick={() => setShowCreateSiteModal(false)} disabled={savingSite}>
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn-primary" disabled={savingSite}>
-                    {savingSite ? 'Creating...' : 'Create Site'}
-                  </button>
-                </div>
-              </form>
             </div>
           </div>
         </div>

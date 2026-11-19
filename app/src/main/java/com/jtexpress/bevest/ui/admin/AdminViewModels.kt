@@ -9,6 +9,7 @@ import com.jtexpress.bevest.domain.model.Vest
 import com.jtexpress.bevest.domain.model.VestStatus
 import com.jtexpress.bevest.domain.repository.AccountRepository
 import com.jtexpress.bevest.domain.repository.ActivityEntry
+import com.jtexpress.bevest.domain.repository.AuthRepository
 import com.jtexpress.bevest.domain.repository.SettingsRepository
 import com.jtexpress.bevest.domain.repository.SystemRepository
 import com.jtexpress.bevest.domain.repository.UserRepository
@@ -47,29 +48,44 @@ class AdminDashboardViewModel @Inject constructor(
     vestRepository: VestRepository,
     settingsRepository: SettingsRepository,
     systemRepository: SystemRepository,
+    authRepository: AuthRepository,
 ) : ViewModel() {
+
+    private val currentUid = authRepository.currentUserId()
+
+    private val allUsersFlow = userRepository.observeAllUsers()
 
     // Counted from every account rather than a per-role query: the role field is matched
     // case-insensitively, so accounts written as "Contractor" by the web are counted too.
     private val people = combine(
-        userRepository.observeAllUsers(),
+        allUsersFlow,
         workerRepository.observeWorkers(null, null),
     ) { usersOutcome, workers ->
-        val users = (usersOutcome as? Outcome.Success)?.data.orEmpty()
+        val allUsers = (usersOutcome as? Outcome.Success)?.data.orEmpty()
+        val myOrgId = currentUid?.let { uid -> allUsers.firstOrNull { it.uid == uid }?.organizationId }
+        val users = if (myOrgId != null) allUsers.filter { it.organizationId == myOrgId } else allUsers
+        val workerList = (workers as? Outcome.Success)?.data.orEmpty().let { list ->
+            if (myOrgId != null) list.filter { it.organizationId == myOrgId } else list
+        }
         Triple(
             users.count { it.role == UserRole.CONTRACTOR },
             users.count { it.role == UserRole.SSO },
-            (workers as? Outcome.Success)?.data.orEmpty().size,
+            workerList.size,
         )
     }
 
     private val system = combine(
         vestRepository.observeVests(),
         settingsRepository.observeMaintenanceMode(),
-        systemRepository.observeActivity(20),
-    ) { vestsOutcome, maintenance, activityOutcome ->
-        val vests = (vestsOutcome as? Outcome.Success)?.data.orEmpty()
-        val activity = (activityOutcome as? Outcome.Success)?.data.orEmpty()
+        systemRepository.observeActivity(200),
+        allUsersFlow,
+    ) { vestsOutcome, maintenance, activityOutcome, usersOutcome ->
+        val allUsers = (usersOutcome as? Outcome.Success)?.data.orEmpty()
+        val myOrgId = currentUid?.let { uid -> allUsers.firstOrNull { it.uid == uid }?.organizationId }
+        val vests = (vestsOutcome as? Outcome.Success)?.data.orEmpty().let { list ->
+            if (myOrgId != null) list.filter { it.organizationId == myOrgId } else list
+        }
+        val activity = filterCompanyActivity((activityOutcome as? Outcome.Success)?.data.orEmpty(), myOrgId, allUsers)
         Triple(vests, maintenance, activity)
     }
 
@@ -351,14 +367,50 @@ data class ActivityState(
     val entries: List<ActivityEntry> = emptyList(),
 )
 
+private fun filterCompanyActivity(
+    entries: List<ActivityEntry>,
+    myOrgId: String?,
+    allUsers: List<User>,
+): List<ActivityEntry> {
+    val orgByActor = buildMap {
+        allUsers.forEach { u ->
+            put(u.uid.lowercase(), u.organizationId)
+            if (u.email.isNotBlank()) put(u.email.trim().lowercase(), u.organizationId)
+        }
+    }
+    return entries.filter { entry ->
+        val msgLower = entry.message.lowercase()
+        val actorLower = entry.actorId.trim().lowercase()
+        if (msgLower.contains("developer") || actorLower.contains("developer")) return@filter false
+        if (myOrgId == null) return@filter true
+        if (!entry.organizationId.isNullOrBlank()) {
+            entry.organizationId == myOrgId
+        } else {
+            orgByActor[actorLower] == myOrgId
+        }
+    }
+}
+
 @HiltViewModel
 class AdminActivityViewModel @Inject constructor(
     systemRepository: SystemRepository,
+    userRepository: UserRepository,
+    authRepository: AuthRepository,
 ) : ViewModel() {
+    private val currentUid = authRepository.currentUserId()
+
     val state: StateFlow<ActivityState> =
-        systemRepository.observeActivity(100).map { outcome ->
+        combine(
+            systemRepository.observeActivity(200),
+            userRepository.observeAllUsers(),
+        ) { outcome, usersOutcome ->
+            val allUsers = (usersOutcome as? Outcome.Success)?.data.orEmpty()
+            val myOrgId = currentUid?.let { uid -> allUsers.firstOrNull { it.uid == uid }?.organizationId }
             when (outcome) {
-                is Outcome.Success -> ActivityState(loading = false, entries = outcome.data)
+                is Outcome.Success -> ActivityState(
+                    loading = false,
+                    entries = filterCompanyActivity(outcome.data, myOrgId, allUsers),
+                )
                 is Outcome.Failure -> ActivityState(loading = false, error = outcome.error.message)
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ActivityState())

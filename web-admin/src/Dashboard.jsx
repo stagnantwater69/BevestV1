@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   FiGrid, FiUsers, FiShield, FiUserPlus, FiActivity, FiClock, FiX, FiMenu
 } from 'react-icons/fi';
@@ -8,7 +8,7 @@ import { collection, doc, getDocs, query, orderBy, limit, onSnapshot } from 'fir
 import UserManagement from './UserManagement';
 import SystemManagement from './SystemManagement';
 import AdminProfile from './AdminProfile';
-import { formatTimeAgo } from './activityLogger';
+import { formatTimeAgo, setActivityContext } from './activityLogger';
 import { formatProfileName } from './validation';
 
 const Dashboard = ({ user, onLogout }) => {
@@ -38,78 +38,83 @@ const Dashboard = ({ user, onLogout }) => {
     return () => unsub();
   }, [user?.uid, user?.profile]);
 
+  const myOrgId = liveProfile?.organizationId || user?.profile?.organizationId || null;
+
+  useEffect(() => {
+    setActivityContext(myOrgId);
+  }, [myOrgId]);
+
   const adminName = formatProfileName(liveProfile, user?.email || 'Administrator');
 
   const adminInitials = ((liveProfile?.firstName?.[0] || '') + (liveProfile?.lastName?.[0] || '')).toUpperCase() ||
     (adminName.slice(0, 2).toUpperCase() || 'AD');
 
-  // Real-time Activity Logs from Firestore database
-  const [activityLogs, setActivityLogs] = useState([]);
+  // Real-time Activity Logs & Construction Company actor mapping from Firestore
+  const [rawLogs, setRawLogs] = useState([]);
+  const [actorOrgMap, setActorOrgMap] = useState(() => new Map());
   const [logsLoading, setLogsLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubUsers = onSnapshot(
+      collection(db, 'users'),
+      (snap) => {
+        const nextMap = new Map();
+        snap.forEach((uDoc) => {
+          const d = uDoc.data();
+          const orgId = d.organizationId || null;
+          nextMap.set(uDoc.id.toLowerCase(), orgId);
+          if (d.email) {
+            nextMap.set(String(d.email).trim().toLowerCase(), orgId);
+          }
+        });
+        setActorOrgMap(nextMap);
+      },
+      (err) => {
+        console.warn('Error subscribing to users for activity isolation:', err);
+      }
+    );
+    return () => unsubUsers();
+  }, []);
 
   // Subscribe to activityLog in real-time from Firestore
   useEffect(() => {
     let unsubscribe = () => {};
+    const mapSnapshot = (snapshot) => {
+      const logs = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        const actionText = d.message || d.action || 'Activity recorded';
+        logs.push({
+          id: docSnap.id,
+          action: actionText,
+          actorId: d.actorId || 'System',
+          organizationId: d.organizationId || null,
+          createdAt: d.createdAt || d.timestamp,
+          time: formatTimeAgo(d.createdAt || d.timestamp)
+        });
+      });
+      logs.sort((a, b) => {
+        const timeA = typeof a.createdAt === 'number' ? a.createdAt : (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0);
+        const timeB = typeof b.createdAt === 'number' ? b.createdAt : (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0);
+        return timeB - timeA;
+      });
+      setRawLogs(logs);
+      setLogsLoading(false);
+    };
+
     try {
       const q = query(
         collection(db, 'activityLog'),
         orderBy('createdAt', 'desc'),
-        limit(50)
+        limit(200)
       );
 
       unsubscribe = onSnapshot(
         q,
-        (snapshot) => {
-          const logs = [];
-          snapshot.forEach((doc) => {
-            const d = doc.data();
-            const actionText = d.message || d.action || 'Activity recorded';
-            if (
-              actionText.toLowerCase().includes('developer') ||
-              (d.actorId && d.actorId.toLowerCase().includes('developer'))
-            ) {
-              return;
-            }
-            logs.push({
-              id: doc.id,
-              action: actionText,
-              actorId: d.actorId || 'System',
-              createdAt: d.createdAt || d.timestamp,
-              time: formatTimeAgo(d.createdAt || d.timestamp)
-            });
-          });
-          setActivityLogs(logs);
-          setLogsLoading(false);
-        },
+        mapSnapshot,
         (err) => {
           console.warn('Falling back to unordered activityLog fetch:', err);
-          const fallbackUnsub = onSnapshot(collection(db, 'activityLog'), (snapshot) => {
-            const logs = [];
-            snapshot.forEach((doc) => {
-            const d = doc.data();
-            const actionText = d.message || d.action || 'Activity recorded';
-            if (
-              actionText.toLowerCase().includes('developer') ||
-              (d.actorId && d.actorId.toLowerCase().includes('developer'))
-            ) {
-              return;
-            }
-            logs.push({
-              id: doc.id,
-              action: actionText,
-              actorId: d.actorId || 'System',
-              createdAt: d.createdAt || d.timestamp,
-              time: formatTimeAgo(d.createdAt || d.timestamp)
-            });
-          });
-            logs.sort((a, b) => {
-              const timeA = typeof a.createdAt === 'number' ? a.createdAt : (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0);
-              const timeB = typeof b.createdAt === 'number' ? b.createdAt : (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0);
-              return timeB - timeA;
-            });
-            setActivityLogs(logs.slice(0, 50));
-            setLogsLoading(false);
-          });
+          const fallbackUnsub = onSnapshot(collection(db, 'activityLog'), mapSnapshot);
           unsubscribe = fallbackUnsub;
         }
       );
@@ -120,6 +125,24 @@ const Dashboard = ({ user, onLogout }) => {
 
     return () => unsubscribe();
   }, []);
+
+  const activityLogs = useMemo(() => {
+    return rawLogs.filter((log) => {
+      const actionLower = (log.action || '').toLowerCase();
+      const actorLower = (log.actorId || '').trim().toLowerCase();
+      if (actionLower.includes('developer') || actorLower.includes('developer')) {
+        return false;
+      }
+      if (!myOrgId) return true;
+      if (log.organizationId) {
+        return log.organizationId === myOrgId;
+      }
+      // Fallback for legacy log entries without explicit organizationId:
+      // allow only when the actor belongs to this Admin's construction company.
+      const resolvedActorOrg = actorOrgMap.get(actorLower);
+      return resolvedActorOrg === myOrgId;
+    });
+  }, [rawLogs, myOrgId, actorOrgMap]);
 
   useEffect(() => {
     const fetchCounts = async () => {

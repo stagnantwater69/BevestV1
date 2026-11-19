@@ -106,9 +106,15 @@ service cloud.firestore {
                   || resource == null  // let an SSO check whether an auto ID is free
                   || (isContractor() && (resource.data.contractorId == request.auth.uid || resource.data.contractorId == myContractorId()))
                   || isSso();
-      allow create, update: if isAdmin()
-                            || isDeveloper()  // developer vest deletion unlinks workers
-                            || isSso();
+      allow create: if isAdmin()
+                    || isDeveloper()
+                    || isSso();
+      allow update: if isAdmin()
+                    || isDeveloper()  // developer vest deletion unlinks workers
+                    || isSso()
+                    || (isContractor()
+                        && (resource.data.contractorId == request.auth.uid || resource.data.contractorId == myContractorId())
+                        && request.resource.data.contractorId == resource.data.contractorId);
       allow delete: if isAdmin()
                     || isDeveloper()
                     || isSso()
@@ -173,8 +179,14 @@ service cloud.firestore {
     // ---- projects / sites ----
     match /projects/{projectId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin() || isDeveloper()
-                   || (isContractor() && request.resource.data.contractorId == request.auth.uid);
+      allow create: if isAdmin() || isDeveloper()
+                    || (isContractor() && (request.resource.data.contractorId == request.auth.uid || request.resource.data.contractorId == myContractorId()));
+      allow update: if isAdmin() || isDeveloper()
+                    || (isContractor()
+                        && (resource.data.contractorId == request.auth.uid || resource.data.contractorId == myContractorId())
+                        && request.resource.data.contractorId == resource.data.contractorId);
+      allow delete: if isAdmin() || isDeveloper()
+                    || (isContractor() && (resource.data.contractorId == request.auth.uid || resource.data.contractorId == myContractorId()));
     }
 
     // ---- construction companies (and legacy organizations) ----

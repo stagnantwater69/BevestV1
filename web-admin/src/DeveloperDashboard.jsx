@@ -108,10 +108,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     };
   };
 
+  const formatNumericDisplay = (val) => (val === 0 || val === '0' || val === '' || val == null ? '' : String(val));
+
   const parseNumericField = (raw) => {
     const str = String(raw ?? '');
     if (str === '') return '';
-    const digits = str.replace(/\D/g, '');
+    const digits = str.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
     if (!digits) return '';
     return Number(digits);
   };
@@ -389,7 +391,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
     setSavingWebpage(true);
     try {
       await saveWebpageSettings(webpageForm, devEmail);
-      await logActivity('Updated public BeVest Webpage contact & hero settings', devEmail);
+      await logActivity('Updated public BeVest Webpage contact & hero settings', devEmail, null);
       showToast('success', '✓ BeVest Webpage settings saved and live!');
     } catch (err) {
       console.error('Error saving webpage settings:', err);
@@ -409,7 +411,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         smallTitle: defaults.smallTitle,
         bigTitle: defaults.bigTitle
       });
-      await logActivity('Reset public BeVest Webpage settings to defaults', devEmail);
+      await logActivity('Reset public BeVest Webpage settings to defaults', devEmail, null);
       showToast('success', '✓ BeVest Webpage settings restored to defaults.');
     } catch (err) {
       showToast('error', 'Failed to reset webpage settings: ' + err.message);
@@ -827,7 +829,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         throw lastError;
       }
 
-      await logActivity('Updated age-based Vital Signs Warning & Danger thresholds for Heart Rate and Body Temperature', devEmail);
+      await logActivity('Updated age-based Vital Signs Warning & Danger thresholds for Heart Rate and Body Temperature', devEmail, null);
       showToast('success', '✓ Vital Signs age-based Warning & Danger thresholds saved and synced to SSO devices!');
     } catch (err) {
       console.error('Failed to save vital thresholds:', err);
@@ -909,7 +911,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             throw lastError;
           }
 
-          await logActivity('Reset Vital Signs thresholds to factory defaults', devEmail);
+          await logActivity('Reset Vital Signs thresholds to factory defaults', devEmail, null);
           showToast('success', '✓ Reset Vital Signs thresholds to factory defaults!');
         } catch (err) {
           showToast('error', 'Failed to reset thresholds: ' + err.message);
@@ -985,7 +987,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         }
       }
 
-      await logActivity(`Smart vest ${cleanId} (MAC: ${rawMac}, S/N: ${cleanSerial}) registered to inventory (Status: ${genStatus || 'AVAILABLE'})`, devEmail);
+      await logActivity(`Smart vest ${cleanId} (MAC: ${rawMac}, S/N: ${cleanSerial}) registered to inventory (Status: ${genStatus || 'AVAILABLE'})`, devEmail, null);
       showToast('success', `✓ Vest ${cleanId} [MAC: ${rawMac}] saved to database!`);
       
       handleRegenerateId();
@@ -1040,7 +1042,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         }
       }
 
-      await logActivity(`Batch registered ${count} smart vests with MAC addresses to inventory (Status: ${batchStatus || 'AVAILABLE'})`, devEmail);
+      await logActivity(`Batch registered ${count} smart vests with MAC addresses to inventory (Status: ${batchStatus || 'AVAILABLE'})`, devEmail, null);
       showToast('success', `✓ Successfully generated and saved ${count} vests with MAC addresses to database!`);
       setShowBatchModal(false);
     } catch (err) {
@@ -1151,7 +1153,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
           // 3. Delete from Firestore
           await deleteDoc(doc(db, 'vests', vestId));
-          await logActivity(`Deleted smart vest ${vestId} from central hardware database (unlinked ${purge.workers} worker(s), removed ${purge.assignments} assignment record(s))`, devEmail);
+          await logActivity(`Deleted smart vest ${vestId} from central hardware database (unlinked ${purge.workers} worker(s), removed ${purge.assignments} assignment record(s))`, devEmail, null);
           if (purge.errors.length) {
             showToast('error', `Vest ${vestId} deleted, but some assignment cleanup failed (${purge.errors[0]}). Deploy the latest firestore.rules and run "Repair Orphaned Assignments".`);
           } else {
@@ -1163,99 +1165,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         }
       },
     });
-  };
-
-  /**
-   * One-click repair for data left behind by earlier deletions: any worker whose
-   * assignedVestId points at a vest that no longer exists is unlinked, and any
-   * vestAssignments record for a missing vest is deleted.
-   */
-  const [repairing, setRepairing] = useState(false);
-  const handleRepairOrphanedAssignments = async () => {
-    const ok = window.confirm('Scan all workers and vest assignment records, and remove any that point to a vest that no longer exists in the hardware database?');
-    if (!ok) return;
-    setRepairing(true);
-    try {
-      const vestsSnap = await getDocs(collection(db, 'vests'));
-      const vestById = {};
-      vestsSnap.docs.forEach(v => { vestById[v.id] = v.data() || {}; });
-
-      let workersFixed = 0;
-      let assignmentsRemoved = 0;
-
-      const workersSnap = await getDocs(collection(db, 'workers'));
-      for (const w of workersSnap.docs) {
-        const vId = w.data()?.assignedVestId;
-        if (!vId) continue;
-        const vest = vestById[vId];
-        // Orphan if the vest is gone, or the vest says it belongs to someone else / nobody
-        const orphan = !vest || (vest.assignedWorkerId || null) !== w.id;
-        if (orphan) {
-          await updateDoc(w.ref, { assignedVestId: null });
-          try { await remove(ref(rtdb, `workerToVest/${w.id}`)); } catch (_) {}
-          workersFixed += 1;
-        }
-      }
-
-      const asgSnap = await getDocs(collection(db, 'vestAssignments'));
-      for (const a of asgSnap.docs) {
-        const vId = a.data()?.vestId;
-        if (!vId || !vestById[vId]) {
-          await deleteDoc(a.ref);
-          try { await remove(ref(rtdb, `vestToWorker/${vId}`)); } catch (_) {}
-          assignmentsRemoved += 1;
-        }
-      }
-
-      await logActivity(`Repaired orphaned assignments: unlinked ${workersFixed} worker(s), removed ${assignmentsRemoved} assignment record(s)`, devEmail);
-      showToast('success', `✓ Repair complete. Unlinked ${workersFixed} worker(s) and removed ${assignmentsRemoved} orphaned assignment record(s).`);
-    } catch (err) {
-      console.error('Repair orphaned assignments failed:', err);
-      showToast('error', 'Repair failed: ' + err.message + ' (make sure the latest firestore.rules are deployed)');
-    } finally {
-      setRepairing(false);
-    }
-  };
-
-  /**
-   * One-click purge for any leftover simulated alerts, incidents, or live readings
-   */
-  const [purgingSim, setPurgingSim] = useState(false);
-  const handlePurgeAllSimulatedData = async () => {
-    const ok = window.confirm('Permanently delete all simulated alerts and incidents from Firestore and clear any simulated readings from Realtime Database?');
-    if (!ok) return;
-    setPurgingSim(true);
-    try {
-      let deletedAlerts = 0;
-      let deletedIncidents = 0;
-
-      const alertsSnap = await getDocs(query(collection(db, 'alerts'), where('simulated', '==', true)));
-      for (const d of alertsSnap.docs) {
-        await deleteDoc(d.ref);
-        deletedAlerts++;
-      }
-
-      const incidentsSnap = await getDocs(query(collection(db, 'incidents'), where('simulated', '==', true)));
-      for (const d of incidentsSnap.docs) {
-        await deleteDoc(d.ref);
-        deletedIncidents++;
-      }
-
-      const workersSnap = await getDocs(collection(db, 'workers'));
-      for (const w of workersSnap.docs) {
-        try {
-          await remove(ref(rtdb, 'liveReadings/' + w.id));
-        } catch (_) {}
-      }
-
-      await logActivity('Purged all simulated data: removed ' + deletedAlerts + ' alert(s) and ' + deletedIncidents + ' incident(s)', devEmail);
-      showToast('success', '✓ Purged ' + deletedAlerts + ' simulated alert(s) and ' + deletedIncidents + ' simulated incident(s).');
-    } catch (err) {
-      console.error('Purge simulated data failed:', err);
-      showToast('error', 'Purge failed: ' + err.message);
-    } finally {
-      setPurgingSim(false);
-    }
   };
 
   const handleOpenQrViewer = (vest) => {
@@ -1364,7 +1273,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
             createdByDeveloper: devEmail
           };
           await setDoc(doc(db, 'constructionCompanies', orgId), orgDoc);
-          await logActivity(`Created construction company ${orgDoc.name} (${orgId})`, devEmail);
+          await logActivity(`Created construction company ${orgDoc.name} (${orgId})`, devEmail, null);
           setOrgForm({ name: '', address: '', phone: '', email: '', pointOfContact: '' });
           setOrgFormSubmitted(false);
           setAdminOrgId(orgId);
@@ -1396,7 +1305,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         setConfirmDialog(null);
         try {
           await deleteDoc(doc(db, 'constructionCompanies', org.id));
-          await logActivity(`Deleted construction company ${org.name} (${org.id})`, devEmail);
+          await logActivity(`Deleted construction company ${org.name} (${org.id})`, devEmail, null);
           showToast('success', `✓ Construction Company "${org.name}" deleted.`);
         } catch (err) {
           showToast('error', 'Failed to delete construction company: ' + err.message);
@@ -1484,7 +1393,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
       } catch (_) {}
 
       // Log activity
-      await logActivity(`Provisioned Admin account for ${adminEmail.trim()} (${resolvedCompany})`, devEmail);
+      await logActivity(`Provisioned Admin account for ${adminEmail.trim()} (${resolvedCompany})`, devEmail, selectedOrg ? selectedOrg.id : null);
 
       showToast('success', `✓ Admin account for ${resolvedCompany} (${adminEmail.trim()}) registered in users collection!`);
       setShowAddAdminModal(false);
@@ -1522,7 +1431,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         setConfirmDialog(null);
         try {
           await deleteDoc(doc(db, 'users', adminAccount.id));
-          await logActivity(`Deleted Admin account: ${adminAccount.email}`, devEmail);
+          await logActivity(`Deleted Admin account: ${adminAccount.email}`, devEmail, adminAccount.organizationId || null);
           setConfirmDialog({
             title: 'Admin Account Deleted',
             message: `Admin account for ${adminAccount.email} has been permanently deleted.`,
@@ -1583,7 +1492,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
         'subscription.lastPaymentAmount': Number(paymentAmount)
       });
 
-      await logActivity(`Verified ₱${Number(paymentAmount).toLocaleString()} payment from ${paymentContractor.email} (Ref: ${paymentRef})`, devEmail);
+      await logActivity(`Verified ₱${Number(paymentAmount).toLocaleString()} payment from ${paymentContractor.email} (Ref: ${paymentRef})`, devEmail, paymentContractor.organizationId || null);
       showToast('success', `✓ Payment verified and subscription activated for ${paymentContractor.email}!`);
       setShowPaymentModal(false);
       setPaymentNotes('');
@@ -1623,7 +1532,7 @@ const DeveloperDashboard = ({ user, onLogout }) => {
 
       await updateDoc(doc(db, 'users', troubleshootTarget.id), updates);
 
-      await logActivity(`Adjusted subscription parameters for ${troubleshootTarget.email} (Status: ${troubleshootStatus})`, devEmail);
+      await logActivity(`Adjusted subscription parameters for ${troubleshootTarget.email} (Status: ${troubleshootStatus})`, devEmail, troubleshootTarget.organizationId || null);
       showToast('success', `✓ Successfully updated subscription parameters for ${troubleshootTarget.email}`);
       setTroubleshootTarget(null);
       setTroubleshootVestBoost(0);
@@ -1821,28 +1730,6 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                   onClick={() => setShowBatchModal(true)}
                 >
                   <FiLayers /> Batch Generate QR Codes
-                </button>
-              )}
-              {activeTab === 'hardware' && (
-                <button
-                  type="button"
-                  className="dev-btn-orange"
-                  onClick={handleRepairOrphanedAssignments}
-                  disabled={repairing}
-                  title="Unlink workers and delete assignment records that point to deleted vests"
-                >
-                  <FiRefreshCw /> {repairing ? 'Repairing…' : 'Repair Orphaned Assignments'}
-                </button>
-              )}
-              {activeTab === 'hardware' && (
-                <button
-                  type="button"
-                  className="dev-btn-orange"
-                  onClick={handlePurgeAllSimulatedData}
-                  disabled={purgingSim}
-                  title="Purge all simulated alerts, incidents, and RTDB live readings"
-                >
-                  <FiTrash2 /> {purgingSim ? 'Purging…' : 'Purge Simulated Data'}
                 </button>
               )}
               {activeTab === 'subscriptions' && (
@@ -2590,8 +2477,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                       type="text"
                       inputMode="numeric"
                       className="dev-input"
+                      placeholder="0"
                       style={{ width: '130px', padding: '0.35rem 0.6rem', fontWeight: 700 }}
-                      value={vestRateInput}
+                      value={formatNumericDisplay(vestRateInput)}
                       onChange={(e) => handleVestRateChange(e.target.value)}
                     />
                   </div>
@@ -2653,8 +2541,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                               type="text"
                               inputMode="numeric"
                               className="dev-input"
+                              placeholder="0"
                               style={{ padding: '0.35rem 0.5rem' }}
-                              value={isCustom ? (t.minVests ?? '') : (t.vests ?? '')}
+                              value={formatNumericDisplay(isCustom ? t.minVests : t.vests)}
                               onChange={(e) => handleTierFieldChange(tierKey, isCustom ? 'minVests' : 'vests', parseNumericField(e.target.value))}
                             />
                           </div>
@@ -2666,8 +2555,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                               type="text"
                               inputMode={isCustom ? 'text' : 'numeric'}
                               className="dev-input"
+                              placeholder={isCustom ? '' : '0'}
                               style={{ padding: '0.35rem 0.5rem' }}
-                              value={t.ssos ?? ''}
+                              value={isCustom ? (t.ssos ?? '') : formatNumericDisplay(t.ssos)}
                               onChange={(e) => handleTierFieldChange(tierKey, 'ssos', isCustom ? e.target.value : parseNumericField(e.target.value))}
                             />
                           </div>
@@ -2677,8 +2567,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                               type="text"
                               inputMode="numeric"
                               className="dev-input"
+                              placeholder="0"
                               style={{ padding: '0.35rem 0.5rem' }}
-                              value={t.storageGb ?? ''}
+                              value={formatNumericDisplay(t.storageGb)}
                               onChange={(e) => {
                                 const gb = parseNumericField(e.target.value);
                                 handleTierFieldChange(tierKey, 'storageGb', gb);
@@ -2692,8 +2583,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                               type="text"
                               inputMode="numeric"
                               className="dev-input"
+                              placeholder="0"
                               style={{ padding: '0.35rem 0.5rem' }}
-                              value={t.discountPercent ?? ''}
+                              value={formatNumericDisplay(t.discountPercent)}
                               onChange={(e) => handleTierFieldChange(tierKey, 'discountPercent', parseNumericField(e.target.value))}
                             />
                           </div>
@@ -2708,8 +2600,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                 type="text"
                                 inputMode="numeric"
                                 className="dev-input"
+                                placeholder="0"
                                 style={{ padding: '0.35rem 0.5rem', fontWeight: 600 }}
-                                value={t.monthlyPrice ?? ''}
+                                value={formatNumericDisplay(t.monthlyPrice)}
                                 onChange={(e) => handleTierFieldChange(tierKey, 'monthlyPrice', parseNumericField(e.target.value))}
                               />
                             </div>
@@ -2719,8 +2612,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                 type="text"
                                 inputMode="numeric"
                                 className="dev-input"
+                                placeholder="0"
                                 style={{ padding: '0.35rem 0.5rem', fontWeight: 600 }}
-                                value={t.annualPrice ?? ''}
+                                value={formatNumericDisplay(t.annualPrice)}
                                 onChange={(e) => handleTierFieldChange(tierKey, 'annualPrice', parseNumericField(e.target.value))}
                               />
                             </div>
@@ -2732,8 +2626,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                     type="text"
                                     inputMode="numeric"
                                     className="dev-input"
+                                    placeholder="0"
                                     style={{ padding: '0.35rem 0.5rem' }}
-                                    value={t.baseMonthlyPrice ?? ''}
+                                    value={formatNumericDisplay(t.baseMonthlyPrice)}
                                     onChange={(e) => handleTierFieldChange(tierKey, 'baseMonthlyPrice', parseNumericField(e.target.value))}
                                   />
                                 </div>
@@ -2743,8 +2638,9 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                                     type="text"
                                     inputMode="numeric"
                                     className="dev-input"
+                                    placeholder="0"
                                     style={{ padding: '0.35rem 0.5rem' }}
-                                    value={t.baseAnnualPrice ?? ''}
+                                    value={formatNumericDisplay(t.baseAnnualPrice)}
                                     onChange={(e) => handleTierFieldChange(tierKey, 'baseAnnualPrice', parseNumericField(e.target.value))}
                                   />
                                 </div>
@@ -3984,10 +3880,12 @@ const DeveloperDashboard = ({ user, onLogout }) => {
                 <div className="dev-form-group">
                   <label className="dev-form-label">AMOUNT (PHP ₱) *</label>
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
                     className="dev-input"
-                    value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    placeholder="0"
+                    value={formatNumericDisplay(paymentAmount)}
+                    onChange={(e) => setPaymentAmount(parseNumericField(e.target.value))}
                     required
                   />
                 </div>

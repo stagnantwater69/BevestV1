@@ -82,7 +82,7 @@ fun WorkerDirectoryScreen(
         title = "Workers",
         subtitle = if (user.role == UserRole.SSO) user.siteId else null,
         floatingActionButton = {
-            if (canAdd) {
+            if (canAdd && !state.loading && state.error == null && !state.noSite && state.all.isNotEmpty()) {
                 ExtendedFloatingActionButton(
                     onClick = onAddWorker,
                     icon = { Icon(BevestIcons.Add, contentDescription = null) },

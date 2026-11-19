@@ -7,12 +7,13 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
-  collection, query, where, orderBy, limit, onSnapshot, doc, getDocs, updateDoc, deleteDoc,
+  collection, query, where, orderBy, limit, onSnapshot, doc, getDocs, setDoc, updateDoc, deleteDoc,
 } from 'firebase/firestore';
 import { ref, onValue, remove } from 'firebase/database';
 import { db, rtdb } from '../firebase';
 import { formatPhoneWithCountryCode } from '../PhoneInput';
 import { formatProfileName } from '../validation';
+import { logActivity } from '../activityLogger';
 
 // ------------------------------------------------------------------ constants
 
@@ -599,7 +600,18 @@ export function useContractorSites(contractorId) {
         sites: qs.docs
           .map((d) => {
             const v = d.data();
-            return { id: d.id, name: v.name || d.id, location: v.location || '', active: v.active !== false };
+            const address = v.address || v.location || '';
+            return {
+              id: d.id,
+              projectId: v.projectId || d.id,
+              name: v.name || d.id,
+              location: address,
+              address,
+              startDate: v.startDate || '',
+              durationMonths: v.durationMonths != null && v.durationMonths !== '' ? Number(v.durationMonths) : null,
+              active: v.active !== false,
+              createdAt: toMillis(v.createdAt),
+            };
           })
           .filter((s) => s.active)
           .sort((a, b) => a.name.localeCompare(b.name)),
@@ -619,6 +631,136 @@ export const siteLabel = (sites, siteId) => {
   const site = sites.find((s) => s.id === siteId);
   return site ? site.name : siteId;
 };
+
+/**
+ * Creates a contractor-scoped project site in Firestore `projects/{siteId}`.
+ */
+export async function createContractorSite({
+  contractorId,
+  organizationId = null,
+  organizationName = null,
+  name,
+  address = '',
+  startDate = '',
+  durationMonths = null,
+}) {
+  const cleanName = String(name || '').trim();
+  const cleanAddress = String(address || '').trim();
+  const cleanStartDate = String(startDate || '').trim();
+  const cleanDuration =
+    durationMonths != null && durationMonths !== '' && Number.isFinite(Number(durationMonths))
+      ? Number(durationMonths)
+      : null;
+
+  const slug = cleanName.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 16) || 'SITE';
+  const siteDocRef = doc(collection(db, 'projects'));
+  const siteId = `${slug}-${siteDocRef.id.slice(0, 5).toUpperCase()}`;
+
+  await setDoc(doc(db, 'projects', siteId), {
+    projectId: siteId,
+    name: cleanName,
+    location: cleanAddress,
+    address: cleanAddress,
+    startDate: cleanStartDate || null,
+    durationMonths: cleanDuration,
+    contractorId,
+    organizationId: organizationId || null,
+    organizationName: organizationName || null,
+    active: true,
+    createdAt: new Date(),
+  });
+  await logActivity(
+    `Contractor created project site: ${cleanName} (${siteId})`,
+    null,
+    organizationId || null,
+  );
+  return siteId;
+}
+
+/**
+ * Updates an existing contractor project site in Firestore `projects/{siteId}`.
+ */
+export async function updateContractorSite({
+  siteId,
+  organizationId = null,
+  name,
+  address = '',
+  startDate = '',
+  durationMonths = null,
+}) {
+  if (!siteId) throw new Error('Missing project site ID.');
+  const cleanName = String(name || '').trim();
+  const cleanAddress = String(address || '').trim();
+  const cleanStartDate = String(startDate || '').trim();
+  const cleanDuration =
+    durationMonths != null && durationMonths !== '' && Number.isFinite(Number(durationMonths))
+      ? Number(durationMonths)
+      : null;
+
+  await updateDoc(doc(db, 'projects', siteId), {
+    name: cleanName,
+    location: cleanAddress,
+    address: cleanAddress,
+    startDate: cleanStartDate || null,
+    durationMonths: cleanDuration,
+    updatedAt: new Date(),
+  });
+  await logActivity(
+    `Contractor updated project site: ${cleanName} (${siteId})`,
+    null,
+    organizationId || null,
+  );
+}
+
+/**
+ * Deletes a contractor project site (`projects/{siteId}`) and clears `siteId`
+ * on any assigned SSOs or workers belonging to this contractor.
+ */
+export async function deleteContractorSite({
+  siteId,
+  siteName = '',
+  contractorId = null,
+  organizationId = null,
+}) {
+  if (!siteId) throw new Error('Missing project site ID.');
+
+  if (contractorId) {
+    const [ssoRes, workerRes] = await Promise.allSettled([
+      getDocs(query(collection(db, 'users'), where('contractorId', '==', contractorId), limit(200))),
+      getDocs(query(collection(db, 'workers'), where('contractorId', '==', contractorId))),
+    ]);
+
+    const unlinks = [];
+    if (ssoRes.status === 'fulfilled') {
+      ssoRes.value.docs.forEach((d) => {
+        if (d.data()?.siteId === siteId) {
+          unlinks.push(updateDoc(doc(db, 'users', d.id), { siteId: null }));
+        }
+      });
+    } else {
+      console.warn('Skipping SSO siteId unlink query:', ssoRes.reason);
+    }
+    if (workerRes.status === 'fulfilled') {
+      workerRes.value.docs.forEach((d) => {
+        if (d.data()?.siteId === siteId) {
+          unlinks.push(updateDoc(doc(db, 'workers', d.id), { siteId: null }));
+        }
+      });
+    } else {
+      console.warn('Skipping worker siteId unlink query:', workerRes.reason);
+    }
+    if (unlinks.length > 0) {
+      await Promise.allSettled(unlinks);
+    }
+  }
+
+  await deleteDoc(doc(db, 'projects', siteId));
+  await logActivity(
+    `Contractor deleted project site: ${siteName || siteId} (${siteId})`,
+    null,
+    organizationId || null,
+  );
+}
 
 /**
  * Deletes an SSO document in `users/{ssoUid}` along with all workers belonging

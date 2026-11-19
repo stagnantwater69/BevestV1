@@ -13,7 +13,7 @@ import {
 import { doc, getDoc, setDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import logo from './assets/bevest_logo.png';
-import { logActivity } from './activityLogger';
+import { logActivity, setActivityContext } from './activityLogger';
 import PhoneInput, { formatPhoneWithCountryCode } from './PhoneInput';
 import { validateEmail, liveEmailError } from './validation';
 
@@ -125,8 +125,13 @@ const Login = ({ onLogin, onBackToHome }) => {
         } else {
           // Success: route to the role-specific web experience
           console.log(`${role} logged in successfully!`);
+          setActivityContext(userData.organizationId || null);
           if (role !== 'DEVELOPER') {
-            logActivity(`${role === 'ADMIN' ? 'Admin' : 'Contractor'} signed in: ${user.email}`, user.email);
+            logActivity(
+              `${role === 'ADMIN' ? 'Admin' : 'Contractor'} signed in: ${user.email}`,
+              user.email,
+              userData.organizationId || null
+            );
           }
 
           // Update local directory cache for password recovery lookup
@@ -397,7 +402,7 @@ const Login = ({ onLogin, onBackToHome }) => {
   };
 
   // Dispatch real SMS verification code via Firebase Authentication
-  const dispatchFirebaseSms = async (rawPhone, email, docId) => {
+  const dispatchFirebaseSms = async (rawPhone, email, docId, organizationId = null) => {
     const e164 = toE164(rawPhone);
     if (!e164 || e164.length < 8) {
       throw new Error('The registered phone number is invalid for SMS delivery.');
@@ -410,7 +415,7 @@ const Login = ({ onLogin, onBackToHome }) => {
 
     const confirmation = await signInWithPhoneNumber(auth, e164, verifier);
     setConfirmationResult(confirmation);
-    setPhoneFoundData({ phone: rawPhone, e164, email, docId });
+    setPhoneFoundData({ phone: rawPhone, e164, email, docId, organizationId });
     setResendTimer(60);
     setPhoneStep('otp');
     setOtpCode('');
@@ -443,7 +448,12 @@ const Login = ({ onLogin, onBackToHome }) => {
           return;
         }
 
-        targetAccount = { phone: result.phone, email: emailToTest, docId: result.docId };
+        targetAccount = {
+          phone: result.phone,
+          email: emailToTest,
+          docId: result.docId,
+          organizationId: result.data?.organizationId || null,
+        };
       } else {
         if (!resetPhone.trim()) {
           setResetError('Please enter your registered phone number.');
@@ -458,12 +468,22 @@ const Login = ({ onLogin, onBackToHome }) => {
           return;
         }
 
-        targetAccount = { phone: result.phone, email: result.email, docId: result.docId };
+        targetAccount = {
+          phone: result.phone,
+          email: result.email,
+          docId: result.docId,
+          organizationId: result.data?.organizationId || null,
+        };
       }
 
       // Found registered phone: Dispatch SMS via Firebase Authentication
       try {
-        await dispatchFirebaseSms(targetAccount.phone, targetAccount.email, targetAccount.docId);
+        await dispatchFirebaseSms(
+          targetAccount.phone,
+          targetAccount.email,
+          targetAccount.docId,
+          targetAccount.organizationId
+        );
       } catch (smsErr) {
         console.error('Firebase SMS dispatch error:', smsErr);
         if (smsErr.code === 'auth/operation-not-allowed') {
@@ -573,7 +593,11 @@ const Login = ({ onLogin, onBackToHome }) => {
         try {
           await sendPasswordResetEmail(auth, phoneFoundData.email);
         } catch (_) {}
-        logActivity(`Password reset via SMS verification for ${phoneFoundData.email}`, phoneFoundData.email);
+        logActivity(
+          `Password reset via SMS verification for ${phoneFoundData.email}`,
+          phoneFoundData.email,
+          phoneFoundData.organizationId || null
+        );
       }
 
       // 3. Cleanly sign out of temporary SMS session

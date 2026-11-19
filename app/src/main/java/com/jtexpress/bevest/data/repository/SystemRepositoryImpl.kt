@@ -1,5 +1,6 @@
 package com.jtexpress.bevest.data.repository
 
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.jtexpress.bevest.data.firebase.FirebasePaths
@@ -18,6 +19,7 @@ import javax.inject.Singleton
 @Singleton
 class SystemRepositoryImpl @Inject constructor(
     private val firestore: FirebaseFirestore,
+    private val auth: FirebaseAuth,
 ) : SystemRepository {
 
     private val activity get() = firestore.collection(FirebasePaths.ACTIVITY_LOG)
@@ -32,17 +34,24 @@ class SystemRepositoryImpl @Inject constructor(
                             message = it.getString("message").orEmpty(),
                             actorId = it.getString("actorId").orEmpty(),
                             createdAt = it.getLong("createdAt") ?: 0L,
+                            organizationId = it.getString("organizationId")?.takeIf { org -> org.isNotBlank() },
                         )
                     },
                 ) as Outcome<List<ActivityEntry>>
             }
             .catch { emit(Outcome.Failure(it.toAppError())) }
 
-    override suspend fun logActivity(message: String, actorId: String): Outcome<Unit> = try {
+    override suspend fun logActivity(message: String, actorId: String, organizationId: String?): Outcome<Unit> = try {
+        val resolvedOrgId = organizationId ?: runCatching {
+            val uid = auth.currentUser?.uid ?: return@runCatching null
+            firestore.collection(FirebasePaths.USERS).document(uid).get().await()
+                .getString("organizationId")?.takeIf { it.isNotBlank() }
+        }.getOrNull()
         activity.add(
             mapOf(
                 "message" to message,
                 "actorId" to actorId,
+                "organizationId" to resolvedOrgId,
                 "createdAt" to System.currentTimeMillis(),
             ),
         ).await()

@@ -9,6 +9,7 @@ import Dashboard from './Dashboard';
 import ContractorDashboard from './contractor/ContractorDashboard';
 import DeveloperDashboard from './DeveloperDashboard';
 import ConfirmModal from './ConfirmModal';
+import { setActivityContext } from './activityLogger';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -61,6 +62,7 @@ function App() {
 
   if (user) {
     const handleLogout = () => {
+      setActivityContext(undefined);
       setDismissedPrompt(false);
       setShowLogin(false);
       setUser(null);
