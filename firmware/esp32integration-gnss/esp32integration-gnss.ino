@@ -564,13 +564,10 @@ void setup() {
     rtcDoubleTapFlag = 1;
   }
 
-  // 1. Read hardware MAC address from WiFi radio & configure full-strength
-  // non-sleeping Wi-Fi
+  // 1. Read hardware MAC address from WiFi radio (keep modem sleep ON until BLE
+  // is not needed, since ESP-IDF aborts if BLE starts while WiFi.setSleep(false))
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false); // Disable Wi-Fi modem sleep to prevent read timeouts
-                        // when moving device
-  WiFi.setTxPower(
-      WIFI_POWER_19_5dBm); // Full antenna range when vest is worn/moved
+  WiFi.setSleep(true);
   delay(120);
 
   esp32MacAddress = WiFi.macAddress();
@@ -777,6 +774,7 @@ void loop() {
             "[PROV] ❌ Failed to connect with provided Wi-Fi credentials.");
         WiFi.setAutoReconnect(false);
         WiFi.disconnect(false, true);
+        WiFi.mode(WIFI_OFF);
         delay(150);
         setLedPattern(LED_ERR_WIFI_2_BLINKS);
 
@@ -932,6 +930,13 @@ void startBleProvisioning() {
     return;
   }
 
+  // Turn off Wi-Fi before initializing BLE to avoid ESP-IDF Wi-Fi/BLE
+  // coexistence abort() and free ~40KB of heap for the BLE stack
+  WiFi.setAutoReconnect(false);
+  WiFi.disconnect(false, true);
+  WiFi.mode(WIFI_OFF);
+  delay(120);
+
   // Advertised Name: BEVEST-<CLEAN_MAC> (e.g. BEVEST-246F28B49C12)
   String bleName = String("BEVEST-") + esp32CleanMac;
   Serial.printf("[BLE]     Starting BLE Provisioning Service...\n");
@@ -980,6 +985,11 @@ void stopBleProvisioning() {
   BLEDevice::deinit(true); // Reclaims ~60KB of heap
   pBleServer = nullptr;
   pStatusChar = nullptr;
+  // Safe to disable Wi-Fi modem sleep now that BLE is shut down
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFi.setSleep(false);
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  }
 }
 
 // ── Attempt Wi-Fi Connection ─────────────────────────────────────────────────
@@ -989,7 +999,8 @@ bool attemptWiFiConnection(const String &ssid, const String &pass,
   WiFi.persistent(false);
   WiFi.setAutoReconnect(false);
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
+  // ESP-IDF requires Wi-Fi modem sleep ON whenever BLE is still active
+  WiFi.setSleep(inProvisioningMode ? true : false);
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
 
   // Cleanly stop any ongoing STA connection attempt to prevent "wifi:sta is
