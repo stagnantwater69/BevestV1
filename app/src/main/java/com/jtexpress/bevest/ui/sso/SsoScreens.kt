@@ -565,17 +565,25 @@ fun IncidentDetailScreen(
                                         followSinglePin = false,
                                     )
                                 }
-                                Row(
+                                Column(
                                     Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = Spacing.md, vertical = Spacing.xs),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
+                                        .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp),
                                 ) {
                                     Text(
-                                        "%.6f, %.6f".format(incident.latitude, incident.longitude),
-                                        style = MaterialTheme.typography.bodySmall,
+                                        text = "GPS COORDINATES",
+                                        style = EyebrowStyle,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                    )
+                                    Text(
+                                        text = "%.6f, %.6f".format(incident.latitude, incident.longitude),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                     )
                                     TextButton(
                                         onClick = {
@@ -586,14 +594,22 @@ fun IncidentDetailScreen(
                                                 workerLabel,
                                             )
                                         },
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                            horizontal = 0.dp,
+                                            vertical = 4.dp,
+                                        ),
                                     ) {
                                         Icon(
                                             imageVector = Icons.Outlined.OpenInNew,
                                             contentDescription = null,
                                             modifier = Modifier.size(16.dp),
                                         )
-                                        Spacer(Modifier.width(4.dp))
-                                        Text("Open in Google Maps")
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = "Open in Google Maps",
+                                            maxLines = 1,
+                                            softWrap = false,
+                                        )
                                     }
                                 }
                             }

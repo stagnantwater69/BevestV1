@@ -1,13 +1,18 @@
 package com.jtexpress.bevest.ui.common
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
+import android.os.Build
+import android.os.Handler
 import android.view.MotionEvent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,10 +31,7 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -50,6 +52,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import java.io.File
 
 data class OsmPin(
     val id: String,
@@ -59,6 +62,57 @@ data class OsmPin(
     val snippet: String? = null,
     val status: SafetyStatus = SafetyStatus.NORMAL,
 )
+
+private class OsmMapHolder {
+    var mapView: MapView? = null
+    var hasInitialCentered: Boolean = false
+    var lastPins: List<OsmPin> = emptyList()
+}
+
+/**
+ * Wraps a Context so legacy receiver registrations inside OSMDroid always supply
+ * [Context.RECEIVER_NOT_EXPORTED] on Android 13/14+ (API 33/34), preventing
+ * SecurityException crashes when opening any screen containing a MapView.
+ */
+private class OsmSafeContextWrapper(base: Context) : ContextWrapper(base) {
+    override fun registerReceiver(receiver: BroadcastReceiver?, filter: IntentFilter?): Intent? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            super.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            super.registerReceiver(receiver, filter)
+        }
+    }
+
+    override fun registerReceiver(
+        receiver: BroadcastReceiver?,
+        filter: IntentFilter?,
+        broadcastPermission: String?,
+        scheduler: Handler?,
+    ): Intent? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            super.registerReceiver(receiver, filter, broadcastPermission, scheduler, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            super.registerReceiver(receiver, filter, broadcastPermission, scheduler)
+        }
+    }
+}
+
+private fun ensureOsmConfigured(context: Context) {
+    val appCtx = context.applicationContext
+    val basePath = File(appCtx.cacheDir, "osmdroid").apply { mkdirs() }
+    val tileCache = File(basePath, "tiles").apply { mkdirs() }
+    Configuration.getInstance().apply {
+        userAgentValue = appCtx.packageName.ifBlank { "com.jtexpress.bevest" }
+        osmdroidBasePath = basePath
+        osmdroidTileCache = tileCache
+    }
+}
+
+private fun OsmPin.hasValidCoords(): Boolean =
+    latitude.isFinite() &&
+        longitude.isFinite() &&
+        latitude in -85.05..85.05 &&
+        longitude in -180.0..180.0
 
 /**
  * Opens the given GPS coordinates directly in Google Maps (new browser tab or Google Maps app).
@@ -114,14 +168,14 @@ fun OsmMapView(
     val lifecycleOwner = LocalLifecycleOwner.current
     val palette = LocalStatusPalette.current
 
-    // Configure OSMDroid user-agent once so OpenStreetMap tile servers allow requests
+    // Configure OSMDroid user-agent & app-private tile cache before creating MapView
     remember(context) {
-        Configuration.getInstance().userAgentValue = context.packageName.ifBlank { "com.jtexpress.bevest" }
+        runCatching { ensureOsmConfigured(context) }
         true
     }
 
-    var mapViewRef by remember { mutableStateOf<MapView?>(null) }
-    var hasInitialCentered by remember { mutableStateOf(false) }
+    val holder = remember { OsmMapHolder() }
+    val validPins = remember(pins) { pins.filter { it.hasValidCoords() } }
 
     // Pre-build status marker drawables for crisp rendering
     val markerIcons = remember(context, palette) {
@@ -134,35 +188,36 @@ fun OsmMapView(
         )
     }
 
-    val primaryPoint = remember(pins) {
-        pins.firstOrNull()?.let { GeoPoint(it.latitude, it.longitude) }
+    val primaryPoint = remember(validPins) {
+        validPins.firstOrNull()?.let { GeoPoint(it.latitude, it.longitude) }
     }
 
     // Smoothly animate camera when single pin coordinates update live
-    LaunchedEffect(primaryPoint?.latitude, primaryPoint?.longitude, pins.size) {
-        val map = mapViewRef ?: return@LaunchedEffect
+    LaunchedEffect(primaryPoint?.latitude, primaryPoint?.longitude, validPins.size) {
+        val map = holder.mapView ?: return@LaunchedEffect
         val first = primaryPoint ?: return@LaunchedEffect
-        if (!hasInitialCentered) {
-            hasInitialCentered = true
-            map.controller.setZoom(initialZoom)
-            map.controller.setCenter(first)
-        } else if (followSinglePin && pins.size == 1) {
-            map.controller.animateTo(first)
+        runCatching {
+            if (!holder.hasInitialCentered) {
+                holder.hasInitialCentered = true
+                map.controller.setZoom(initialZoom)
+                map.controller.setCenter(first)
+            } else if (followSinglePin && validPins.size == 1) {
+                map.controller.animateTo(first)
+            }
         }
     }
 
-    DisposableEffect(lifecycleOwner, mapViewRef) {
+    DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> mapViewRef?.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapViewRef?.onPause()
+                Lifecycle.Event.ON_RESUME -> runCatching { holder.mapView?.onResume() }
+                Lifecycle.Event.ON_PAUSE -> runCatching { holder.mapView?.onPause() }
                 else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            mapViewRef?.onDetach()
         }
     }
 
@@ -170,7 +225,9 @@ fun OsmMapView(
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
-                MapView(ctx).apply {
+                runCatching { ensureOsmConfigured(ctx) }
+                val safeCtx = OsmSafeContextWrapper(ctx)
+                MapView(safeCtx).apply {
                     setTileSource(TileSourceFactory.MAPNIK)
                     setMultiTouchControls(true)
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
@@ -179,7 +236,7 @@ fun OsmMapView(
                     controller.setZoom(initialZoom)
                     primaryPoint?.let {
                         controller.setCenter(it)
-                        hasInitialCentered = true
+                        holder.hasInitialCentered = true
                     }
 
                     // Prevent parent verticalScroll from stealing touch gestures while panning map
@@ -197,41 +254,69 @@ fun OsmMapView(
                         }
                         false
                     }
-                    mapViewRef = this
+                    holder.mapView = this
                 }
             },
             update = { map ->
-                map.overlays.removeAll { it is Marker }
-                pins.forEach { pin ->
-                    val marker = Marker(map).apply {
-                        id = pin.id
-                        position = GeoPoint(pin.latitude, pin.longitude)
-                        title = pin.title
-                        snippet = pin.snippet
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                        icon = markerIcons[pin.status] ?: markerIcons[SafetyStatus.NORMAL]
-                        setOnMarkerClickListener { m, _ ->
-                            if (onPinClick != null) {
-                                if (m.isInfoWindowShown) {
-                                    onPinClick(pin)
-                                } else {
-                                    m.showInfoWindow()
-                                    map.controller.animateTo(m.position)
-                                }
-                            } else {
-                                if (m.isInfoWindowShown) m.closeInfoWindow() else m.showInfoWindow()
-                                map.controller.animateTo(m.position)
-                            }
-                            true
-                        }
+                if (holder.lastPins == validPins) return@AndroidView
+                holder.lastPins = validPins
+                runCatching {
+                    val existingMarkers = map.overlays.filterIsInstance<Marker>()
+                    existingMarkers.forEach { m ->
+                        runCatching { m.closeInfoWindow() }
+                        runCatching { m.onDetach(map) }
                     }
-                    map.overlays.add(marker)
+                    map.overlays.removeAll(existingMarkers.toSet())
+
+                    validPins.forEach { pin ->
+                        val marker = Marker(map).apply {
+                            id = pin.id
+                            position = GeoPoint(pin.latitude, pin.longitude)
+                            title = pin.title
+                            snippet = pin.snippet
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                            icon = markerIcons[pin.status] ?: markerIcons[SafetyStatus.NORMAL]
+                            setOnMarkerClickListener { m, _ ->
+                                runCatching {
+                                    if (onPinClick != null) {
+                                        if (m.isInfoWindowShown) {
+                                            onPinClick(pin)
+                                        } else {
+                                            m.showInfoWindow()
+                                            map.controller.animateTo(m.position)
+                                        }
+                                    } else {
+                                        if (m.isInfoWindowShown) m.closeInfoWindow() else m.showInfoWindow()
+                                        map.controller.animateTo(m.position)
+                                    }
+                                }
+                                true
+                            }
+                        }
+                        map.overlays.add(marker)
+                    }
+                    map.invalidate()
                 }
-                map.invalidate()
+            },
+            onRelease = { map ->
+                runCatching {
+                    map.overlays.filterIsInstance<Marker>().forEach { m ->
+                        runCatching { m.closeInfoWindow() }
+                        runCatching { m.onDetach(map) }
+                    }
+                    map.overlays.clear()
+                    map.onPause()
+                    map.onDetach()
+                }
+                if (holder.mapView === map) {
+                    holder.mapView = null
+                }
+                holder.lastPins = emptyList()
+                holder.hasInitialCentered = false
             },
         )
 
-        if (showControls && pins.isNotEmpty()) {
+        if (showControls && validPins.isNotEmpty()) {
             Column(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -240,20 +325,22 @@ fun OsmMapView(
             ) {
                 SmallFloatingActionButton(
                     onClick = {
-                        val map = mapViewRef ?: return@SmallFloatingActionButton
-                        if (pins.size == 1) {
-                            val p = pins.first()
-                            map.controller.animateTo(GeoPoint(p.latitude, p.longitude), initialZoom, 600L)
-                        } else if (pins.size > 1) {
-                            val lats = pins.map { it.latitude }
-                            val lngs = pins.map { it.longitude }
-                            val box = BoundingBox(
-                                (lats.maxOrNull() ?: 0.0) + 0.0008,
-                                (lngs.maxOrNull() ?: 0.0) + 0.0008,
-                                (lats.minOrNull() ?: 0.0) - 0.0008,
-                                (lngs.minOrNull() ?: 0.0) - 0.0008,
-                            )
-                            map.zoomToBoundingBox(box, true, 64)
+                        val map = holder.mapView ?: return@SmallFloatingActionButton
+                        runCatching {
+                            if (validPins.size == 1) {
+                                val p = validPins.first()
+                                map.controller.animateTo(GeoPoint(p.latitude, p.longitude), initialZoom, 600L)
+                            } else if (validPins.size > 1) {
+                                val lats = validPins.map { it.latitude }
+                                val lngs = validPins.map { it.longitude }
+                                val box = BoundingBox(
+                                    ((lats.maxOrNull() ?: 0.0) + 0.0008).coerceAtMost(85.05),
+                                    ((lngs.maxOrNull() ?: 0.0) + 0.0008).coerceAtMost(180.0),
+                                    ((lats.minOrNull() ?: 0.0) - 0.0008).coerceAtLeast(-85.05),
+                                    ((lngs.minOrNull() ?: 0.0) - 0.0008).coerceAtLeast(-180.0),
+                                )
+                                map.zoomToBoundingBox(box, true, 64)
+                            }
                         }
                     },
                     shape = CircleShape,
@@ -269,7 +356,7 @@ fun OsmMapView(
                 }
 
                 SmallFloatingActionButton(
-                    onClick = { mapViewRef?.controller?.zoomIn() },
+                    onClick = { runCatching { holder.mapView?.controller?.zoomIn() } },
                     shape = CircleShape,
                     containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
                     contentColor = MaterialTheme.colorScheme.onSurface,
@@ -283,7 +370,7 @@ fun OsmMapView(
                 }
 
                 SmallFloatingActionButton(
-                    onClick = { mapViewRef?.controller?.zoomOut() },
+                    onClick = { runCatching { holder.mapView?.controller?.zoomOut() } },
                     shape = CircleShape,
                     containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
                     contentColor = MaterialTheme.colorScheme.onSurface,
@@ -363,4 +450,3 @@ private fun createPinDrawable(context: Context, color: Color): BitmapDrawable {
 
     return BitmapDrawable(context.resources, bitmap)
 }
-

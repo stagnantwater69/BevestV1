@@ -15,7 +15,7 @@ class SafetyWatcherHost @Inject constructor(
 ) : ViewModel() {
     val fallPopup: StateFlow<FallPopupState?> = watcher.fallPopup
 
-    fun start(siteId: String?) = watcher.start(siteId)
+    fun start(ssoUid: String?, siteId: String?) = watcher.start(ssoUid, siteId)
     fun stop() = watcher.stop()
     fun dismissFallPopup(alert: Alert) = watcher.dismissFallPopup(alert)
     fun acknowledgeFall(alert: Alert, byUserId: String) = watcher.acknowledgeFall(alert, byUserId)

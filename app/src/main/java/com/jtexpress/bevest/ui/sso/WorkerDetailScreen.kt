@@ -939,47 +939,66 @@ private fun LocationCard(
                         followSinglePin = true,
                     )
                 }
-                Row(
+                Column(
                     Modifier
-                        .padding(horizontal = Spacing.lg, vertical = Spacing.md)
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xs),
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-                        ) {
-                            Text(
-                                "GPS COORDINATES",
-                                style = EyebrowStyle,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (stale) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "GPS COORDINATES",
+                            style = EyebrowStyle,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                        if (stale) {
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = palette.offline.copy(alpha = 0.12f),
+                            ) {
                                 Text(
-                                    "· Last known",
+                                    text = "Last known",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = palette.offline,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                 )
                             }
                         }
-                        Text(
-                            "%.6f, %.6f".format(lat, lng),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                        )
                     }
+                    Text(
+                        text = "%.6f, %.6f".format(lat, lng),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     TextButton(
                         onClick = { openExternalMap(context, lat, lng, workerName) },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            horizontal = 0.dp,
+                            vertical = 4.dp,
+                        ),
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.OpenInNew,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp),
                         )
-                        Spacer(Modifier.width(4.dp))
-                        Text("Open in Google Maps")
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Open in Google Maps",
+                            maxLines = 1,
+                            softWrap = false,
+                        )
                     }
                 }
             } else {

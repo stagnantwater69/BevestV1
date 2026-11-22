@@ -3,6 +3,7 @@ package com.jtexpress.bevest.ui.sso
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.firebase.auth.FirebaseAuth
 import com.jtexpress.bevest.domain.model.Alert
 import com.jtexpress.bevest.domain.repository.AlertRepository
 import com.jtexpress.bevest.domain.repository.ProjectRepository
@@ -41,6 +42,7 @@ class AlertDetailViewModel @Inject constructor(
     private val workerRepository: WorkerRepository,
     private val projectRepository: ProjectRepository,
     private val responder: AlertResponder,
+    private val auth: FirebaseAuth,
 ) : ViewModel() {
 
     private val alertId: String = savedStateHandle.get<String>("alertId").orEmpty()
@@ -61,6 +63,16 @@ class AlertDetailViewModel @Inject constructor(
                         Triple(workerOutcome, msg, working)
                     }.flatMapLatest { (workerOutcome, msg, working) ->
                         val worker = (workerOutcome as? Outcome.Success)?.data
+                        val currentUid = auth.currentUser?.uid
+                        // Strict SSO Data Isolation: another SSO cannot view alert details for a worker they do not own
+                        if (currentUid != null && (worker == null || worker.createdBy != currentUid)) {
+                            return@flatMapLatest flowOf(
+                                AlertDetailState(
+                                    loading = false,
+                                    error = "You do not have permission to view this alert.",
+                                ),
+                            )
+                        }
                         val effectiveSiteId = alert.siteId?.takeIf { it.isNotBlank() }
                             ?: worker?.siteId?.takeIf { it.isNotBlank() }
                         val effectiveFloor = alert.floorNumber?.takeIf { it.isNotBlank() }
@@ -90,6 +102,7 @@ class AlertDetailViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlertDetailState())
 
     fun acknowledge(byUserId: String) {
+        if (state.value.alert == null) return
         local.value = null to true
         viewModelScope.launch {
             local.value = when (val r = alertRepository.acknowledgeAlert(alertId, byUserId)) {
@@ -103,6 +116,7 @@ class AlertDetailViewModel @Inject constructor(
     }
 
     fun resolve(byUserId: String, notes: String) {
+        if (state.value.alert == null) return
         local.value = null to true
         viewModelScope.launch {
             local.value = when (val r = alertRepository.resolveAlert(alertId, byUserId, notes)) {

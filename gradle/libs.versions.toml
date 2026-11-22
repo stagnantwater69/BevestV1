@@ -30,7 +30,7 @@ coroutines = "1.7.3"
 mapsCompose = "4.3.3"
 playServicesMaps = "18.2.0"
 playServicesLocation = "21.2.0"
-osmdroid = "6.1.18"
+osmdroid = "6.1.20"
 
 # ML Kit
 barcodeScanning = "17.2.0"

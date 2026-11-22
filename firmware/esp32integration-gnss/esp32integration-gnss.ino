@@ -15,7 +15,7 @@
 //  - On-Board BOOT Button (GPIO0 with INPUT_PULLUP) -> 3-second Reset
 //  (Independent of D15)
 //  - Active Buzzer (GPIO25 or GPIO2) -> Siren & Auditory Feedback
-//  - On-Board LED (GPIO2) -> BLE Pairing Blinker / Online Indicator'
+//  - On-Board LED (GPIO2) -> BLE Pairing Blinker / Online Indicator
 //  - Battery Voltage Divider (GPIO35 / ADC1_CH7, 100k/100k) -> Live 18650
 //  Battery SoC %
 //
@@ -75,14 +75,12 @@
 #include <math.h>
 #include <time.h>
 
-
 // Firebase ESP Client (Uses installed FirebaseESP32 library)
 #include <FirebaseESP32.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <addons/RTDBHelper.h>
 #include <addons/TokenHelper.h>
-
 
 // ── BLE GATT Provisioning UUIDs (Matches Bevest Mobile App)
 // ───────────────────
@@ -131,7 +129,7 @@ RTC_DATA_ATTR int rtcDoubleTapFlag = 0;
 // ── Timing & Intervals ───────────────────────────────────────────────────────
 #define PUSH_INTERVAL_MS 2500     // Telemetry push to Firebase every 2.5s
 #define VESTLIVE_INTERVAL_MS 5000 // Heartbeat to /vestsLive every 5s
-#define FALL_COOLDOWN_MS 6000      // Hold fall status for 6s before resolving
+#define FALL_COOLDOWN_MS 6000     // Hold fall status for 6s before resolving
 #define SAFETY_RESPONSE_TIMEOUT_MS                                             \
   15000 // 15-second buzzer window for worker safety response (D15 1-click)
 #define WORKER_TRIGGER_HOLD_MS                                                 \
@@ -565,7 +563,8 @@ void setup() {
   }
 
   // 1. Read hardware MAC address from WiFi radio (keep modem sleep ON until BLE
-  // is not needed, since ESP-IDF aborts if BLE starts while WiFi.setSleep(false))
+  // is not needed, since ESP-IDF aborts if BLE starts while
+  // WiFi.setSleep(false))
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(true);
   delay(120);
@@ -1967,7 +1966,8 @@ void updateBatteryMeasurement(bool forceImmediate) {
   int targetPercent = voltageToBatteryPercent(batteryVoltage);
   int diff = targetPercent - batteryPercent;
 
-  // Hysteresis + ±1% max step per interval prevents rapid jitter on the flat Li-ion plateau
+  // Hysteresis + ±1% max step per interval prevents rapid jitter on the flat
+  // Li-ion plateau
   if (diff >= 2) {
     batteryPercent += 1;
   } else if (diff <= -2) {

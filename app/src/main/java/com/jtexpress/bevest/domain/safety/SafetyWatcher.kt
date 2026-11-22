@@ -47,6 +47,7 @@ data class FallPopupState(
     val vestId: String?,
     val siteName: String? = null,
     val floorNumber: String? = null,
+    val ownerSsoUid: String? = null,
 )
 
 /**
@@ -66,6 +67,7 @@ class SafetyWatcher @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val alertMutex = Mutex()
     private var jobs: List<Job> = emptyList()
+    private var watchingUid: String? = null
     private var watchingSite: String? = null
     private var isStarted: Boolean = false
 
@@ -122,19 +124,22 @@ class SafetyWatcher @Inject constructor(
         return fetched
     }
 
-    fun start(siteId: String?) {
-        if (isStarted && siteId == watchingSite && jobs.isNotEmpty()) return
+    fun start(ssoUid: String?, siteId: String?) {
+        if (isStarted && ssoUid == watchingUid && siteId == watchingSite && jobs.isNotEmpty()) return
         stop()
         isStarted = true
+        watchingUid = ssoUid
         watchingSite = siteId
-        jobs = listOf(watchReadings(siteId), watchAlerts(siteId))
+        jobs = listOf(watchReadings(siteId), watchAlerts(ssoUid, siteId))
     }
 
     fun stop() {
         jobs.forEach { it.cancel() }
         jobs = emptyList()
         isStarted = false
+        watchingUid = null
         watchingSite = null
+        notified.keys.forEach { id -> runCatching { NotificationHelper.cancel(context, id) } }
         notified.clear()
         lastHandledFallTimestamp.clear()
         currentlyFalling.clear()
@@ -423,6 +428,10 @@ class SafetyWatcher @Inject constructor(
     }
 
     private suspend fun showPopupAndNotify(alert: Alert, worker: Worker, fallbackVestId: String?) {
+        // Strict SSO Data Isolation: never pop up or notify for another SSO's worker
+        val activeUid = watchingUid
+        if (!activeUid.isNullOrBlank() && worker.createdBy != activeUid) return
+
         val workerName = worker.fullName.ifBlank { "Worker ${worker.workerId}" }
         val resolvedSiteName = alert.siteName?.takeIf { it.isNotBlank() }
             ?: resolveSiteName(alert.siteId?.takeIf { it.isNotBlank() } ?: worker.siteId)
@@ -438,6 +447,7 @@ class SafetyWatcher @Inject constructor(
             vestId = vestId,
             siteName = resolvedSiteName,
             floorNumber = resolvedFloor,
+            ownerSsoUid = activeUid,
         )
         runCatching { notify(alert, workerName) }
     }
@@ -778,7 +788,7 @@ class SafetyWatcher @Inject constructor(
      * whichever phone created it. The alerts already open when watching starts are
      * recorded without notifying, so opening the app doesn't replay old alerts.
      */
-    private fun watchAlerts(siteId: String?) = scope.launch {
+    private fun watchAlerts(ssoUid: String?, siteId: String?) = scope.launch {
         var first = true
         val targetSite = siteId?.takeIf { it.isNotBlank() }
         combine(
@@ -786,11 +796,19 @@ class SafetyWatcher @Inject constructor(
             workerRepository.observeWorkers(contractorId = null, siteId = targetSite),
         ) { alerts, workers -> alerts to workers }
             .collect { (alertsOutcome, workersOutcome) ->
-                val alerts = (alertsOutcome as? Outcome.Success)?.data ?: return@collect
-                val workerList = (workersOutcome as? Outcome.Success)?.data.orEmpty()
-                val workersById = workerList.associateBy { it.workerId }
-                val names = workerList.associate { it.workerId to it.fullName.ifBlank { "Worker ${it.workerId}" } }
-                val workerVests = workerList.associate { it.workerId to it.assignedVestId }
+                val rawAlerts = (alertsOutcome as? Outcome.Success)?.data ?: return@collect
+                val workerList = (workersOutcome as? Outcome.Success)?.data ?: return@collect
+                // Strict SSO Data Isolation: only process alerts belonging to workers owned by this SSO
+                val myWorkers = if (!ssoUid.isNullOrBlank()) {
+                    workerList.filter { it.createdBy == ssoUid }
+                } else {
+                    workerList
+                }
+                val workersById = myWorkers.associateBy { it.workerId }
+                val myWorkerIds = workersById.keys
+                val alerts = rawAlerts.filter { it.workerId in myWorkerIds }
+                val names = myWorkers.associate { it.workerId to it.fullName.ifBlank { "Worker ${it.workerId}" } }
+                val workerVests = myWorkers.associate { it.workerId to it.assignedVestId }
 
                 for (alert in alerts) {
                     when (alert.type) {
@@ -835,7 +853,7 @@ class SafetyWatcher @Inject constructor(
                     notified.remove(id)
                 }
 
-                // Update the in-app Alert Pop-Up Screen with the newest unacknowledged Fall, Worker Trigger, or No Safety Response alert
+                // Update the in-app Alert Modal Pop-up with the newest unacknowledged alert belonging strictly to this SSO
                 val activePopupAlert = alerts.firstOrNull { alert ->
                     (alert.type == AlertType.FALL_DETECTED ||
                         alert.type == AlertType.EMERGENCY_REQUEST ||
@@ -855,13 +873,16 @@ class SafetyWatcher @Inject constructor(
                         vestId = alert.vestId.ifBlank { workerVests[alert.workerId] },
                         siteName = resolvedSiteName,
                         floorNumber = resolvedFloor,
+                        ownerSsoUid = ssoUid,
                     )
                 } ?: _fallPopup.value?.takeIf { current ->
+                    val belongsToMe = current.alert.workerId in myWorkerIds &&
+                        (ssoUid.isNullOrBlank() || current.ownerSsoUid == ssoUid)
                     val isRecent = System.currentTimeMillis() - current.alert.createdAt < 5_000L
                     val notDismissed = dismissedPopups[current.alert.alertId]?.let {
                         current.alert.severity.ordinal > it.ordinal
                     } ?: true
-                    isRecent && notDismissed && current.alert.status == AlertStatus.ACTIVE
+                    belongsToMe && isRecent && notDismissed && current.alert.status == AlertStatus.ACTIVE
                 }
 
                 first = false

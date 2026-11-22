@@ -1,14 +1,18 @@
 package com.jtexpress.bevest.ui.sso
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
@@ -16,6 +20,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -93,8 +98,8 @@ fun SsoArea(
     val safetyWatcher: SafetyWatcherHost = hiltViewModel()
     val fallPopup by safetyWatcher.fallPopup.collectAsState()
 
-    DisposableEffect(siteId) {
-        safetyWatcher.start(siteId)
+    DisposableEffect(user.uid, siteId) {
+        safetyWatcher.start(user.uid, siteId)
         onDispose { safetyWatcher.stop() }
     }
 
@@ -110,12 +115,15 @@ fun SsoArea(
         }
     }
 
-    fallPopup?.let { popup ->
+    fallPopup?.takeIf { it.ownerSsoUid == null || it.ownerSsoUid == user.uid }?.let { popup ->
         FallDetectedPopupDialog(
             popup = popup,
             onOpenAlert = {
                 safetyWatcher.dismissFallPopup(popup.alert)
                 navController.navigate(Routes.withArg(Routes.SSO_ALERT_DETAIL, popup.alert.alertId))
+            },
+            onDismiss = {
+                safetyWatcher.dismissFallPopup(popup.alert)
             },
         )
     }
@@ -219,6 +227,7 @@ fun SsoArea(
 private fun FallDetectedPopupDialog(
     popup: FallPopupState,
     onOpenAlert: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
     val red = LocalStatusPalette.current.emergency
     val isWorkerTrigger = popup.alert.type == AlertType.EMERGENCY_REQUEST
@@ -226,48 +235,65 @@ private fun FallDetectedPopupDialog(
     val isEmergency = popup.alert.severity == AlertSeverity.EMERGENCY
 
     Dialog(
-        onDismissRequest = onOpenAlert,
+        onDismissRequest = onDismiss,
         properties = DialogProperties(
             dismissOnBackPress = false,
             dismissOnClickOutside = false,
             usePlatformDefaultWidth = false,
         ),
     ) {
-        Column(
+        Surface(
             modifier = Modifier
-                .fillMaxSize()
-                .background(red)
-                .padding(horizontal = Spacing.xl, vertical = Spacing.xxl),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+                .fillMaxWidth(0.92f)
+                .widthIn(max = 420.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp,
+            shadowElevation = 16.dp,
+            border = BorderStroke(1.5.dp, red.copy(alpha = 0.45f)),
         ) {
-            Icon(
-                imageVector = Icons.Filled.Warning,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(96.dp),
-            )
-            Spacer(Modifier.height(Spacing.lg))
-            Text(
-                text = when {
-                    isWorkerTrigger -> "Worker Trigger"
-                    isNoSafetyResponse -> "⚠ NO SAFETY RESPONSE"
-                    isEmergency -> "⚠ EMERGENCY: NO RESPONSE"
-                    else -> "⚠ WORKER FALL DETECTED"
-                },
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(Spacing.md))
-            Surface(
-                color = Color.White.copy(alpha = 0.16f),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // High-urgency modal header band
                 Column(
-                    modifier = Modifier.padding(Spacing.lg),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(red)
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.lg),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .background(Color.White.copy(alpha = 0.18f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Warning,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(34.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(Spacing.sm))
+                    Text(
+                        text = when {
+                            isWorkerTrigger -> "WORKER TRIGGER ALERT"
+                            isNoSafetyResponse -> "NO SAFETY RESPONSE"
+                            isEmergency -> "EMERGENCY: NO RESPONSE"
+                            else -> "WORKER FALL DETECTED"
+                        },
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+
+                // Modal body with worker & alert details
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.lg),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
@@ -276,42 +302,54 @@ private fun FallDetectedPopupDialog(
                             isNoSafetyResponse -> "${popup.workerName} has not responded!"
                             else -> "${popup.workerName} has fallen!"
                         },
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(Spacing.xs))
-                    Text(
-                        text = buildString {
-                            append("Worker ID: ${popup.alert.workerId}")
-                            if (!popup.vestId.isNullOrBlank()) {
-                                append(" • Vest: ${popup.vestId}")
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = buildString {
+                                    append("Worker ID: ${popup.alert.workerId}")
+                                    if (!popup.vestId.isNullOrBlank()) {
+                                        append(" • Vest: ${popup.vestId}")
+                                    }
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                textAlign = TextAlign.Center,
+                            )
+                            if (!popup.siteName.isNullOrBlank() || !popup.floorNumber.isNullOrBlank()) {
+                                Text(
+                                    text = buildString {
+                                        if (!popup.siteName.isNullOrBlank()) {
+                                            append("Site: ${popup.siteName}")
+                                        }
+                                        if (!popup.floorNumber.isNullOrBlank()) {
+                                            if (isNotEmpty()) append(" • ")
+                                            append("Floor: ${popup.floorNumber}")
+                                        }
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                )
                             }
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.9f),
-                        textAlign = TextAlign.Center,
-                    )
-                    if (!popup.siteName.isNullOrBlank() || !popup.floorNumber.isNullOrBlank()) {
-                        Spacer(Modifier.height(Spacing.xs))
-                        Text(
-                            text = buildString {
-                                if (!popup.siteName.isNullOrBlank()) {
-                                    append("Site: ${popup.siteName}")
-                                }
-                                if (!popup.floorNumber.isNullOrBlank()) {
-                                    if (isNotEmpty()) append(" • ")
-                                    append("Floor: ${popup.floorNumber}")
-                                }
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White,
-                            textAlign = TextAlign.Center,
-                        )
+                        }
                     }
-                    Spacer(Modifier.height(Spacing.sm))
+                    Spacer(Modifier.height(Spacing.md))
                     Text(
                         text = when {
                             isWorkerTrigger -> "Worker Trigger. Please check with Worker."
@@ -320,27 +358,46 @@ private fun FallDetectedPopupDialog(
                             else -> "Impact / fall detected by the smart vest sensor. Check on this worker immediately."
                         },
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                     )
+                    Spacer(Modifier.height(Spacing.lg))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    ) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text(
+                                text = "Dismiss",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                        Button(
+                            onClick = onOpenAlert,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = red,
+                                contentColor = Color.White,
+                            ),
+                            modifier = Modifier
+                                .weight(1.4f)
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text(
+                                text = "View Alert",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
                 }
-            }
-            Spacer(Modifier.height(Spacing.xxl))
-            Button(
-                onClick = onOpenAlert,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = red,
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-            ) {
-                Text(
-                    text = "Open & View Alert",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
             }
         }
     }
