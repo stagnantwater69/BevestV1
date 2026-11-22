@@ -15,7 +15,7 @@
 //  - On-Board BOOT Button (GPIO0 with INPUT_PULLUP) -> 3-second Reset
 //  (Independent of D15)
 //  - Active Buzzer (GPIO25 or GPIO2) -> Siren & Auditory Feedback
-//  - On-Board LED (GPIO2) -> BLE Pairing Blinker / Online Indicator
+//  - On-Board LED (GPIO2) -> BLE Pairing Blinker / Online Indicator'
 //  - Battery Voltage Divider (GPIO35 / ADC1_CH7, 100k/100k) -> Live 18650
 //  Battery SoC %
 //
