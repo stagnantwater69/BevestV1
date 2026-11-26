@@ -120,11 +120,12 @@
 // ── Battery Voltage Divider & Calibration ────────────────────────────────────
 #define VOLTAGE_DIVIDER_RATIO 2.0f // (R1 + R2) / R2 = (100k + 100k) / 100k
 #define ADC_REF_CALIBRATION                                                    \
-  1.158f // Tune with multimeter: (Measured V / Serial Reported V)
+  1.092f // Tune with multimeter: (Measured V / Serial Reported V)
 #define BATTERY_SAMPLE_MS 5000 // Sample battery voltage every 5 seconds
 
-// ── RTC Memory for EN Double-Click Detection ─────────────────────────────────
+// ── RTC Memory for EN Double-Click & Clean Reboot Into BLE Mode ──────────────
 RTC_DATA_ATTR int rtcDoubleTapFlag = 0;
+RTC_DATA_ATTR int rtcForceBlePairing = 0;
 
 // ── Timing & Intervals ───────────────────────────────────────────────────────
 #define PUSH_INTERVAL_MS 2500     // Telemetry push to Firebase every 2.5s
@@ -188,6 +189,7 @@ int lastWifiFailReason = 0; // 3 = Auth Failed, 4 = SSID Not Found
 String rxSsid = "";
 String rxPass = "";
 String rxVestId = "";
+char rxRawPayload[256] = {0};
 
 // Button hold tracking
 unsigned long buttonPressStart = 0;
@@ -491,40 +493,19 @@ class ServerCallbacks : public BLEServerCallbacks {
 };
 
 // ── BLE Config Characteristic Callbacks ──────────────────────────────────────
+// Keep onWrite minimal (zero Arduino String / Serial heap work on Bluedroid's
+// small BTC task stack); full JSON parsing and NVS saving run safely in loop().
 class ConfigCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pCharacteristic) {
-    String rxValue = pCharacteristic->getValue().c_str();
-    if (rxValue.length() > 0) {
-      Serial.printf("\n[BLE] Received Configuration Payload:\n%s\n",
-                    rxValue.c_str());
-
-      // 1. Try JSON format: {"ssid":"...","pass":"...","vestId":"..."}
-      rxSsid = extractJsonValue(rxValue, "ssid");
-      rxPass = extractJsonValue(rxValue, "pass");
-      rxVestId = extractJsonValue(rxValue, "vestId");
-
-      // 2. Semicolon fallback: "SSID;PASSWORD;VEST_ID"
-      if (rxSsid.length() == 0 && rxValue.indexOf(';') != -1) {
-        int firstSemi = rxValue.indexOf(';');
-        int secondSemi = rxValue.indexOf(';', firstSemi + 1);
-        rxSsid = rxValue.substring(0, firstSemi);
-        if (secondSemi != -1) {
-          rxPass = rxValue.substring(firstSemi + 1, secondSemi);
-          rxVestId = rxValue.substring(secondSemi + 1);
-        } else {
-          rxPass = rxValue.substring(firstSemi + 1);
-        }
+    std::string val = pCharacteristic->getValue();
+    if (val.length() > 0) {
+      size_t copyLen = val.length();
+      if (copyLen >= sizeof(rxRawPayload)) {
+        copyLen = sizeof(rxRawPayload) - 1;
       }
-
-      rxSsid.trim();
-      rxPass.trim();
-      rxVestId.trim();
-
-      if (rxSsid.length() > 0) {
-        newConfigReceived = true;
-      } else {
-        Serial.println("[BLE] ⚠️ Received payload without valid 'ssid'!");
-      }
+      memcpy(rxRawPayload, val.data(), copyLen);
+      rxRawPayload[copyLen] = '\0';
+      newConfigReceived = true;
     }
   }
 };
@@ -545,9 +526,13 @@ void setup() {
   // 0. Disable brownout reset during powerbank inrush & protect credentials
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
 
+  bool forceBleOnBoot = (rtcForceBlePairing == 1);
+  rtcForceBlePairing = 0;
+
   esp_reset_reason_t rstReason = esp_reset_reason();
-  if (rstReason == ESP_RST_POWERON || rstReason == ESP_RST_BROWNOUT) {
-    // Powerbank connection or power-up inrush: NEVER wipe credentials!
+  if (forceBleOnBoot || rstReason == ESP_RST_POWERON ||
+      rstReason == ESP_RST_BROWNOUT) {
+    // Clean BLE-switch reboot or power-up inrush: NEVER wipe credentials!
     rtcDoubleTapFlag = 0;
   } else if (rtcDoubleTapFlag == 1) {
     rtcDoubleTapFlag = 0;
@@ -644,7 +629,12 @@ void setup() {
                 BATTERY_ADC_PIN, batteryVoltage, batteryPercent);
 
   // 5. Connect to Saved Wi-Fi or Start In-App BLE Pairing Mode
-  if (isConfigured && currentWifiSSID.length() > 0) {
+  if (forceBleOnBoot) {
+    Serial.println("[PROV]    🔵 Clean reboot into Bluetooth Pairing Mode "
+                   "(waiting for new Wi-Fi credentials)...");
+    setLedPattern(LED_SLOW_BLINK); // Slow Blinking = BLE Broadcast
+    startBleProvisioning();
+  } else if (isConfigured && currentWifiSSID.length() > 0) {
     Serial.printf("[WiFi]    Saved network found: \"%s\". Connecting...\n",
                   currentWifiSSID.c_str());
     bool connected =
@@ -671,10 +661,13 @@ void setup() {
     startBleProvisioning();
   }
 
-  // 6. Start Background FreeRTOS Task for Firebase Cloud Sync so sensor polling
-  // never blocks
-  xTaskCreatePinnedToCore(firebaseCloudTask, "FirebaseCloudTask", 12288, NULL,
-                          1, NULL, 0);
+  // 6. Start Background FreeRTOS Task for Firebase Cloud Sync only when NOT in
+  // BLE Pairing Mode (saves 12KB DRAM while BLE is active; after BLE saves new
+  // Wi-Fi, ESP32 reboots cleanly into full Wi-Fi + Firebase mode).
+  if (!inProvisioningMode) {
+    xTaskCreatePinnedToCore(firebaseCloudTask, "FirebaseCloudTask", 12288, NULL,
+                            1, NULL, 0);
+  }
 }
 
 // ── Main Loop ────────────────────────────────────────────────────────────────
@@ -688,11 +681,13 @@ void loop() {
     stopEmergencyAlarm();
     digitalWrite(BUZZER_PIN, LOW);
     buzzerOffTime = 0;
-    WiFi.setAutoReconnect(false);
-    WiFi.disconnect(false, true);
+    // Cleanly reboot straight into BLE Pairing Mode so BT controller RAM &
+    // heap are 100% fresh (BLEDevice::deinit(true) releases BT RAM until reboot)
+    Serial.println("[BLE]     Rebooting cleanly into Bluetooth Pairing Mode...");
+    rtcForceBlePairing = 1;
+    Serial.flush();
     delay(150);
-    setLedPattern(LED_SLOW_BLINK);
-    startBleProvisioning();
+    ESP.restart();
   }
 
   // Always service non-blocking Blue LED indicator
@@ -707,10 +702,35 @@ void loop() {
 
     if (newConfigReceived) {
       newConfigReceived = false;
-      Serial.printf("[PROV] Validating & attempting connection to \"%s\"...\n",
-                    rxSsid.c_str());
+      String rxValue = String(rxRawPayload);
+      memset(rxRawPayload, 0, sizeof(rxRawPayload));
 
-      // Validate SSID & WPA password length before attempting connection
+      Serial.printf("\n[BLE] Received Configuration Payload:\n%s\n",
+                    rxValue.c_str());
+
+      // 1. Try JSON format: {"ssid":"...","pass":"...","vestId":"..."}
+      rxSsid = extractJsonValue(rxValue, "ssid");
+      rxPass = extractJsonValue(rxValue, "pass");
+      rxVestId = extractJsonValue(rxValue, "vestId");
+
+      // 2. Semicolon fallback: "SSID;PASSWORD;VEST_ID"
+      if (rxSsid.length() == 0 && rxValue.indexOf(';') != -1) {
+        int firstSemi = rxValue.indexOf(';');
+        int secondSemi = rxValue.indexOf(';', firstSemi + 1);
+        rxSsid = rxValue.substring(0, firstSemi);
+        if (secondSemi != -1) {
+          rxPass = rxValue.substring(firstSemi + 1, secondSemi);
+          rxVestId = rxValue.substring(secondSemi + 1);
+        } else {
+          rxPass = rxValue.substring(firstSemi + 1);
+        }
+      }
+
+      rxSsid.trim();
+      rxPass.trim();
+      rxVestId.trim();
+
+      // Validate SSID & WPA password length before saving
       if (rxSsid.length() == 0 || rxSsid.length() > 32 ||
           (rxPass.length() > 0 &&
            (rxPass.length() < 8 || rxPass.length() > 63))) {
@@ -725,71 +745,44 @@ void loop() {
         return;
       }
 
-      // Notify App: 1 = Connecting
+      // Save credentials to NVS FIRST — never start Wi-Fi while BLE is still
+      // holding ~70KB DRAM (running BLE + Wi-Fi simultaneously causes OOM/reset
+      // before credentials get saved).
+      preferences.begin("bevest", false);
+      preferences.putString("ssid", rxSsid);
+      preferences.putString("pass", rxPass);
+      if (rxVestId.length() > 0) {
+        preferences.putString("vestId", rxVestId);
+        currentVestId = rxVestId;
+      }
+      preferences.putBool("configured", true);
+      preferences.end();
+
+      currentWifiSSID = rxSsid;
+      currentWifiPassword = rxPass;
+      isConfigured = true;
+
+      Serial.printf("[PROV] ✅ Saved new Wi-Fi \"%s\" to NVS Flash!\n",
+                    rxSsid.c_str());
+
+      // Notify App: 2 = Credentials Saved & Confirmed
       if (pStatusChar) {
-        pStatusChar->setValue("1");
-        pStatusChar->notify();
-      }
-
-      bool success = attemptWiFiConnection(rxSsid, rxPass, 14);
-
-      if (success) {
-        Serial.println("[PROV] ✅ Connected to site Wi-Fi successfully!");
-
-        // Save credentials permanently to NVS
-        preferences.begin("bevest", false);
-        preferences.putString("ssid", rxSsid);
-        preferences.putString("pass", rxPass);
-        if (rxVestId.length() > 0) {
-          preferences.putString("vestId", rxVestId);
-          currentVestId = rxVestId;
-        }
-        preferences.putBool("configured", true);
-        preferences.end();
-
-        currentWifiSSID = rxSsid;
-        currentWifiPassword = rxPass;
-        isConfigured = true;
-
-        // Notify App: 2 = Success (Confirmed)
-        if (pStatusChar) {
-          for (int i = 0; i < 3; i++) {
-            pStatusChar->setValue("2");
-            pStatusChar->notify();
-            delay(200);
-          }
-        }
-
-        delay(400); // Allow BLE notification packet to be transmitted
-
-        // Shut down Bluetooth radio to release heap memory for Firebase TLS
-        stopBleProvisioning();
-        setLedPattern(LED_FAST_BLINK);
-
-        // Start Firebase Telemetry Service
-        initFirebaseService();
-      } else {
-        Serial.println(
-            "[PROV] ❌ Failed to connect with provided Wi-Fi credentials.");
-        WiFi.setAutoReconnect(false);
-        WiFi.disconnect(false, true);
-        WiFi.mode(WIFI_OFF);
-        delay(150);
-        setLedPattern(LED_ERR_WIFI_2_BLINKS);
-
-        // Notify App: 4 = SSID Not Found, 3 = Invalid Password / Auth Failed
-        const char *errCode = (lastWifiFailReason == 4) ? "4" : "3";
-        if (pStatusChar) {
-          for (int i = 0; i < 3; i++) {
-            pStatusChar->setValue(errCode);
-            pStatusChar->notify();
-            delay(150);
-          }
-        }
-        if (!bleDeviceConnected && pBleServer) {
-          BLEDevice::startAdvertising();
+        for (int i = 0; i < 3; i++) {
+          pStatusChar->setValue("2");
+          pStatusChar->notify();
+          delay(150);
         }
       }
+
+      delay(400); // Ensure BLE notification is delivered before clean reboot
+
+      Serial.println(
+          "[PROV] 🔄 Rebooting cleanly with 100% free RAM to join new Wi-Fi...");
+      rtcForceBlePairing = 0;
+      rtcDoubleTapFlag = 0;
+      Serial.flush();
+      delay(150);
+      ESP.restart();
     }
     delay(10);
     return; // Do not execute telemetry loop while in provisioning mode
@@ -998,9 +991,11 @@ bool attemptWiFiConnection(const String &ssid, const String &pass,
   WiFi.persistent(false);
   WiFi.setAutoReconnect(false);
   WiFi.mode(WIFI_STA);
-  // ESP-IDF requires Wi-Fi modem sleep ON whenever BLE is still active
+  // ESP-IDF requires Wi-Fi modem sleep ON whenever BLE is still active;
+  // also cap TX power to 11 dBm during BLE+Wi-Fi coexistence to prevent
+  // power spikes/resets before new credentials are saved to NVS.
   WiFi.setSleep(inProvisioningMode ? true : false);
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  WiFi.setTxPower(inProvisioningMode ? WIFI_POWER_11dBm : WIFI_POWER_19_5dBm);
 
   // Cleanly stop any ongoing STA connection attempt to prevent "wifi:sta is
   // connecting, return error"
@@ -1381,8 +1376,15 @@ void checkRemoteWifiCommand() {
     buzzerOffTime = 0;
     Firebase.setBool(fbdo, String("/vestsLive/") + currentVestId + "/online",
                      false);
+    Firebase.setBool(fbdo, String("/vestsLiveByMac/") + esp32CleanMac + "/online",
+                     false);
+    // Use RTC flag + clean reboot so BLE initializes with 100% fresh BT RAM
+    // and never reconnects to the old Wi-Fi before receiving new credentials.
+    rtcForceBlePairing = 1;
     inProvisioningMode = true;
-    pendingBlePairingMode = true;
+    Serial.flush();
+    delay(200);
+    ESP.restart();
     return;
   }
 

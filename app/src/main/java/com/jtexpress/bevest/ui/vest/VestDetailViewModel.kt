@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.jtexpress.bevest.data.ble.BleConnectionState
 import com.jtexpress.bevest.data.ble.BleProvisioner
 import com.jtexpress.bevest.data.ble.DiscoveredBleVest
+import com.jtexpress.bevest.data.wifi.NearbyWifiNetwork
+import com.jtexpress.bevest.data.wifi.NearbyWifiScanner
 import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.domain.model.Vest
 import com.jtexpress.bevest.domain.model.VestAssignment
@@ -44,6 +46,9 @@ data class WifiReprovisionUiState(
     val connectedBle: DiscoveredBleVest? = null,
     val bleConnectionState: BleConnectionState = BleConnectionState.DISCONNECTED,
     val bleStatusMsg: String? = null,
+    val scanningWifi: Boolean = false,
+    val nearbyWifis: List<NearbyWifiNetwork> = emptyList(),
+    val wifiScanMsg: String? = null,
 )
 
 data class VestDetailState(
@@ -64,6 +69,7 @@ class VestDetailViewModel @Inject constructor(
     private val vestRepository: VestRepository,
     private val workerRepository: WorkerRepository,
     private val bleProvisioner: BleProvisioner,
+    private val wifiScanner: NearbyWifiScanner,
     private val authRepository: AuthRepository,
     private val userRepository: UserRepository,
 ) : ViewModel() {
@@ -98,7 +104,12 @@ class VestDetailViewModel @Inject constructor(
     val isLocationEnabled: Boolean get() = bleProvisioner.isLocationEnabled
     val hasBlePermissions: Boolean get() = bleProvisioner.hasPermissions()
 
-    private val wifiAndBleFlow = combine(wifiInputs, bleProvisioner.state, assigningWorker) { wifiLocal, bleState, isAssigning ->
+    private val wifiAndBleFlow = combine(
+        wifiInputs,
+        bleProvisioner.state,
+        wifiScanner.state,
+        assigningWorker,
+    ) { wifiLocal, bleState, wifiScanState, isAssigning ->
         val bleError = if (bleState.connectionState == BleConnectionState.FAILED) bleState.statusMessage else null
         val bleSsidErr = if (bleState.connectionState == BleConnectionState.FAILED && bleState.errorCode == "WIFI_NOT_FOUND") {
             "Wi-Fi network not found (check 2.4 GHz SSID)"
@@ -113,6 +124,9 @@ class VestDetailViewModel @Inject constructor(
             connectedBle = bleState.connectedVest,
             bleConnectionState = bleState.connectionState,
             bleStatusMsg = bleState.statusMessage,
+            scanningWifi = wifiScanState.scanning,
+            nearbyWifis = wifiScanState.networks,
+            wifiScanMsg = wifiScanState.statusMessage,
             ssidError = wifiLocal.ssidError ?: bleSsidErr,
             passError = wifiLocal.passError ?: blePassErr,
             errorMsg = wifiLocal.errorMsg ?: bleError,
@@ -223,10 +237,17 @@ class VestDetailViewModel @Inject constructor(
         wifiInputs.update {
             WifiReprovisionUiState(ssid = currentSsid.orEmpty())
         }
+        if (wifiScanner.hasLocationPermission()) {
+            wifiScanner.scan()
+        }
+    }
+
+    fun scanNearbyWifi() {
+        wifiScanner.scan()
     }
 
     /**
-     * Remotely instruct an Online vest to enter BLE Pairing Mode, then start BLE scanning.
+     * Remotely instruct an Online vest to cleanly reboot into BLE Pairing Mode, then start BLE scanning.
      */
     fun triggerRemoteBleModeAndScan() {
         viewModelScope.launch {
@@ -239,7 +260,7 @@ class VestDetailViewModel @Inject constructor(
                 )
             }
             vestRepository.triggerVestBleModeRemotely(vestId)
-            delay(2000)
+            delay(3_500L)
             startBleScan()
         }
     }
@@ -290,6 +311,7 @@ class VestDetailViewModel @Inject constructor(
     }
 
     fun disconnectBle() {
+        wifiScanner.stop()
         bleProvisioner.stopScan()
         bleProvisioner.disconnect()
     }

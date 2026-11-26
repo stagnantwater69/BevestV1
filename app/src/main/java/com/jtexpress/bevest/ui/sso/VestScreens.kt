@@ -46,10 +46,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.jtexpress.bevest.data.ble.BleConnectionState
 import com.jtexpress.bevest.data.ble.DiscoveredBleVest
+import com.jtexpress.bevest.data.wifi.NearbyWifiNetwork
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -628,6 +630,7 @@ fun VestDetailScreen(
             wifiUi = state.wifiUi,
             onSsidChange = viewModel::onWifiSsidInput,
             onPassChange = viewModel::onWifiPassInput,
+            onScanNearbyWifi = viewModel::scanNearbyWifi,
             onTriggerRemoteBleAndScan = viewModel::triggerRemoteBleModeAndScan,
             onStartBleScan = viewModel::startBleScan,
             onConnectBle = viewModel::connectBleVest,
@@ -815,11 +818,151 @@ private fun AssignWorkerToVestDialog(
 }
 
 @Composable
+private fun NearbyWifiPickerSection(
+    selectedSsid: String,
+    networks: List<NearbyWifiNetwork>,
+    scanning: Boolean,
+    statusMessage: String?,
+    onRefresh: () -> Unit,
+    onSelectSsid: (String) -> Unit,
+) {
+    val palette = LocalStatusPalette.current
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Nearby Wi-Fi Networks",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            TextButton(
+                onClick = onRefresh,
+                enabled = !scanning,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+            ) {
+                Icon(
+                    imageVector = BevestIcons.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.size(4.dp))
+                Text(
+                    text = if (scanning) "Scanning…" else "Scan Wi-Fi",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
+
+        if (networks.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 180.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                networks.forEach { net ->
+                    val isSelected = selectedSsid.trim().equals(net.ssid, ignoreCase = false)
+                    val borderColor = when {
+                        isSelected -> MaterialTheme.colorScheme.primary
+                        net.is24Ghz -> MaterialTheme.colorScheme.outlineVariant
+                        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    }
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(BevestShapes.inner)
+                            .clickable(enabled = net.is24Ghz) { onSelectSsid(net.ssid) },
+                        shape = BevestShapes.inner,
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                        } else {
+                            MaterialTheme.colorScheme.surface
+                        },
+                        border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, borderColor),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Wifi,
+                                contentDescription = null,
+                                tint = when {
+                                    isSelected -> MaterialTheme.colorScheme.primary
+                                    net.is24Ghz -> palette.normal
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                },
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = net.ssid,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (net.is24Ghz) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = if (net.is24Ghz) {
+                                        "2.4 GHz · ${net.rssi} dBm"
+                                    } else {
+                                        "5 GHz only (ESP32 requires 2.4 GHz)"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (net.is24Ghz) {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    } else {
+                                        palette.warning
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CheckCircle,
+                                    contentDescription = "Selected",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (!statusMessage.isNullOrBlank()) {
+            Text(
+                text = statusMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
 private fun ChangeVestWifiDialog(
     vest: Vest,
     wifiUi: com.jtexpress.bevest.ui.vest.WifiReprovisionUiState,
     onSsidChange: (String) -> Unit,
     onPassChange: (String) -> Unit,
+    onScanNearbyWifi: () -> Unit,
     onTriggerRemoteBleAndScan: () -> Unit,
     onStartBleScan: () -> Unit,
     onConnectBle: (DiscoveredBleVest) -> Unit,
@@ -841,9 +984,20 @@ private fun ChangeVestWifiDialog(
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
     }
+    var pendingPermissionAction by remember { mutableStateOf("BLE_SCAN") }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { onStartBleScan() }
+    ) {
+        when (pendingPermissionAction) {
+            "REMOTE_BLE" -> onTriggerRemoteBleAndScan()
+            "WIFI_SCAN" -> onScanNearbyWifi()
+            else -> onStartBleScan()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        onScanNearbyWifi()
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -894,12 +1048,24 @@ private fun ChangeVestWifiDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
+                NearbyWifiPickerSection(
+                    selectedSsid = wifiUi.ssid,
+                    networks = wifiUi.nearbyWifis,
+                    scanning = wifiUi.scanningWifi,
+                    statusMessage = wifiUi.wifiScanMsg,
+                    onRefresh = {
+                        pendingPermissionAction = "WIFI_SCAN"
+                        permissionLauncher.launch(permissionsToRequest)
+                    },
+                    onSelectSsid = { picked -> onSsidChange(picked) },
+                )
+
                 FormField(
                     label = "New Site Wi-Fi SSID (2.4 GHz)",
                     value = wifiUi.ssid,
                     onValueChange = onSsidChange,
                     error = wifiUi.ssidError,
-                    helper = "e.g. SiteB-Safety-WiFi",
+                    helper = "Select a nearby network above or type manually",
                     imeAction = ImeAction.Next,
                 )
 
@@ -926,8 +1092,8 @@ private fun ChangeVestWifiDialog(
                         SecondaryButton(
                             text = "Switch Online Vest to Bluetooth Mode",
                             onClick = {
+                                pendingPermissionAction = "REMOTE_BLE"
                                 permissionLauncher.launch(permissionsToRequest)
-                                onTriggerRemoteBleAndScan()
                             },
                             icon = Icons.Outlined.Bluetooth,
                             modifier = Modifier.fillMaxWidth(),
@@ -936,7 +1102,10 @@ private fun ChangeVestWifiDialog(
 
                     SecondaryButton(
                         text = if (wifiUi.scanningBle) "Scanning for Vest..." else "Scan Nearby Bluetooth Vests",
-                        onClick = { permissionLauncher.launch(permissionsToRequest) },
+                        onClick = {
+                            pendingPermissionAction = "BLE_SCAN"
+                            permissionLauncher.launch(permissionsToRequest)
+                        },
                         icon = Icons.Outlined.Bluetooth,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -1587,6 +1756,10 @@ fun PairVestScreen(
                         val keyboard = LocalSoftwareKeyboardController.current
                         val focus = LocalFocusManager.current
 
+                        LaunchedEffect(Unit) {
+                            viewModel.scanNearbyWifi()
+                        }
+
                         state.successMessage?.let { SuccessNote(it) }
 
                         Text(
@@ -1595,12 +1768,21 @@ fun PairVestScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
 
+                        NearbyWifiPickerSection(
+                            selectedSsid = state.wifiSsid,
+                            networks = state.nearbyWifis,
+                            scanning = state.scanningWifi,
+                            statusMessage = state.wifiScanMsg,
+                            onRefresh = viewModel::scanNearbyWifi,
+                            onSelectSsid = viewModel::onWifiSsidInput,
+                        )
+
                         FormField(
                             value = state.wifiSsid,
                             onValueChange = viewModel::onWifiSsidInput,
                             label = "Site Wi-Fi Network Name (SSID)",
                             error = state.wifiSsidError,
-                            helper = "2.4 GHz network (e.g. Site-Office-WiFi)",
+                            helper = "Select a nearby 2.4 GHz network above or type manually",
                             keyboardType = KeyboardType.Text,
                             imeAction = ImeAction.Next,
                         )

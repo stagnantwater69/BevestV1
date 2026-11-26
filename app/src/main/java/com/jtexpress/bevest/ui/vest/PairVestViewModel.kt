@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.jtexpress.bevest.data.ble.BleConnectionState
 import com.jtexpress.bevest.data.ble.BleProvisioner
 import com.jtexpress.bevest.data.ble.DiscoveredBleVest
+import com.jtexpress.bevest.data.wifi.NearbyWifiNetwork
+import com.jtexpress.bevest.data.wifi.NearbyWifiScanner
 import com.jtexpress.bevest.domain.model.SensorReading
 import com.jtexpress.bevest.domain.model.User
 import com.jtexpress.bevest.domain.model.VestStatus
@@ -61,6 +63,9 @@ data class PairVestState(
     val wifiPass: String = "",
     val wifiSsidError: String? = null,
     val wifiPassError: String? = null,
+    val scanningWifi: Boolean = false,
+    val nearbyWifis: List<NearbyWifiNetwork> = emptyList(),
+    val wifiScanMsg: String? = null,
     val provisioningWifi: Boolean = false,
     val wifiProvisionSuccess: Boolean = false,
     val checking: Boolean = false,
@@ -79,6 +84,7 @@ class PairVestViewModel @Inject constructor(
     private val workerRepository: WorkerRepository,
     private val monitoringRepository: MonitoringRepository,
     private val bleProvisioner: BleProvisioner,
+    private val wifiScanner: NearbyWifiScanner,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PairVestState())
@@ -119,6 +125,21 @@ class PairVestViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            wifiScanner.state.collect { wifiScanState ->
+                _state.update { current ->
+                    current.copy(
+                        scanningWifi = wifiScanState.scanning,
+                        nearbyWifis = wifiScanState.networks,
+                        wifiScanMsg = wifiScanState.statusMessage,
+                    )
+                }
+            }
+        }
+    }
+
+    fun scanNearbyWifi() {
+        wifiScanner.scan()
     }
 
     val isBluetoothEnabled: Boolean get() = bleProvisioner.isBluetoothEnabled
